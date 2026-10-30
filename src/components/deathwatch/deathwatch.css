@@ -69,7 +69,10 @@ body:has(.dw-sheet[open]) {
    text always sits on a panel, never on the painting. */
 .dw-backdrop {
   position: fixed;
-  inset: 0;
+  /* 100lvh: the picture keeps its size while a phone's URL bar slides, instead of rescaling on every scroll turn. */
+  inset: 0 0 auto;
+  height: 100vh;
+  height: 100lvh;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;

@@ -521,11 +521,15 @@ function buildSilhouette(w, h) {
   return cv
 }
 
+// The box's height, not innerHeight: the box is 100lvh, so a phone's URL bar sliding away does not rebuild the
+// mountain (it jumped on every scroll turn).
+const viewH = () => host.value?.clientHeight || window.innerHeight
+
 function layout() {
   const cv = canvas.value
   if (!cv) return false
   const w = window.innerWidth
-  const h = window.innerHeight
+  const h = viewH()
   // Finite check first: `NaN < 2` is false, so a non-finite viewport used to
   // walk straight past this guard and NaN-poison the whole build, throwing on
   // createLinearGradient once it reached the silhouette.
@@ -582,7 +586,7 @@ function relayout() {
   if (relayoutPending) return
   relayoutPending = requestAnimationFrame(() => {
     relayoutPending = 0
-    if (window.innerWidth === lastW && window.innerHeight === lastH) return
+    if (window.innerWidth === lastW && viewH() === lastH) return
     if (layout()) draw(1)
   })
 }
@@ -970,9 +974,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* 100lvh, not inset: 0: the full height with a phone's URL bar hidden, so the box keeps its size while it slides. */
 .deathfire {
   position: fixed;
-  inset: 0;
+  inset: 0 0 auto;
+  height: 100vh;
+  height: 100lvh;
   /* Behind all content, above the ambient gradient on body::before (-2). */
   z-index: -1;
   pointer-events: none;
@@ -986,10 +993,11 @@ onBeforeUnmount(() => {
 /* Above page content, below the nav (z 50). */
 .deathfire-veil {
   position: fixed;
-  inset: 0;
+  inset: 0 0 auto;
   z-index: 40;
   width: 100%;
-  height: 100%;
+  height: 100vh;
+  height: 100lvh;
   pointer-events: none;
 }
 </style>

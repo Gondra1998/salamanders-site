@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { requirements, termsOfService } from './recruitment'
+import { requirements, termsOfService, tldr } from './recruitment'
 import { RECRUITMENT_TEXTS } from './recruitmentTexts'
 import { resolveArea } from './areas'
 
@@ -7,7 +7,7 @@ const plain = (segs) => segs.map((s) => s.t).join('')
 
 describe('RECRUITMENT_TEXTS', () => {
   it('holds every Recruitment text the old site had, as text', () => {
-    expect(Object.keys(RECRUITMENT_TEXTS)).toEqual(['ts_h', 'ts_i', 'ts1', 'ts2', 'ts3', 'ts4', 'ts5', 'ts6', 'ts_e', 'rq_q', 'rq1', 'rq2', 'rq3'])
+    expect(Object.keys(RECRUITMENT_TEXTS)).toEqual(['ts_h', 'ts_i', 'ts1', 'ts2', 'ts3', 'ts4', 'ts5', 'ts6', 'ts_tl', 'ts_e', 'rq_q', 'rq1', 'rq2', 'rq3'])
     for (const [k, v] of Object.entries(RECRUITMENT_TEXTS)) expect(typeof v === 'string' && v.trim().length > 0, k).toBe(true)
   })
 
@@ -120,5 +120,31 @@ describe('the Requirements quote', () => {
   it('drops the marks of a quote that is one *…*, and keeps two marks on one line as two', () => {
     expect(requirements({ rq_q: '*All of it.*' }).quote).toEqual([{ k: '', t: 'All of it.' }])
     expect(requirements({ rq_q: '*a* and *b*' }).quote).toEqual([{ k: 'i', t: 'a' }, { k: '', t: ' and ' }, { k: 'i', t: 'b' }])
+  })
+})
+
+describe('tldr', () => {
+  it('reads the default: a subtitle, then three groups of points, the last with its closing notes', () => {
+    const t = tldr()
+    expect(plain(t.sub)).toBe('A brief summary of the rules governing service within Watch Fortress Ebonhold.')
+    expect(t.groups.map((g) => [plain(g.title), g.items.length, g.notes.length])).toEqual([
+      ['Essential Information', 6, 0],
+      ['Failure Progression', 4, 0],
+      ['Service & Rewards', 3, 2],
+    ])
+    expect(plain(t.groups[0].items[0])).toMatch(/^Tour Duration: /)
+  })
+
+  it('takes what the data holds; a point before any group opens one without a title; blank lines are skipped', () => {
+    const t = tldr({ ts_tl: 'Sub\n\n- one\nnote\n##   Two\n  - two' })
+    expect(plain(t.sub)).toBe('Sub')
+    expect(t.groups.map((g) => [plain(g.title), g.items.map(plain), g.notes.map(plain)])).toEqual([
+      ['', ['one'], ['note']],
+      ['Two', ['two'], []],
+    ])
+  })
+
+  it('has no groups when the text is blank', () => {
+    expect(tldr({ ts_tl: '' })).toEqual({ sub: [], groups: [] })
   })
 })

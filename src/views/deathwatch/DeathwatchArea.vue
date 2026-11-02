@@ -39,7 +39,9 @@ const texts = computed(() => (store.commander ? pageTexts(page.value.area, page.
 // While a view's chunk is on its way (after a short delay, so a fast one never flashes it), and if it fails.
 // From 900px the Armouring Hall has no rail (.solo): its views head themselves (HallHead). Where no view does (still
 // loading, failed, or locked, below), its head is drawn here instead, so the hall never loses its way out.
-const hallHead = () => (page.value.area === 'armouringhall' ? h(HallHead, { tab: page.value.tab }) : null)
+// Recruitment heads itself the same way (HallHead with area="recruitment").
+const solo = computed(() => ['armouringhall', 'recruitment'].includes(page.value.area))
+const hallHead = () => (solo.value ? h(HallHead, { tab: page.value.tab, area: page.value.area }) : null)
 const Loading = { render: () => [hallHead(), h('p', { class: 'dw-area-loading', role: 'status' }, 'Loading…')] }
 // `error` is what defineAsyncComponent hands it: taken as a prop, so it does not fall on the fragment as an attribute.
 const Failed = { props: ['error'], render: () => [hallHead(), h('p', { class: 'dw-area-error', role: 'alert' }, 'This view could not be loaded. Try again.')] }
@@ -74,7 +76,7 @@ watch(viewKey, async (key) => {
 </script>
 
 <template>
-  <section v-if="page" class="dw-area" :class="{ solo: page.area === 'armouringhall' }">
+  <section v-if="page" class="dw-area" :class="{ solo }">
     <p v-if="restricted" class="dw-area-restricted dw-panel" role="status">Restricted to the Watch Commander.</p>
     <template v-else>
       <!-- The rail. On a phone only its head shows (the crest and the area's name); from 900px the list of views joins it. -->
@@ -100,7 +102,7 @@ watch(viewKey, async (key) => {
         <!-- Keyed on the view, so the whole framed sheet opens again (deathwatch.css) when the tab changes. -->
         <div :key="viewKey" ref="sheet" class="dw-area-sheet dw-panel">
           <template v-if="locked">
-            <HallHead v-if="page.area === 'armouringhall'" :tab="page.tab" />
+            <HallHead v-if="solo" :tab="page.tab" :area="page.area" />
             <p class="dw-area-restricted" role="status">Reserved for the Deathwatch Command.</p>
           </template>
           <component :is="view" v-else :key="viewKey" />

@@ -2,7 +2,7 @@
 // The players of one event ranked by MVP, or, with `player`, that player's profile: home team, awards, totals,
 // classes and every mission they played (guest missions highlighted).
 import { computed } from 'vue'
-import { awardsOf, classRank, mainClass, mvpText, num, rowMvp } from '../../../lib/deathwatch/tracker'
+import { awardsOf, classRank, kd, mainClass, mvpText, num, rowMvp } from '../../../lib/deathwatch/tracker'
 import PlayerName from './PlayerName.vue'
 
 const props = defineProps({
@@ -66,7 +66,7 @@ const profile = computed(() => {
     <div v-else class="dw-scroll">
       <table class="dw-table">
         <thead>
-          <tr><th>#</th><th class="l">Player</th><th>MVP</th><th>Kills</th><th>Special</th><th>Revives</th><th>Incaps</th><th>Seeds</th><th class="l">Class</th></tr>
+          <tr><th>#</th><th class="l">Player</th><th>MVP</th><th>Kills</th><th>Special</th><th>Revives</th><th>Incaps</th><th title="Kills per incap">K/D</th><th>Seeds</th><th class="l">Class</th></tr>
         </thead>
         <tbody>
           <tr v-for="(p, i) in R.pl" :key="p.n" :class="medal(p) < 4 ? `m${medal(p)}` : ''">
@@ -80,6 +80,7 @@ const profile = computed(() => {
             <td>{{ p.s }}</td>
             <td>{{ p.v }}</td>
             <td>{{ p.i }}</td>
+            <td>{{ kd(p.k, p.i) }}</td>
             <td>{{ p.g }}</td>
             <td class="l">
               <span v-if="mainClass(p).length > 1" :title="mainClass(p).join(', ')">{{ mainClass(p).map((c) => c.slice(0, 4)).join(' / ') }}</span>
@@ -130,6 +131,7 @@ const profile = computed(() => {
         <div class="dw-tile"><p class="dw-tile-label">Items</p><span class="dw-tile-value">{{ profile.A.it }}</span></div>
         <div class="dw-tile"><p class="dw-tile-label">Revives</p><span class="dw-tile-value">{{ profile.A.v }}</span></div>
         <div class="dw-tile"><p class="dw-tile-label">Incaps</p><span class="dw-tile-value">{{ profile.A.i }}</span></div>
+        <div class="dw-tile"><p class="dw-tile-label">K/D</p><span class="dw-tile-value">{{ kd(profile.A.k, profile.A.i) }}</span></div>
         <div class="dw-tile"><p class="dw-tile-label">Gene-Seeds</p><span class="dw-tile-value">{{ profile.A.g }}</span></div>
       </div>
       <div class="dw-chips">

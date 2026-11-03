@@ -39,8 +39,8 @@ const texts = computed(() => (store.commander ? pageTexts(page.value.area, page.
 // While a view's chunk is on its way (after a short delay, so a fast one never flashes it), and if it fails.
 // From 900px the Armouring Hall has no rail (.solo): its views head themselves (HallHead). Where no view does (still
 // loading, failed, or locked, below), its head is drawn here instead, so the hall never loses its way out.
-// Recruitment heads itself the same way (HallHead with area="recruitment").
-const solo = computed(() => ['armouringhall', 'recruitment'].includes(page.value.area))
+// Recruitment and the Event Tracker head themselves the same way (HallHead with their area).
+const solo = computed(() => ['armouringhall', 'recruitment', 'eventtracker'].includes(page.value.area))
 const hallHead = () => (solo.value ? h(HallHead, { tab: page.value.tab, area: page.value.area }) : null)
 const Loading = { render: () => [hallHead(), h('p', { class: 'dw-area-loading', role: 'status' }, 'Loading…')] }
 // `error` is what defineAsyncComponent hands it: taken as a prop, so it does not fall on the fragment as an attribute.

@@ -1,7 +1,7 @@
 <script setup>
 // The event's totals, per Kill Team, and (with `classes`) how often each class was played and by whom.
 import { computed } from 'vue'
-import { CLASSES, GAME_STATS, num, teamStats } from '../../../lib/deathwatch/tracker'
+import { CLASSES, GAME_STATS, kd, num, teamStats } from '../../../lib/deathwatch/tracker'
 
 const props = defineProps({ R: { type: Object, required: true }, classes: { type: Boolean, default: false }, notes: { type: Boolean, default: false } })
 
@@ -46,7 +46,7 @@ const entries = computed(() => classRows.value.reduce((a, r) => a + r.x.n, 0))
     <div class="dw-scroll">
       <table class="dw-table">
         <thead>
-          <tr><th class="l">Class</th><th>Played</th><th>Share</th><th>Ø kills</th><th>Seeds</th></tr>
+          <tr><th class="l">Class</th><th>Played</th><th>Share</th><th>Ø kills</th><th title="Kills per incap">K/D</th></tr>
         </thead>
         <tbody>
           <tr v-for="{ c, x } in classRows" :key="c">
@@ -54,7 +54,7 @@ const entries = computed(() => classRows.value.reduce((a, r) => a + r.x.n, 0))
             <td>{{ x.n }}</td>
             <td>{{ entries ? `${Math.round((x.n / entries) * 100)}%` : '–' }}</td>
             <td>{{ x.kn ? num(x.k / x.kn) : '–' }}</td>
-            <td>{{ x.g }}</td>
+            <td>{{ x.n ? kd(x.k, x.i) : '–' }}</td>
           </tr>
         </tbody>
       </table>

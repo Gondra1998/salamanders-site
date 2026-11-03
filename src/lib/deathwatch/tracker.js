@@ -63,7 +63,7 @@ export function calc(teams, custom) {
   const CK = { nd: [], sg: 0 }
   const dupes = {}
   const P = Object.create(null)
-  const C = Object.fromEntries(CLASSES.map((c) => [c, { n: 0, k: 0, kn: 0, g: 0 }]))
+  const C = Object.fromEntries(CLASSES.map((c) => [c, { n: 0, k: 0, kn: 0, i: 0 }]))
   let none = 0
   let cur = 1
   const ts = src
@@ -112,7 +112,7 @@ export function calc(teams, custom) {
         const c = Object.hasOwn(C, r[1]) ? C[r[1]] : null
         if (c) {
           c.n++
-          c.g += g
+          c.i += r[9] // every entry's incaps, for the class's K/D
           if (r[3] > 0) {
             c.kn++
             c.k += r[3]
@@ -289,31 +289,11 @@ export function progression(R, mode) {
   }
 }
 
-/** The standings as a Discord message (a code block, plus the honour roll if it still fits in 2000 characters). */
-export function discordText(R, date = new Date()) {
-  const d = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-  const nw = Math.min(12, Math.max(9, ...R.ts.map((t) => t.n.length)))
-  const g = (x) => Math.round(x).toLocaleString('de-DE')
-  const head = `${'#'.padEnd(2)} ${'Kill Team'.padEnd(nw)} ${['W1', 'W2', 'W3', 'W4'].map((x) => x.padStart(5)).join(' ')} ${'Total'.padStart(7)}`
-  const rows = R.ts.map((t) =>
-    `${String(t.r).padEnd(2)} ${t.n.slice(0, nw).padEnd(nw)} ${t.wk.map((w) => g(w).padStart(5)).join(' ')} ${g(t.tot).padStart(7)} ${t.mv > 0 ? '▲' : t.mv < 0 ? '▼' : ''}`.trimEnd(),
-  )
-  const hl = [['MVP', 'mvp'], ['Executioner', 'k'], ['Terminator', 's'], ['Guardian Angel', 'v']]
-    .map(([label, k]) => {
-      const b = leaders(R.pl, k)
-      return b && `• ${label}: ${b.who.map((p) => p.n + (R.kia.has(p.n) ? ` (${kiaLabel(R, p.n)})` : '')).join(', ')} (${k === 'mvp' ? b.value.toFixed(1).replace('.', ',') : num(b.value)})`
-    })
-    .filter(Boolean)
-  const c = R.ts[0]
-  if (c && c.tot > 0) hl.unshift(`• Event Champion: ${c.n} (${num(c.tot)})`)
-  const text = `**🏆 Deathwatch Event – Standings** (as of ${d})\n\`\`\`\n${head}\n${rows.join('\n')}\n\`\`\``
-  const full = hl.length ? `${text}\n**Honour Roll**\n${hl.join('\n')}` : text
-  return full.length <= 2000 ? full : text
-}
-
 /** A number as the old site showed it: one decimal at most, German separators. */
 export const num = (n) => (typeof n === 'number' ? (Math.round(n * 10) / 10).toLocaleString('de-DE') : n)
 export const mvpText = (v) => v.toFixed(1).replace('.', ',')
+/** Kills per incap, as games show K/D: with no incaps, the kills themselves. */
+export const kd = (k, i) => num(k / Math.max(1, i))
 
 // ── Manage ────────────────────────────────────────────────────────────────────────────────────────────────
 

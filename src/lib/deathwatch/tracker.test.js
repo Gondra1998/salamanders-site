@@ -4,9 +4,9 @@ import {
   archiveDoc,
   bestMission,
   calc,
-  discordText,
   findMission,
   honours,
+  kd,
   nextOpenSlot,
   parseBackup,
   progression,
@@ -55,6 +55,9 @@ describe('calc', () => {
     expect(b1.o).toBe(1) // b1's objective for Alpha does not count for b1
     expect(R.ts[0].cc.Sniper).toBe(1)
     expect(R.home).toEqual({ a1: 1, a2: 1, b1: 2 })
+    // Class K/D input: every entry counts (Beta's b1, with no kills, too).
+    expect(R.C.Tactical).toMatchObject({ n: 4, k: 150, i: 1 })
+    expect([kd(150, 4), kd(50, 0)]).toEqual(['37,5', '50']) // no incaps: the kills themselves
   })
 
   it('finds the data checks and the fallen', () => {
@@ -156,13 +159,6 @@ describe('the views', () => {
   it('splits the best mission between Gene-Seed and Relics by what scores more', () => {
     expect(bestMission(WEIGHTS).total).toBe(500 + 200 + 100 + 75 + 100)
     expect(bestMission({ ...WEIGHTS, gs: 0 }).parts[1]).toEqual(['3 Guardian Relics', 150])
-  })
-
-  it('writes the standings for Discord', () => {
-    // Local noon: discordText prints the viewer's own date, and an ISO date string is midnight UTC (the day before, west of it).
-    const text = discordText(calc(teams()), new Date(2026, 9, 24, 12))
-    expect(text).toContain('(as of 24 Oct 2026)')
-    expect(text).toContain('• Event Champion: Alpha (1.275)')
   })
 })
 

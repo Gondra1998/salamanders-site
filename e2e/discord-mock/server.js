@@ -199,9 +199,11 @@ async function r2(request, key) {
     ) {
       return s3Error(403, 'AccessDenied')
     }
-    const bytes = new Uint8Array(await request.arrayBuffer())
+    // Real R2 refuses a chunked upload (no Content-Length), so the streamed copy must send the length it signed.
     const declared = request.headers.get('Content-Length')
-    if (declared !== null && Number(declared) !== bytes.length) return s3Error(400, 'IncompleteBody')
+    if (declared === null) return s3Error(411, 'MissingContentLength')
+    const bytes = new Uint8Array(await request.arrayBuffer())
+    if (Number(declared) !== bytes.length) return s3Error(400, 'IncompleteBody')
     objects.set(key, { type: request.headers.get('Content-Type') || 'application/octet-stream', bytes })
     return new Response(null, { status: 200, headers: { ETag: `"${Bun.hash(bytes).toString(16)}"` } })
   }

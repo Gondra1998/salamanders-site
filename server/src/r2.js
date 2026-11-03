@@ -2,10 +2,12 @@
  * Cloudflare R2 through its S3-compatible API, signed with AWS SigV4 by hand
  * on node:crypto (no SDK). The only module that talks to R2.
  *
- * put(key, body, { contentType, contentLength }) → uploads one object,
+ * put(key, body, { contentType, contentLength, signal }) → uploads one object,
  *   header-signed with an unsigned payload. body is a Uint8Array or a
- *   ReadableStream (sent half-duplex). Resolves on any 2xx; throws
- *   R2Error(status), status 0 when R2 is unreachable or not configured.
+ *   ReadableStream (sent half-duplex); signal (optional) goes straight to
+ *   fetch, so a caller can time the upload out. Resolves on any 2xx; throws
+ *   R2Error(status), status 0 when R2 is unreachable, the upload was
+ *   aborted, or R2 is not configured.
  * presignGet(key, { expiresSec = 900 }) → a query-signed GET link. Pure
  *   maths over the secret: no request to Cloudflare.
  * Objects live path-style at `${endpoint}/${bucket}/${key}`, region auto,
@@ -88,7 +90,7 @@ export function createR2({ accountId, bucket, accessKeyId, secretAccessKey, endp
   }
   const sign = (ctx, canonical) => signature({ ...ctx, secret: secretAccessKey, stringToSign: stringToSign({ ...ctx, canonical }) })
 
-  async function put(key, body, { contentType, contentLength }) {
+  async function put(key, body, { contentType, contentLength, signal }) {
     if (!Number.isSafeInteger(contentLength) || contentLength < 0) throw new TypeError('contentLength must be a whole number of bytes.')
     if (typeof contentType !== 'string' || !HEADER_VALUE.test(contentType)) throw new TypeError('contentType must be a plain header value.')
     const ctx = context()
@@ -111,6 +113,7 @@ export function createR2({ accountId, bucket, accessKeyId, secretAccessKey, endp
         Authorization: `${ALGORITHM} Credential=${accessKeyId}/${scopeOf(ctx)}, SignedHeaders=${Object.keys(signed).sort().join(';')}, Signature=${sig}`,
       },
       body,
+      signal,
     }
     if (body instanceof ReadableStream) init.duplex = 'half'
     let res

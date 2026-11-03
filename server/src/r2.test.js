@@ -252,6 +252,27 @@ describe('put', () => {
     expect(err.cause).toBeUndefined()
   })
 
+  it('hands the caller signal to fetch, so an upload can be timed out', async () => {
+    const { r2, calls } = make()
+    const signal = new AbortController().signal
+    await r2.put('k', new Uint8Array(1), { contentType: 'image/png', contentLength: 1, signal })
+    expect(calls[0][1].signal).toBe(signal)
+  })
+
+  it('turns an aborted upload into R2Error with status 0', async () => {
+    const { r2 } = make({
+      fetchImpl: async (url, init) => {
+        // Fails only on a signal that arrived and is aborted; without one, the upload would succeed.
+        if (init.signal?.aborted) throw init.signal.reason
+        return new Response(null, { status: 200 })
+      },
+    })
+    const err = await r2.put('k', new Uint8Array(1), { contentType: 'image/png', contentLength: 1, signal: AbortSignal.abort() }).catch((e) => e)
+    expect(err).toBeInstanceOf(R2Error)
+    expect(err.status).toBe(0)
+    expect(err.cause).toBeUndefined()
+  })
+
   it.each([
     [{ contentType: 'image/png', contentLength: -1 }],
     [{ contentType: 'image/png', contentLength: 1.5 }],

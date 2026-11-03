@@ -26,6 +26,7 @@ import { createDeathwatchStore } from './deathwatchStore.js'
 import { createDiscordRoles } from './discordRoles.js'
 import { createDisplayNames } from './displayNames.js'
 import { createGalleryAccess } from './galleryAccess.js'
+import { CHANNEL_ID, galleryConfigReport, pollIntervalMs } from './galleryConfig.js'
 import { createGalleryDiscord } from './galleryDiscord.js'
 import { createGalleryHandler } from './galleryHandler.js'
 import { createGalleryPoll } from './galleryPoll.js'
@@ -128,7 +129,10 @@ const r2 = createR2({
 })
 const galleryStore = createGalleryStore(pool)
 const GALLERY_CHANNEL_ID = process.env.GALLERY_CHANNEL_ID || ''
-const galleryConfigured = r2.configured && /^\d{17,20}$/.test(GALLERY_CHANNEL_ID)
+const galleryConfigured = r2.configured && CHANNEL_ID.test(GALLERY_CHANNEL_ID)
+// Some gallery variables set but not a working gallery: say which, by name only, so the 503s are not a mystery.
+const galleryReport = galleryConfigReport(process.env)
+if (galleryReport) console.warn(galleryReport)
 // Not created unconfigured (its constructor refuses bad options); the Review tab then shows no runs.
 let galleryPoll = { status: async () => ({ lastRunAt: null, lastOkAt: null, lastError: null }) }
 if (galleryConfigured) {
@@ -137,8 +141,8 @@ if (galleryConfigured) {
     r2,
     store: galleryStore,
     channelId: GALLERY_CHANNEL_ID,
-    // At most setInterval's ceiling (a larger delay would fire at once, every time); unset or not above 0, two minutes.
-    intervalMs: Number(process.env.GALLERY_POLL_MS) > 0 ? Math.min(Number(process.env.GALLERY_POLL_MS), 2_147_483_647) : 120_000,
+    // At least a second and at most setInterval's ceiling; unset or not above 0, two minutes (galleryConfig.js).
+    intervalMs: pollIntervalMs(process.env),
   })
   galleryPoll.start()
 }

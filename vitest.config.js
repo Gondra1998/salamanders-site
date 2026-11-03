@@ -42,6 +42,7 @@ const GATED = [
   'server/src/r2.js',
   'server/src/galleryAccess.js',
   'server/src/galleryHandler.js',
+  'server/src/galleryConfig.js',
   'src/lib/gallery/embed.js',
 ]
 

@@ -180,12 +180,14 @@ newest message: clips posted before launch are not imported.
 | `GALLERY_CHANNEL_ID` | the clips channel id — no default, required |
 | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | the private bucket and an API token scoped to it alone — no defaults, required; the secret lives in `server/.env` only |
 | `GALLERY_CURATOR_ROLE_ID` | the curator role id — optional. Unset, nobody is curator and the other approver roles still work |
-| `GALLERY_POLL_MS` | how often the poll runs, in ms — optional, default 120000 |
-| `R2_ENDPOINT` | for the e2e stack's mock R2 only; leave unset in production |
+| `GALLERY_POLL_MS` | how often the poll runs, in ms — optional, default 120000; a value under 1000 is raised to 1000 |
+| `R2_ENDPOINT` | for the e2e stack's mock R2 only; leave unset in production. Scheme and host[:port] only, no path (`http://discord-mock:4400`): a path, query or credentials make the client refuse it, and every `/gallery/*` route answers 503 |
 | `REPORTER_ROLE_ID`, `RECLUSIARCH_ROLE_ID` | shared with member reports (see above); default in code |
 
 Until the channel id and all four R2 values are set, every `/gallery/*` route answers 503
-"not configured" and the poll does not start, so the image may ship first.
+"not configured" and the poll does not start, so the image may ship first. When some of
+these variables are set but they do not make a working gallery, the API logs one warning at
+startup naming each one missing or refused (never its value).
 
 **Bot permissions, once:** View Channel and Read Message History on the clips channel,
 and the Message Content intent toggle on the bot's page in the Discord Developer Portal

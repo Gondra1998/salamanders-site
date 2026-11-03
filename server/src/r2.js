@@ -69,7 +69,8 @@ export function presignQuery({ accessKeyId, amzDate, region, service, expiresSec
 }
 
 // An absolute http(s) origin, a trailing slash allowed; a path, query, fragment or credentials would change what is signed.
-function parseEndpoint(endpoint) {
+// → the URL, or null. Exported so galleryConfig.js can say why the gallery is off without a second opinion.
+export function parseEndpoint(endpoint) {
   try {
     const u = new URL(endpoint)
     return /^https?:$/.test(u.protocol) && u.href === `${u.origin}/` ? u : null

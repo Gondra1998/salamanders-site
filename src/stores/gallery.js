@@ -5,9 +5,11 @@ import * as api from '../lib/gallery/api'
 // they are an approver, and the lists the pages fill. It only decides what to show; the server enforces every read
 // and write again. Statuses: idle, checking, allowed, denied, signin, unavailable.
 // One counter for every load() and reset(): a load's answer lands only if no later load() or reset() has started
-// since, so a slow response can never bring back a state the user has already left (sign-out resets). The list
-// actions below are not guarded by it; the pages show their lists only while the status is 'allowed'.
+// since, so a slow response can never bring back a state the user has already left (sign-out resets).
 let seq = 0
+// The same for each list: reset() and refresh() start a new generation of it, and a page asked for under an
+// older one is dropped (answer or failure), so it cannot land in a list that was emptied or started again.
+const gen = { clips: 0, art: 0 }
 
 const statusOf = (err) => (err?.status === 401 ? 'signin' : err?.status === 403 ? 'denied' : 'unavailable')
 
@@ -27,6 +29,21 @@ const PAGE = { clips: api.listClips, art: api.listArt }
 function dropItem(store, id) {
   store.clips.items = store.clips.items.filter((i) => i.id !== id)
   store.art.items = store.art.items.filter((i) => i.id !== id)
+}
+
+// → { items, next } for one page of a list, or null if the list has moved on while it was asked for. Stops the
+// list's loading flag, unless a newer refresh() owns it now.
+async function fetchPage(store, kind, token, before) {
+  const mine = gen[kind]
+  try {
+    const { items, next } = await PAGE[kind](token, before)
+    return mine === gen[kind] ? { items, next: next ?? null } : null
+  } catch (err) {
+    if (mine === gen[kind]) throw err
+    return null
+  } finally {
+    if (mine === gen[kind]) store[kind].loading = false
+  }
 }
 
 // Runs one action: the message of a failure is kept in `error` for the page to show, and the failure goes on to the caller.
@@ -63,18 +80,17 @@ export const useGallery = defineStore('gallery', {
 
     reset() {
       seq++
+      gen.clips++
+      gen.art++
       this.$patch(initial())
     },
 
     refresh(kind, token) {
+      gen[kind]++
       return attempt(this, async () => {
         this.$patch({ [kind]: { items: [], next: null, loading: true } })
-        try {
-          const { items, next } = await PAGE[kind](token, null)
-          this.$patch({ [kind]: { items, next: next ?? null } })
-        } finally {
-          this[kind].loading = false
-        }
+        const page = await fetchPage(this, kind, token, null)
+        if (page) this.$patch({ [kind]: page })
       })
     },
 
@@ -84,12 +100,10 @@ export const useGallery = defineStore('gallery', {
       if (list.loading || list.next === null) return
       await attempt(this, async () => {
         list.loading = true
-        try {
-          const { items, next } = await PAGE[kind](token, list.next)
-          list.items.push(...items)
-          list.next = next ?? null
-        } finally {
-          list.loading = false
+        const page = await fetchPage(this, kind, token, list.next)
+        if (page) {
+          list.items.push(...page.items)
+          list.next = page.next
         }
       })
     },

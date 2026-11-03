@@ -204,9 +204,9 @@ describe('gallery store: who may see it', () => {
 })
 
 describe.each([
-  ['clips', listClips],
-  ['art', listArt],
-])('gallery store: the %s list', (kind, list) => {
+  ['clips', listClips, listArt],
+  ['art', listArt, listClips],
+])('gallery store: the %s list', (kind, list, otherList) => {
   const page = (ids, next) => ({ items: ids.map((id) => item(id)), next })
 
   it('refresh() empties the list at once, then fills it with the first page', async () => {
@@ -290,6 +290,124 @@ describe.each([
     await expect(s.refresh(kind, 'tok')).rejects.toMatchObject({ status: 500 })
     expect(s[kind]).toEqual({ items: [], next: null, loading: false })
     expect(s.error).toBe('Boom.')
+  })
+
+  // A page asked for before a reset() or a refresh() of the same list is out of date: it must not land in what
+  // came after (sign-out empties the store; a refresh starts the list again from the first page).
+  describe('a page that lands after the list has moved on', () => {
+    const EMPTY = { items: [], next: null, loading: false }
+    const loaded = { items: [item(3)], next: '3', loading: false }
+
+    it('more() answered after reset() leaves the list empty', async () => {
+      s.$patch({ [kind]: loaded })
+      const d = deferred()
+      list.mockReturnValue(d.promise)
+      const p = s.more(kind, 'tok')
+      s.reset()
+      d.resolve(page([2], '2'))
+      await p
+      expect(s[kind]).toEqual(EMPTY)
+    })
+
+    it('refresh() answered after reset() leaves the list empty', async () => {
+      const d = deferred()
+      list.mockReturnValue(d.promise)
+      const p = s.refresh(kind, 'tok')
+      s.reset()
+      d.resolve(page([2], '2'))
+      await p
+      expect(s[kind]).toEqual(EMPTY)
+    })
+
+    it('more() answered after a later refresh() is dropped, and the refresh lands', async () => {
+      s.$patch({ [kind]: loaded })
+      const stale = deferred()
+      const fresh = deferred()
+      list.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
+      const more = s.more(kind, 'tok')
+      const refresh = s.refresh(kind, 'tok')
+      fresh.resolve(page([9], '9'))
+      await refresh
+      stale.resolve(page([2], '2'))
+      await more
+      expect(s[kind]).toEqual({ items: [item(9)], next: '9', loading: false })
+    })
+
+    it('more() answered while a later refresh() is still asking does not stop its loading', async () => {
+      s.$patch({ [kind]: loaded })
+      const stale = deferred()
+      const fresh = deferred()
+      list.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
+      const more = s.more(kind, 'tok')
+      const refresh = s.refresh(kind, 'tok')
+      stale.resolve(page([2], '2'))
+      await more
+      expect(s[kind]).toEqual({ items: [], next: null, loading: true })
+      fresh.resolve(page([9], null))
+      await refresh
+      expect(s[kind]).toEqual({ items: [item(9)], next: null, loading: false })
+    })
+
+    it('an older refresh() answered after a newer one is dropped', async () => {
+      const old = deferred()
+      const newer = deferred()
+      list.mockReturnValueOnce(old.promise).mockReturnValueOnce(newer.promise)
+      const a = s.refresh(kind, 'tok')
+      const b = s.refresh(kind, 'tok')
+      newer.resolve(page([9], '9'))
+      await b
+      old.resolve(page([1], null))
+      await a
+      expect(s[kind]).toEqual({ items: [item(9)], next: '9', loading: false })
+    })
+
+    it('a failure of such a page is dropped too: no error, no throw, no loading left on', async () => {
+      s.$patch({ [kind]: loaded })
+      const stale = deferred()
+      const fresh = deferred()
+      list.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
+      const more = s.more(kind, 'tok')
+      const refresh = s.refresh(kind, 'tok')
+      stale.reject(apiError(503, 'Discord is not answering.'))
+      await expect(more).resolves.toBeUndefined()
+      expect(s.error).toBe('')
+      expect(s[kind].loading).toBe(true) // the refresh is still asking
+      fresh.resolve(page([9], null))
+      await refresh
+      expect(s[kind]).toEqual({ items: [item(9)], next: null, loading: false })
+    })
+
+    it('a page stays out of date however many resets and refreshes came after it', async () => {
+      // Each of these only ever counts forward: none of them can bring an older generation back round.
+      for (const steps of [['reset', 'refresh'], ['refresh', 'reset'], ['reset', 'reset'], ['refresh', 'refresh']]) {
+        setActivePinia(createPinia())
+        vi.resetAllMocks()
+        const t = useGallery()
+        t.$patch({ [kind]: loaded })
+        const stale = deferred()
+        const later = deferred()
+        list.mockReturnValueOnce(stale.promise).mockReturnValue(later.promise)
+        const more = t.more(kind, 'tok')
+        const rest = steps.map((step) => (step === 'reset' ? t.reset() : t.refresh(kind, 'tok')))
+        stale.resolve(page([2], '2'))
+        await more
+        expect(t[kind].items, steps.join(' then ')).not.toContainEqual(item(2))
+        later.resolve(page([9], null))
+        await Promise.all(rest)
+      }
+    })
+
+    it('a refresh of the other list does not make this one out of date', async () => {
+      s.$patch({ [kind]: loaded })
+      const d = deferred()
+      list.mockReturnValue(d.promise)
+      otherList.mockResolvedValue(page([8], null))
+      const more = s.more(kind, 'tok')
+      await s.refresh(kind === 'clips' ? 'art' : 'clips', 'tok')
+      d.resolve(page([2], null))
+      await more
+      expect(s[kind]).toEqual({ items: [item(3), item(2)], next: null, loading: false })
+    })
   })
 })
 

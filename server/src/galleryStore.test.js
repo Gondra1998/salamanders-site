@@ -121,6 +121,31 @@ describe('insertDiscordItem', () => {
   })
 })
 
+describe('hasDiscordItem', () => {
+  it('asks by message and attachment id, as parameters, and answers whether a row came back', async () => {
+    const held = fakePool([['select 1 from gallery_items', [{ '?column?': 1 }]]])
+    expect(await store(held.pool).hasDiscordItem(clip.messageId, clip.attachmentId)).toBe(true)
+    expect(held.log).toEqual([
+      {
+        sql: 'select 1 from gallery_items where discord_message_id = $1 and discord_attachment_id = $2 limit 1',
+        params: [clip.messageId, clip.attachmentId],
+      },
+    ])
+    expect(await store(fakePool().pool).hasDiscordItem(clip.messageId, clip.attachmentId)).toBe(false)
+  })
+
+  it.each([
+    [null, clip.attachmentId],
+    ['', clip.attachmentId],
+    [clip.messageId, undefined],
+    [clip.messageId, ''],
+  ])('refuses (%j, %j) before any query', async (messageId, attachmentId) => {
+    const { pool, log } = fakePool()
+    await expect(store(pool).hasDiscordItem(messageId, attachmentId)).rejects.toThrow(TypeError)
+    expect(log).toEqual([])
+  })
+})
+
 describe('insertArt', () => {
   const art = { title: 'Dread', note: 'oils', ext: 'png', contentType: 'image/png', bytes: 5000 }
 
@@ -499,6 +524,7 @@ describe('values never reach the SQL text', () => {
     ])
     const s = store(pool)
     await s.insertDiscordItem({ ...clip, title: mark, authorUsername: mark }, { id: mark, username: mark })
+    await s.hasDiscordItem(mark, mark)
     await s.insertArt({ title: mark, note: mark, ext: 'png', contentType: mark, bytes: 1 }, { id: mark, username: mark })
     await s.transition(mark, { from: [mark], to: mark, action: mark, actor: { id: mark, username: mark }, note: mark })
     await s.removeByOwner(mark, { id: mark, username: mark })

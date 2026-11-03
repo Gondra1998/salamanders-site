@@ -135,6 +135,21 @@ export function createGalleryStore(pool) {
     },
 
     /**
+     * Whether the poll already holds this message's attachment, asked before it downloads one, so a batch
+     * repeated after a crash copies nothing twice. Uses the partial unique index on the two Discord ids.
+     * The same TypeError as insertDiscordItem, before any query, for an id that is not a non-empty string.
+     */
+    async hasDiscordItem(messageId, attachmentId) {
+      needId(messageId, 'messageId')
+      needId(attachmentId, 'attachmentId')
+      const { rows } = await pool.query(
+        'select 1 from gallery_items where discord_message_id = $1 and discord_attachment_id = $2 limit 1',
+        [messageId, attachmentId],
+      )
+      return rows.length > 0
+    },
+
+    /**
      * A member's upload, pending review. The key names the new id, so the row goes in with an empty key and
      * is updated once the id is known. → { id, r2Key }.
      */

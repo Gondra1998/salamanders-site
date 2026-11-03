@@ -167,7 +167,10 @@ rejected, hidden or removed item keeps its file in R2.
 
 **The clips channel.** Posting in it is the publish step: the poll (every 2 minutes)
 copies each video or image attachment into R2 and stores it approved, and records
-Medal / YouTube / Twitch links as embeds. Attachments over 100 MB are skipped. Deleting
+Medal / YouTube / Twitch links as embeds. Attachments over 100 MB are skipped. An
+attachment that cannot be copied (a dead Discord link, a size mismatch, a copy that cannot
+finish in two minutes) is skipped too and named on the Review tab's poll line; the
+back-catalogue job can pick it up later. Deleting
 the message in Discord removes the clip from the site (the newest 50 are checked every
 pass, all of them hourly); an approver can also hide one. The first pass only notes the
 newest message: clips posted before launch are not imported.

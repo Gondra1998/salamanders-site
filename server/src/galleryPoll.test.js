@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createGalleryPoll } from './galleryPoll'
-import { createGalleryDiscord } from './galleryDiscord'
+import { createGalleryDiscord, DownloadRefused } from './galleryDiscord'
 import { Upstream } from './discordRoles'
 import { R2Error } from './r2'
 import { POLL_ACTOR } from './galleryStore'
@@ -83,6 +83,11 @@ function fakeStore({ cursor, items = [] } = {}, order = []) {
       }
       s.syncCalls.push(patch)
       s.sync = { channel_id: ch, last_message_id: null, last_run_at: null, last_ok_at: null, last_error: null, ...s.sync, ...patch }
+    },
+    hasCalls: 0,
+    async hasDiscordItem(messageId, attachmentId) {
+      s.hasCalls++
+      return s.items.some((it) => it.messageId === messageId && it.attachmentId === attachmentId)
     },
     async insertDiscordItem(row, actor) {
       order.push(['insert', row.messageId, row.attachmentId])
@@ -242,23 +247,24 @@ describe('copying the channel', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('R2 is unreachable.'))
   })
 
-  it('a failed download ends the pass the same way, with no upload and no row', async () => {
-    const { poll, store, r2, discord } = setup({ cursor: id(0), channel: [clip(1)] })
-    discord.download = async () => {
-      throw new Upstream("Discord's CDN answered 403.")
-    }
-    await poll.runOnce()
-    expect(r2.puts).toEqual([])
-    expect(store.items).toEqual([])
-    expect(store.sync).toMatchObject({ last_message_id: id(0), last_error: "Discord's CDN answered 403." })
-  })
-
-  it('treats "exists" from the store as fine (a retried batch)', async () => {
+  it('treats "exists" from the insert as fine (a row stored between the lookup and the insert)', async () => {
     const already = { messageId: id(1), attachmentId: attId(1) }
     const { poll, store } = setup({ cursor: id(0), channel: [clip(1), clip(2)], items: [already] })
+    store.hasDiscordItem = async () => false
     await poll.runOnce()
     expect(store.items.map((it) => it.messageId)).toEqual([id(1), id(2)])
+    expect(store.events).toHaveLength(1)
     expect(store.sync).toMatchObject({ last_message_id: id(2), last_ok_at: iso(T0), last_error: null })
+  })
+
+  it("prefers the CDN's content-length to Discord's size, and falls back to the size when the CDN gives none", async () => {
+    const { poll, r2, store, discord } = setup({ cursor: id(0), channel: [clip(1), clip(2)] })
+    const fallback = discord.download
+    discord.download = async (url, opts) =>
+      url === video(1).url ? { body: 'b', contentLength: 4242, contentType: 'video/mp4' } : fallback(url, opts)
+    await poll.runOnce()
+    expect(r2.puts.map((p) => p.opts.contentLength)).toEqual([4242, 1002])
+    expect(store.items.map((it) => it.bytes)).toEqual([4242, 1002])
   })
 
   it('skips too-large and not-media attachments and still advances', async () => {
@@ -355,6 +361,162 @@ describe('a message that cannot be stored (Ruling 4)', () => {
     expect(store.sync.last_error).not.toContain('signed')
     expect(store.sync.last_error).not.toContain('cdn.test')
     for (const [line] of log.mock.calls) expect(line).not.toContain('signed')
+  })
+})
+
+/**
+ * Ruling 23: an attachment that can never be copied as things stand (the CDN refused its link, R2 refused the
+ * object, or the copy ran out its own deadline) is skipped like a refused row; a network error, a 5xx or a 429
+ * is an outage, which ends the pass with the cursor where it was.
+ */
+describe('an attachment that cannot be copied (Ruling 23)', () => {
+  // The real galleryDiscord download, against a CDN that answers `reply` (a status, or an Error thrown by fetch).
+  const cdn = (reply) =>
+    createGalleryDiscord({
+      fetchImpl: async () => {
+        if (reply instanceof Error) throw reply
+        return new Response('nope', { status: reply })
+      },
+      apiBase: 'https://d.test/api',
+      botToken: 'bot',
+    }).download
+  // Message 2 holds two attachments; the first of them is the one that fails.
+  const channel = () => [clip(1), message(2, { attachments: [video(2), video(3)] }), clip(4)]
+  const failing = video(2)
+  const failOne = (discord, download) => {
+    const fine = discord.download
+    discord.download = async (url, opts) => {
+      if (url !== failing.url) return fine(url, opts)
+      discord.calls.push(['download', url, opts.signal])
+      return download(url, opts)
+    }
+  }
+  const failPut = (r2, err) => {
+    const fine = r2.put
+    r2.put = async (key, body, opts) => {
+      if (key.includes(failing.id)) throw typeof err === 'function' ? await err(opts) : err
+      return fine(key, body, opts)
+    }
+  }
+  const expectSkipped = (store, log) => {
+    expect(store.items.map((it) => it.attachmentId)).toEqual([attId(1), attId(3), attId(4)])
+    expect(store.sync).toMatchObject({ last_message_id: id(4), last_ok_at: iso(T0) })
+    expect(store.sync.last_error).toContain(`Skipped clips message ${id(2)} (could not copy an attachment: `)
+    expect(store.sync.last_error).not.toContain('cdn.test')
+    expect(store.sync.last_error).not.toContain('signed')
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(`Skipped clips message ${id(2)}`))
+  }
+  const expectOutage = (store, error) => {
+    expect(store.items.map((it) => it.attachmentId)).toEqual([attId(1)])
+    expect(store.syncCalls.some((p) => 'last_message_id' in p)).toBe(false)
+    expect(store.sync).toMatchObject({ last_message_id: id(0), last_ok_at: null, last_run_at: iso(T0), last_error: error })
+  }
+
+  it.each([403, 404, 410])('a CDN %i skips that row: its siblings are stored and the cursor advances', async (status) => {
+    const { poll, store, discord, r2, log } = setup({ cursor: id(0), channel: channel() })
+    failOne(discord, cdn(status))
+    await poll.runOnce()
+    expectSkipped(store, log)
+    expect(store.sync.last_error).toContain(`Discord's CDN answered ${status}.`)
+    expect(r2.puts.some((p) => p.key.includes(failing.id))).toBe(false)
+  })
+
+  it.each([
+    [500, "Discord's CDN answered 500."],
+    [503, "Discord's CDN answered 503."],
+    [429, "Discord's CDN answered 429."],
+  ])('a CDN %i ends the pass and leaves the cursor, as before', async (status, error) => {
+    const { poll, store, discord } = setup({ cursor: id(0), channel: channel() })
+    failOne(discord, cdn(status))
+    await poll.runOnce()
+    expectOutage(store, error)
+  })
+
+  it('a network error on the download ends the pass and leaves the cursor', async () => {
+    const { poll, store, discord } = setup({ cursor: id(0), channel: channel() })
+    failOne(discord, cdn(new TypeError('fetch failed')))
+    await poll.runOnce()
+    expectOutage(store, 'Discord is unreachable.')
+  })
+
+  it.each([400, 403, 413])('R2 answering %i skips that row and goes on', async (status) => {
+    const { poll, store, r2, log } = setup({ cursor: id(0), channel: channel() })
+    failPut(r2, new R2Error(`R2 refused the upload (${status}).`, status))
+    await poll.runOnce()
+    expectSkipped(store, log)
+    expect(store.sync.last_error).toContain(`R2 refused the upload (${status}).`)
+  })
+
+  it.each([
+    [503, 'R2 refused the upload (503).'],
+    [500, 'R2 refused the upload (500).'],
+    [429, 'R2 refused the upload (429).'],
+    [0, 'R2 is unreachable.'],
+  ])('R2 answering %i ends the pass and leaves the cursor', async (status, error) => {
+    const { poll, store, r2 } = setup({ cursor: id(0), channel: channel() })
+    failPut(r2, new R2Error(error, status))
+    await poll.runOnce()
+    expectOutage(store, error)
+  })
+
+  // The row's own deadline: whatever the download or the upload throws once it has fired.
+  const afterAbort = (signal) => new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+  it.each([
+    ['the download', 'download'],
+    ['the upload', 'put'],
+  ])("the row's deadline firing during %s skips that row", async (_, where) => {
+    const { poll, store, discord, r2, log } = setup({ cursor: id(0), channel: channel(), uploadTimeoutMs: 20 })
+    if (where === 'download') {
+      failOne(discord, async (url, { signal }) => {
+        await afterAbort(signal)
+        throw new Upstream('Discord is unreachable.')
+      })
+    } else {
+      failPut(r2, async ({ signal }) => {
+        await afterAbort(signal)
+        return new R2Error('R2 is unreachable.', 0)
+      })
+    }
+    await poll.runOnce()
+    expectSkipped(store, log)
+    expect(store.sync.last_error).toContain('the copy did not finish within 0.02 s')
+  })
+
+  it('a batch repeated after a crash mid-batch downloads and uploads nothing it already holds', async () => {
+    const { poll, store, discord, r2 } = setup({ cursor: id(0), channel: [clip(1), clip(2), clip(3)] })
+    const fine = r2.put
+    r2.put = async (key, body, opts) => {
+      if (key.includes(attId(3))) throw new R2Error('R2 is unreachable.', 0)
+      return fine(key, body, opts)
+    }
+    await poll.runOnce() // stores 1 and 2, then R2 goes away: the cursor stays
+    expect(store.sync.last_message_id).toBe(id(0))
+    expect(r2.puts).toHaveLength(2)
+    const downloads = () => discord.calls.filter((c) => c[0] === 'download').length
+    expect(downloads()).toBe(3)
+
+    r2.put = fine
+    await poll.runOnce() // the same batch again
+    expect(r2.puts).toHaveLength(3) // only clip 3
+    expect(r2.puts.at(-1).key).toBe(`clips/${id(3)}/${attId(3)}.mp4`)
+    expect(downloads()).toBe(4)
+    expect(store.hasCalls).toBe(6)
+    expect(store.items.map((it) => it.messageId)).toEqual([id(1), id(2), id(3)])
+    expect(store.sync).toMatchObject({ last_message_id: id(3), last_error: null })
+  })
+
+  it('Postgres failing the lookup is an outage, not a skipped row', async () => {
+    const { poll, store, r2 } = setup({ cursor: id(0), channel: [clip(1)] })
+    store.hasDiscordItem = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' })
+    }
+    await poll.runOnce()
+    expect(r2.puts).toEqual([])
+    expect(store.sync).toMatchObject({ last_message_id: id(0), last_ok_at: null, last_error: 'The clips poll failed (Error).' })
+  })
+
+  it('DownloadRefused is still an Upstream, so other callers keep treating it as one', () => {
+    expect(new DownloadRefused('x')).toBeInstanceOf(Upstream)
   })
 })
 

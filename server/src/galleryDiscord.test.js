@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createGalleryDiscord } from './galleryDiscord'
+import { createGalleryDiscord, DownloadRefused } from './galleryDiscord'
 import { Upstream } from './discordRoles'
 
 const API = 'https://d.test/api'
@@ -189,5 +189,25 @@ describe('download', () => {
     const err = await discord.download(CDN).catch((e) => e)
     expect(err).toBeInstanceOf(Upstream)
     expect(err.message).not.toContain('signed')
+  })
+
+  // The poll skips a refused link for good but retries the others next pass (Ruling 23), so the two must differ.
+  it.each([400, 403, 404, 410])('a %i is DownloadRefused: that link will never work', async (status) => {
+    const err = await make(fakeFetch({ status, raw: 'gone' })).discord.download(CDN).catch((e) => e)
+    expect(err).toBeInstanceOf(DownloadRefused)
+    expect(err).toBeInstanceOf(Upstream)
+    expect(err.message).toBe(`Discord's CDN answered ${status}.`)
+  })
+
+  it.each([
+    ['a 429', { status: 429, raw: 'slow down' }],
+    ['a 500', { status: 500, raw: 'oops' }],
+    ['a 503', { status: 503, raw: 'down' }],
+    ['a 302 (not followed to a 200)', { status: 302, raw: '' }],
+    ['a network error', new TypeError('fetch failed')],
+  ])('%s is a plain Upstream, not DownloadRefused: the next pass tries again', async (_, reply) => {
+    const err = await make(fakeFetch(reply)).discord.download(CDN).catch((e) => e)
+    expect(err).toBeInstanceOf(Upstream)
+    expect(err).not.toBeInstanceOf(DownloadRefused)
   })
 })

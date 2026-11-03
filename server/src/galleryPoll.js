@@ -8,10 +8,15 @@
  * Discord or R2 down (Upstream, R2Error), or Postgres down, ends the pass where it is: last_error says
  * why and the next pass retries. A message the parser cannot read, or a row the store refuses, is
  * skipped and named in last_error, so one bad message cannot hold the cursor back for ever.
+ * So is an attachment that can never be copied as things stand (Ruling 23): the CDN refused its link
+ * (DownloadRefused, a 4xx), R2 refused the object (a 4xx other than 429), or the copy ran out its own
+ * deadline. A network error, a 5xx or a 429 is an outage like any other. An attachment already held is
+ * not downloaded again.
  * runOnce never rejects; two passes never overlap.
  */
 import { parseMessage } from './galleryParse.js'
 import { Upstream } from './discordRoles.js'
+import { DownloadRefused } from './galleryDiscord.js'
 import { R2Error } from './r2.js'
 import { POLL_ACTOR } from './galleryStore.js'
 
@@ -22,10 +27,15 @@ const SWEEP_PAGE = 100
 const ROW_SQLSTATE = /^2[23][0-9A-Z]{3}$/
 
 const isOutage = (err) => err instanceof Upstream || err instanceof R2Error
+// R2 refusing this object for good (a size mismatch, say), as against R2 down or rate limiting.
+const r2Refused = (err) => err instanceof R2Error && err.status >= 400 && err.status < 500 && err.status !== 429
 const rejectsRow = (err) => err instanceof TypeError || ROW_SQLSTATE.test(err?.code)
 // For logs and last_error: short, and with any link (a signed CDN one, say) cut out.
 const describe = (err) => `${err?.name ?? 'Error'}: ${String(err?.message ?? '').replace(/https?:\/\/\S*/g, '[link]')}`.slice(0, 200)
 const isoOrNull = (v) => (v == null ? null : new Date(v).toISOString())
+
+/** One attachment that cannot be copied as things stand: skipped like a refused row, not an outage. */
+class CopyRefused extends Error {}
 
 export function createGalleryPoll({
   discord,
@@ -51,18 +61,32 @@ export function createGalleryPoll({
 
   async function storeRow({ download, ...row }) {
     if (!download) return store.insertDiscordItem({ ...row, r2Key: null, contentType: null, bytes: null }, POLL_ACTOR)
+    // A batch repeated after a crash: what is already held costs one lookup, not another copy.
+    if (await store.hasDiscordItem(row.messageId, row.attachmentId)) return 'exists'
     const { url, size, contentType, ext } = download
     const r2Key = `clips/${row.messageId}/${row.attachmentId}.${ext}`
     // One deadline for the download and the upload it streams into.
     const signal = AbortSignal.timeout(uploadTimeoutMs)
-    const { body } = await discord.download(url, { signal })
-    await r2.put(r2Key, body, { contentType, contentLength: size, signal })
-    return store.insertDiscordItem({ ...row, r2Key, contentType, bytes: size }, POLL_ACTOR)
+    let bytes
+    try {
+      const got = await discord.download(url, { signal })
+      // The CDN's own length is what it will send; Discord's size is the fallback when it gives none.
+      bytes = got.contentLength > 0 ? got.contentLength : size
+      await r2.put(r2Key, got.body, { contentType, contentLength: bytes, signal })
+    } catch (err) {
+      // Whatever was thrown once the row's own deadline fired (an abort, R2Error(0), Upstream) is that deadline.
+      if (signal.aborted) throw new CopyRefused(`the copy did not finish within ${uploadTimeoutMs / 1000} s`)
+      // Both messages name a status at most, never the link (galleryDiscord.js, r2.js).
+      if (err instanceof DownloadRefused || r2Refused(err)) throw new CopyRefused(err.message)
+      throw err
+    }
+    return store.insertDiscordItem({ ...row, r2Key, contentType, bytes }, POLL_ACTOR)
   }
 
   function skip(message, err) {
     const messageId = /^\d{1,20}$/.test(message?.id) ? message.id : '?'
-    skipNote = `Skipped clips message ${messageId} (${describe(err)})`.slice(0, 300)
+    const why = err instanceof CopyRefused ? `could not copy an attachment: ${err.message}` : describe(err)
+    skipNote = `Skipped clips message ${messageId} (${why})`.slice(0, 300)
     log(`Clips poll: ${skipNote}`)
   }
 
@@ -77,7 +101,7 @@ export function createGalleryPoll({
       try {
         await storeRow(row)
       } catch (err) {
-        if (isOutage(err) || !rejectsRow(err)) throw err
+        if (!(err instanceof CopyRefused) && (isOutage(err) || !rejectsRow(err))) throw err
         skip(message, err) // that row only: its siblings in the message are still worth storing
       }
     }

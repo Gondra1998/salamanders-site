@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { createGalleryStore, POLL_ACTOR } from './galleryStore'
 import { PAGE_SIZE } from './galleryValidate'
 
@@ -538,5 +539,19 @@ describe('values never reach the SQL text', () => {
     await s.markDiscordDeleted(mark)
     expect(log.length).toBeGreaterThan(20)
     for (const { sql } of log) expect(sql).not.toContain('drop table')
+  })
+})
+
+describe('schema.sql gallery_items', () => {
+  // Postgres enforces these on the e2e stack (a fresh database built from schema.sql); here they are pinned
+  // inside the create table, since the table has never been created in production and needs no migration.
+  const sql = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8')
+  const table = /create table if not exists gallery_items \(([\s\S]*?)\r?\n\);/.exec(sql)?.[1] ?? ''
+
+  it.each([
+    ['both Discord ids or neither', "check ((discord_message_id is null) = (discord_attachment_id is null))"],
+    ['Discord ids exactly when the source is discord', "check ((source = 'discord') = (discord_message_id is not null))"],
+  ])('checks %s', (_, check) => {
+    expect(table).toContain(check)
   })
 })

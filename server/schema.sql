@@ -195,7 +195,12 @@ create table if not exists gallery_items (
   review_note            text,
   posted_at              timestamptz not null,
   created_at             timestamptz not null default now(),
-  updated_at             timestamptz not null default now()
+  updated_at             timestamptz not null default now(),
+  -- A polled clip has both Discord ids and a site upload neither, so the partial unique index covers every
+  -- polled row. These live inside create table (not a later alter) because this table has never been created
+  -- in production: no migration is needed. Once it exists, a new check must come as its own alter table.
+  check ((discord_message_id is null) = (discord_attachment_id is null)),
+  check ((source = 'discord') = (discord_message_id is not null))
 );
 
 create index if not exists gallery_items_list_idx on gallery_items (kind, status, id desc);

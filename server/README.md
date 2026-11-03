@@ -110,7 +110,7 @@ Any Discord failure answers 503: the area fails closed.
 Limits: collections `teams`, `cfg`, `archive`; ids match `^[A-Za-z0-9_-]{1,64}$`; a
 document is a JSON object of at most 1 MB with no U+0000 or lone surrogate (Postgres
 `jsonb` cannot store them); a request body is at most 2 MB (the server refuses more than
-4 MB outright); `discordId` is 17 to 20 digits. Document edits and grant changes are
+12 MB outright); `discordId` is 17 to 20 digits. Document edits and grant changes are
 recorded in `deathwatch_doc_history` and `deathwatch_grant_events`, in the same
 transaction as the change.
 
@@ -124,3 +124,81 @@ Until **both** are set every `/deathwatch/*` route answers 503 "not configured".
 ids are supplied at deploy time and never committed. To deploy: set both in `server/.env`,
 apply the schema (idempotent, command in the reports section above) before starting the new
 image, then restart the API. The one-time import of the old site's data is a separate job.
+
+## Reliquarium (`/gallery/*`)
+
+Members-only galleries: gameplay clips polled from a Discord channel, and artwork
+uploaded on the site and approved before anyone sees it. Design:
+`docs/superpowers/specs/2026-11-02-reliquarium-design.md`. Access is the
+XVIIIth Legion role (`REPORTER_ROLE_ID`), or being the guild owner or an
+Administrator. An approver is someone with access who also holds the Reclusiarch,
+Captain, Legion Hierarchy or curator role, or is an Administrator. Roles are asked
+of Discord live. Reads reuse a verdict for 30 seconds; every approve, reject, hide,
+upload and removal checks Discord afresh. Any Discord failure answers 503.
+
+| Who | May |
+|---|---|
+| member | view clips and art, submit art, remove their own items, see their own submissions and why one was rejected |
+| approver | also read the review queue, the poll status and the audit trail; approve, reject (with a reason) and hide anything |
+
+| Endpoint | Who | Notes |
+|---|---|---|
+| `GET /gallery/me` | any signed-in user | `{ access, approver }`; never 403 |
+| `GET /gallery/clips?before=<id>` | member | 24 approved clips, newest first: `{ items, next }`; `next` is the next page's `before`, or null |
+| `GET /gallery/art?before=<id>` | member | the same for art |
+| `GET /gallery/mine` | member | `{ items }`: the caller's own items in every status |
+| `POST /gallery/art` | member | multipart form: `file`, `title`, optional `note`; 201 `{ item }`, pending review |
+| `DELETE /gallery/items/:id` | the item's owner | 204; 404 if not theirs, 409 if already hidden or removed |
+| `GET /gallery/review` | approver | `{ items, sync }`: the pending queue and the clips poll's `lastRunAt`, `lastOkAt`, `lastError` |
+| `POST /gallery/items/:id/approve` | approver | from pending or rejected; `{ item }` |
+| `POST /gallery/items/:id/reject` | approver | JSON `{ reason }`, required; from pending; `{ item }` |
+| `POST /gallery/items/:id/hide` | approver | optional JSON `{ note }`; from pending, approved or rejected; `{ item }` |
+| `GET /gallery/events?before=<id>` | approver | 100 audit rows, newest first: `{ events, next }` |
+
+An item carries `url`: a presigned R2 link valid 15 minutes for a stored file, or the
+Medal / YouTube / Twitch link for an embed. The bucket is private; that link is the
+only way to a file. A move an item's status does not allow answers 409, an unknown id 404.
+
+Limits: an upload is one JPEG, PNG, WebP or GIF of at most 10 MB, checked by its
+bytes, not its name or declared type; a title is 1 to 120 characters and a note at
+most 500; a rejection reason 1 to 500. A JSON body is at most 16 KB. Nothing is ever
+deleted: every change writes a `gallery_events` row in the same transaction, and a
+rejected, hidden or removed item keeps its file in R2.
+
+**The clips channel.** Posting in it is the publish step: the poll (every 2 minutes)
+copies each video or image attachment into R2 and stores it approved, and records
+Medal / YouTube / Twitch links as embeds. Attachments over 100 MB are skipped. Deleting
+the message in Discord removes the clip from the site (the newest 50 are checked every
+pass, all of them hourly); an approver can also hide one. The first pass only notes the
+newest message: clips posted before launch are not imported.
+
+| Variable | Value |
+|---|---|
+| `GALLERY_CHANNEL_ID` | the clips channel id — no default, required |
+| `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | the private bucket and an API token scoped to it alone — no defaults, required; the secret lives in `server/.env` only |
+| `GALLERY_CURATOR_ROLE_ID` | the curator role id — optional. Unset, nobody is curator and the other approver roles still work |
+| `GALLERY_POLL_MS` | how often the poll runs, in ms — optional, default 120000 |
+| `R2_ENDPOINT` | for the e2e stack's mock R2 only; leave unset in production |
+| `REPORTER_ROLE_ID`, `RECLUSIARCH_ROLE_ID` | shared with member reports (see above); default in code |
+
+Until the channel id and all four R2 values are set, every `/gallery/*` route answers 503
+"not configured" and the poll does not start, so the image may ship first.
+
+**Bot permissions, once:** View Channel and Read Message History on the clips channel,
+and the Message Content intent toggle on the bot's page in the Discord Developer Portal
+(without it, messages come back with no attachments or text).
+
+Rollout:
+
+1. Create the private R2 bucket (no public access, no custom domain) and an API token
+   scoped to that bucket alone. Put the R2 values, `GALLERY_CHANNEL_ID` and (if wanted)
+   `GALLERY_CURATOR_ROLE_ID` in `server/.env`.
+2. Apply `schema.sql` (idempotent, command in the reports section above), then start the
+   new API image.
+3. Grant the bot the permissions above. The first pass seeds the cursor; watch the
+   Review tab's poll status for `lastOkAt` and an empty `lastError`.
+4. Merge the site; the Reliquarium nav entry appears for members only.
+5. Back the bucket up: a nightly `rclone sync` of it into the Vulkan share that is
+   already backed up.
+
+The one-time import of the channel's back catalogue is a separate job.

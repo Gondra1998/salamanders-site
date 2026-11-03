@@ -55,6 +55,20 @@ services:
       WATCH_COMMANDER_ROLE_ID: ${WATCH_COMMANDER_ROLE_ID:-}
       # Optional: the Deathwatch Command role (it shows the Watch Command tab). Unset, nobody is Deathwatch Command.
       DEATHWATCH_COMMAND_ROLE_ID: ${DEATHWATCH_COMMAND_ROLE_ID:-}
+      # Reliquarium (members-only art and clips galleries). No defaults anywhere: until the clips channel
+      # and all four R2 values are set, every /gallery route answers 503 and the clips poll does not start.
+      GALLERY_CHANNEL_ID: ${GALLERY_CHANNEL_ID:-}
+      # Optional: the curator role, one more approver. Unset, nobody is curator.
+      GALLERY_CURATOR_ROLE_ID: ${GALLERY_CURATOR_ROLE_ID:-}
+      # Optional: how often the clips channel is polled, in ms. Empty means 120000.
+      GALLERY_POLL_MS: ${GALLERY_POLL_MS:-}
+      # The private R2 bucket and an API token scoped to it alone. The secret is server/.env only.
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      # For the e2e stack's mock R2 only. Leave unset in production: empty means Cloudflare's endpoint.
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
     ports:
       - '8787:8787'
 

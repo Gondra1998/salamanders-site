@@ -145,6 +145,56 @@ describe('parseHideNote', () => {
     expect(Object.keys(parseHideNote({ note: 'n', status: 'approved' }))).toEqual(['note']))
 })
 
+describe('text the database cannot store', () => {
+  const UNSTORABLE = "That text has characters that can't be stored."
+  const NUL = '\u0000'
+  const LONE_HIGH = '\ud83d' // the first half of a pair, on its own
+  const LONE_LOW = '\ude00' // the second half of a pair, on its own
+
+  it('refuses a NUL in the title, the note, the reason and the hide note', () => {
+    expect(parseArtFields({ title: `a${NUL}b` })).toBe(UNSTORABLE)
+    expect(parseArtFields({ title: NUL })).toBe(UNSTORABLE)
+    expect(parseArtFields({ title: 'a', note: `n${NUL}` })).toBe(UNSTORABLE)
+    expect(parseReason({ reason: `too${NUL}dark` })).toBe(UNSTORABLE)
+    expect(parseHideNote({ note: `${NUL}spoilers` })).toBe(UNSTORABLE)
+  })
+
+  it('refuses an unpaired surrogate, high or low, in the title, the note, the reason and the hide note', () => {
+    for (const bad of [LONE_HIGH, LONE_LOW]) {
+      expect(parseArtFields({ title: `a${bad}b` })).toBe(UNSTORABLE)
+      expect(parseArtFields({ title: 'a', note: `n${bad}` })).toBe(UNSTORABLE)
+      expect(parseReason({ reason: `too${bad}dark` })).toBe(UNSTORABLE)
+      expect(parseHideNote({ note: `${bad}spoilers` })).toBe(UNSTORABLE)
+    }
+  })
+
+  it('still accepts a well-formed surrogate pair', () => {
+    expect(parseArtFields({ title: 'Vulkan \u{1f525}', note: '\u{1f409}' })).toEqual({ title: 'Vulkan \u{1f525}', note: '\u{1f409}' })
+    expect(parseReason({ reason: '\u{1f525}' })).toEqual({ reason: '\u{1f525}' })
+    expect(parseHideNote({ note: '\u{1f525}' })).toEqual({ note: '\u{1f525}' })
+  })
+
+  it('reports a length problem before a storability one', () => {
+    expect(parseArtFields({ title: `${NUL}${'x'.repeat(120)}` })).toBe(TITLE_MSG)
+    expect(parseArtFields({ title: 'a', note: `${NUL}${'x'.repeat(500)}` })).toBe(NOTE_MSG)
+    expect(parseReason({ reason: `${NUL}${'x'.repeat(500)}` })).toBe(REASON_MSG)
+    expect(parseHideNote({ note: `${NUL}${'x'.repeat(500)}` })).toBe(NOTE_MSG)
+  })
+
+  it('refuses any title, note, reason or hide note with a NUL or lone surrogate anywhere in it (property)', () => {
+    const plant = fc.tuple(fc.string({ maxLength: 40 }), fc.constantFrom(NUL, LONE_HIGH, LONE_LOW), fc.string({ maxLength: 40 }))
+    fc.assert(
+      fc.property(plant, ([head, bad, tail]) => {
+        const text = `${head}${bad}${tail}`
+        expect(parseArtFields({ title: text })).toBe(UNSTORABLE)
+        expect(parseArtFields({ title: 'a', note: text })).toBe(UNSTORABLE)
+        expect(parseReason({ reason: text })).toBe(UNSTORABLE)
+        expect(parseHideNote({ note: text })).toBe(UNSTORABLE)
+      }),
+    )
+  })
+})
+
 describe('sniffImage', () => {
   it('sniffs JPEG, PNG, WebP and GIF by magic bytes and nothing else', () => {
     expect(sniffImage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...pad]))).toEqual({ ext: 'jpg', contentType: 'image/jpeg' })

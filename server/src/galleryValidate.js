@@ -3,6 +3,9 @@
  * docs/superpowers/specs/2026-11-02-reliquarium-design.md). Pure. Each parse returns clean fields, or an
  * error message string, the way deathwatchValidate.js does. A result holds only the fields that were parsed,
  * never an echo of whatever else the request carried.
+ *
+ * Free text must also be something Postgres can store: it rejects U+0000 and unpaired surrogates, as
+ * deathwatchValidate.js does for its documents.
  */
 export const MAX_ART_BYTES = 10_485_760
 export const PAGE_SIZE = 24
@@ -18,8 +21,12 @@ const MALFORMED = 'Malformed request.'
 const TITLE_MSG = `Give the piece a title (1 to ${TITLE_MAX} characters).`
 const NOTE_MSG = `The note is ${NOTE_MAX} characters at most.`
 const REASON_MSG = `Say why (1 to ${REASON_MAX} characters).`
+const UNSTORABLE = "That text has characters that can't be stored."
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
+/** Postgres text refuses U+0000 and cannot hold an unpaired surrogate; either would turn a pasted character into a 500. */
+const storable = (s) => !s.includes('\u0000') && s.isWellFormed()
 
 /** The trimmed text, '' when the field is absent, or null when it is there but is not text. */
 function optionalText(v) {
@@ -35,6 +42,7 @@ export function parseArtFields(b) {
   const note = optionalText(b.note)
   if (note === null) return MALFORMED
   if (note.length > NOTE_MAX) return NOTE_MSG
+  if (!storable(title) || !storable(note)) return UNSTORABLE
   return { title, note }
 }
 
@@ -43,6 +51,7 @@ export function parseReason(b) {
   if (!isObject(b)) return MALFORMED
   const reason = typeof b.reason === 'string' ? b.reason.trim() : ''
   if (reason.length < 1 || reason.length > REASON_MAX) return REASON_MSG
+  if (!storable(reason)) return UNSTORABLE
   return { reason }
 }
 
@@ -53,6 +62,7 @@ export function parseHideNote(b) {
   const note = optionalText(b.note)
   if (note === null) return MALFORMED
   if (note.length > NOTE_MAX) return NOTE_MSG
+  if (!storable(note)) return UNSTORABLE
   return { note }
 }
 

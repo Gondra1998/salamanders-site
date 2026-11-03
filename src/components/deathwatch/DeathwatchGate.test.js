@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { defineComponent, h, onMounted } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -191,5 +191,58 @@ describe('DeathwatchGate: the server cannot be reached', () => {
     await settle(w)
     expect(getMe).toHaveBeenCalledTimes(2)
     expect(w.find('.page').exists()).toBe(true)
+  })
+})
+
+describe("DeathwatchGate: the cogitator's wake", () => {
+  // matchMedia stands for a real browser (jsdom has none, so the other tests see no wake); `reduce` for its setting.
+  const motion = (reduce) => vi.stubGlobal('matchMedia', (q) => ({ matches: reduce && q.includes('reduce') }))
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('runs its checks over the page, ends on the real answer, and fades once', async () => {
+    motion(false)
+    vi.useFakeTimers()
+    storeMember()
+    getMe.mockResolvedValue({ access: true, watchCommander: true })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:rest(.*)*', component: { template: '<div />' } }] })
+    router.push(PAGE)
+    await router.isReady()
+    const w = mount(DeathwatchGate, { slots: { default: () => h(Probe) }, global: { plugins: [pinia, router] } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(w.find('.dwb').exists()).toBe(true)
+    expect(w.find('.page').exists()).toBe(true) // the page is already behind it
+    expect(w.find('.dwb-big').text()).toBe('Waking the machine spirit_')
+
+    await vi.advanceTimersByTimeAsync(1000 + 4 * 500) // the vox log, four rites (1–3 s)
+    expect(w.find('.dwb-ident b').text()).toBe('invented')
+    expect(w.findAll('.dwb-log li.on')).toHaveLength(5)
+    expect(w.findAll('.dwb-log li').at(-1).text()).toContain('granted')
+
+    await vi.advanceTimersByTimeAsync(700) // hold (to 3.7 s)
+    expect(w.find('.dwb-big').text()).toBe('The gate is open')
+    expect(w.find('.dwb-small').text()).toBe('Welcome to the Vigil')
+    await vi.advanceTimersByTimeAsync(1900 + 400) // open to 5.6 s, then a short fade (six seconds in all)
+    expect(w.find('.dwb').exists()).toBe(false)
+  })
+
+  it('steps aside at once when not cleared', async () => {
+    motion(false)
+    storeMember()
+    getMe.mockResolvedValue({ access: false, watchCommander: false })
+    const w = await mountGate()
+    expect(w.find('.dwb').exists()).toBe(false)
+    expect(w.text()).toContain('Your clearance is not on record.')
+  })
+
+  it('never plays with reduced motion', async () => {
+    storeMember()
+    getMe.mockResolvedValue({ access: true, watchCommander: false })
+    motion(true)
+    expect((await mountGate()).find('.dwb').exists()).toBe(false)
   })
 })

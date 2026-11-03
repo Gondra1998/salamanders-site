@@ -43,12 +43,49 @@ describe('DeathwatchBanner', () => {
   })
 
   it('signs you in, and brings you back to /deathwatch, when you are signed out', () => {
+    vi.stubEnv('VITE_DEATHWATCH_FIXTURE', '') // as in production, whatever .env.local says
     const { w, push } = mountBanner()
     const e = click(w)
     expect(auth.signIn).toHaveBeenCalledTimes(1)
     expect(auth.signIn).toHaveBeenCalledWith({ returnTo: '/deathwatch' })
     expect(push).not.toHaveBeenCalled()
     expect(e.defaultPrevented).toBe(true)
+    vi.unstubAllEnvs()
+  })
+
+  it("dims into the cogitator's scan lines first, then goes in", async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('matchMedia', () => ({ matches: false }))
+    auth.signedIn = true
+    const { w, push } = mountBanner()
+    click(w)
+    await w.vm.$nextTick()
+    expect(document.querySelector('.dw-dim')).not.toBeNull()
+    expect(push).not.toHaveBeenCalled()
+    click(w) // a second click while it dims changes nothing
+    vi.advanceTimersByTime(650)
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith('/deathwatch')
+    w.unmount()
+    vi.useRealTimers()
+  })
+
+  it('goes in at once with reduced motion', () => {
+    vi.stubGlobal('matchMedia', (q) => ({ matches: q.includes('reduce') }))
+    auth.signedIn = true
+    const { w, push } = mountBanner()
+    click(w)
+    expect(push).toHaveBeenCalledWith('/deathwatch')
+    expect(document.querySelector('.dw-dim')).toBeNull()
+  })
+
+  it('in dev with the Deathwatch fixture, goes straight in without signing in', () => {
+    vi.stubEnv('VITE_DEATHWATCH_FIXTURE', '1')
+    const { w, push } = mountBanner()
+    click(w)
+    expect(push).toHaveBeenCalledWith('/deathwatch')
+    expect(auth.signIn).not.toHaveBeenCalled()
+    vi.unstubAllEnvs()
   })
 
   it('takes you to /deathwatch through the router when you are signed in', () => {

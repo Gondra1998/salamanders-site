@@ -192,7 +192,7 @@ describe('download', () => {
   })
 
   // The poll skips a refused link for good but retries the others next pass (Ruling 23), so the two must differ.
-  it.each([400, 403, 404, 410])('a %i is DownloadRefused: that link will never work', async (status) => {
+  it.each([400, 403, 404, 410, 415])('a %i is DownloadRefused: that link will never work', async (status) => {
     const err = await make(fakeFetch({ status, raw: 'gone' })).discord.download(CDN).catch((e) => e)
     expect(err).toBeInstanceOf(DownloadRefused)
     expect(err).toBeInstanceOf(Upstream)
@@ -200,6 +200,9 @@ describe('download', () => {
   })
 
   it.each([
+    ['a 401', { status: 401, raw: 'no' }],
+    ['a 405', { status: 405, raw: 'no' }],
+    ['a 408', { status: 408, raw: 'slow' }],
     ['a 429', { status: 429, raw: 'slow down' }],
     ['a 500', { status: 500, raw: 'oops' }],
     ['a 503', { status: 503, raw: 'down' }],

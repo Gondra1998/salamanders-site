@@ -239,6 +239,18 @@ describe('put', () => {
     expect(err.message).not.toContain(SETTINGS.secretAccessKey)
   })
 
+  it.each([
+    [401, 'R2 refused the credentials (401).'],
+    [403, 'R2 refused the credentials (403).'],
+    [400, 'R2 refused the upload (400).'],
+    [503, 'R2 refused the upload (503).'],
+  ])('names a %i as %j, with no key, secret or bucket in it', async (status, message) => {
+    const { r2 } = make({ response: () => new Response('<Error/>', { status }) })
+    const err = await r2.put('k', new Uint8Array(1), { contentType: 'image/png', contentLength: 1 }).catch((e) => e)
+    expect(err.message).toBe(message)
+    for (const value of Object.values(SETTINGS)) expect(err.message).not.toContain(value)
+  })
+
   it('throws R2Error with status 0 when R2 is unreachable, dropping the original error', async () => {
     const { r2 } = make({
       fetchImpl: async () => {

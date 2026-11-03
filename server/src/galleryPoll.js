@@ -9,9 +9,10 @@
  * why and the next pass retries. A message the parser cannot read, or a row the store refuses, is
  * skipped and named in last_error, so one bad message cannot hold the cursor back for ever.
  * So is an attachment that can never be copied as things stand (Ruling 23): the CDN refused its link
- * (DownloadRefused, a 4xx), R2 refused the object (a 4xx other than 429), or the copy ran out its own
- * deadline. A network error, a 5xx or a 429 is an outage like any other. An attachment already held is
- * not downloaded again.
+ * (DownloadRefused: 400, 403, 404, 410, 415), R2 refused this object (400, 411, 412, 413, 415, 422), or the
+ * copy ran out its own deadline. Anything else is an outage like any other: a network error, a 5xx, a 429,
+ * a 408, and an R2 401/403/404 above all (bad or rotated credentials, a missing bucket), which would
+ * otherwise skip every clip. An attachment already held is not downloaded again.
  * runOnce never rejects; two passes never overlap.
  */
 import { parseMessage } from './galleryParse.js'
@@ -27,8 +28,10 @@ const SWEEP_PAGE = 100
 const ROW_SQLSTATE = /^2[23][0-9A-Z]{3}$/
 
 const isOutage = (err) => err instanceof Upstream || err instanceof R2Error
-// R2 refusing this object for good (a size mismatch, say), as against R2 down or rate limiting.
-const r2Refused = (err) => err instanceof R2Error && err.status >= 400 && err.status < 500 && err.status !== 429
+// R2 refusing this object for good (a size mismatch, say). Not 401/403/404: those are the account or the
+// bucket, true of every clip, so they end the pass like R2 being down.
+const R2_OBJECT_REFUSED = new Set([400, 411, 412, 413, 415, 422])
+const r2Refused = (err) => err instanceof R2Error && R2_OBJECT_REFUSED.has(err.status)
 const rejectsRow = (err) => err instanceof TypeError || ROW_SQLSTATE.test(err?.code)
 // For logs and last_error: short, and with any link (a signed CDN one, say) cut out.
 const describe = (err) => `${err?.name ?? 'Error'}: ${String(err?.message ?? '').replace(/https?:\/\/\S*/g, '[link]')}`.slice(0, 200)

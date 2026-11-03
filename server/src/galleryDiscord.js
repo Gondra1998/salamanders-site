@@ -11,13 +11,16 @@
  *
  * A 429 on a bot call waits Retry-After seconds (at most 30) and retries once; a second 429 is Upstream.
  * Every failure is Upstream, whose message names a status at most: never the token, a url or a CDN link.
- * A download the CDN answers with a 4xx other than 429 (a stripped attachment, an expired link) is the
- * subclass DownloadRefused: that link will never work, unlike a network error, a 429 or a 5xx.
+ * A download the CDN answers with 400, 403, 404, 410 or 415 is the subclass DownloadRefused: that link
+ * will never work (Discord answers 403 for a stripped or expired signed link). Anything else (a network
+ * error, a 401, 408, 429 or 5xx) is a plain Upstream: the next pass tries again.
  */
 import { Upstream } from './discordRoles.js'
 
-/** The CDN refused this one link for good (a 4xx other than 429). Still an Upstream to any caller that only knows that. */
+/** The CDN refused this one link for good. Still an Upstream to any caller that only knows that. */
 export class DownloadRefused extends Upstream {}
+
+const LINK_REFUSED = new Set([400, 403, 404, 410, 415])
 
 const MAX_RETRY_AFTER_S = 30
 const UNKNOWN_MESSAGE = 10008 // Discord's JSON error code for a message that does not exist
@@ -91,8 +94,7 @@ export function createGalleryDiscord({
       const res = await request(url, { signal })
       if (res.status !== 200) {
         await res.body?.cancel()
-        const refused = res.status >= 400 && res.status < 500 && res.status !== 429
-        throw new (refused ? DownloadRefused : Upstream)(`Discord's CDN answered ${res.status}.`)
+        throw new (LINK_REFUSED.has(res.status) ? DownloadRefused : Upstream)(`Discord's CDN answered ${res.status}.`)
       }
       return {
         body: res.body,

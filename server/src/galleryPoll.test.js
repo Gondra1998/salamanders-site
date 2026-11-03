@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createGalleryPoll } from './galleryPoll'
 import { createGalleryDiscord, DownloadRefused } from './galleryDiscord'
 import { Upstream } from './discordRoles'
-import { R2Error } from './r2'
+import { R2Error, createR2 } from './r2'
 import { POLL_ACTOR } from './galleryStore'
 import { MAX_CLIP_BYTES } from './galleryParse'
 
@@ -412,7 +412,7 @@ describe('an attachment that cannot be copied (Ruling 23)', () => {
     expect(store.sync).toMatchObject({ last_message_id: id(0), last_ok_at: null, last_run_at: iso(T0), last_error: error })
   }
 
-  it.each([403, 404, 410])('a CDN %i skips that row: its siblings are stored and the cursor advances', async (status) => {
+  it.each([400, 403, 404, 410, 415])('a CDN %i skips that row: its siblings are stored and the cursor advances', async (status) => {
     const { poll, store, discord, r2, log } = setup({ cursor: id(0), channel: channel() })
     failOne(discord, cdn(status))
     await poll.runOnce()
@@ -425,6 +425,8 @@ describe('an attachment that cannot be copied (Ruling 23)', () => {
     [500, "Discord's CDN answered 500."],
     [503, "Discord's CDN answered 503."],
     [429, "Discord's CDN answered 429."],
+    [401, "Discord's CDN answered 401."],
+    [408, "Discord's CDN answered 408."],
   ])('a CDN %i ends the pass and leaves the cursor, as before', async (status, error) => {
     const { poll, store, discord } = setup({ cursor: id(0), channel: channel() })
     failOne(discord, cdn(status))
@@ -439,7 +441,7 @@ describe('an attachment that cannot be copied (Ruling 23)', () => {
     expectOutage(store, 'Discord is unreachable.')
   })
 
-  it.each([400, 403, 413])('R2 answering %i skips that row and goes on', async (status) => {
+  it.each([400, 411, 412, 413, 415, 422])('R2 answering %i skips that row and goes on', async (status) => {
     const { poll, store, r2, log } = setup({ cursor: id(0), channel: channel() })
     failPut(r2, new R2Error(`R2 refused the upload (${status}).`, status))
     await poll.runOnce()
@@ -451,12 +453,27 @@ describe('an attachment that cannot be copied (Ruling 23)', () => {
     [503, 'R2 refused the upload (503).'],
     [500, 'R2 refused the upload (500).'],
     [429, 'R2 refused the upload (429).'],
+    [408, 'R2 refused the upload (408).'],
+    [404, 'R2 refused the upload (404).'],
     [0, 'R2 is unreachable.'],
   ])('R2 answering %i ends the pass and leaves the cursor', async (status, error) => {
     const { poll, store, r2 } = setup({ cursor: id(0), channel: channel() })
     failPut(r2, new R2Error(error, status))
     await poll.runOnce()
     expectOutage(store, error)
+  })
+
+  // Bad or rotated credentials are true of every clip: skipping past them would lose clips silently.
+  it.each([401, 403])('R2 answering %i (the credentials) ends the pass and leaves the cursor', async (status) => {
+    const secrets = { accountId: 'acct-sentinel', bucket: 'bucket-sentinel', accessKeyId: 'key-sentinel', secretAccessKey: 'secret-sentinel' }
+    const real = createR2({ ...secrets, fetchImpl: async () => new Response('<Error>AccessDenied</Error>', { status }) })
+    const { poll, store, r2, log } = setup({ cursor: id(0), channel: channel() })
+    r2.put = real.put
+    await poll.runOnce()
+    expect(store.items).toEqual([])
+    expect(store.syncCalls.some((p) => 'last_message_id' in p)).toBe(false)
+    expect(store.sync).toMatchObject({ last_message_id: id(0), last_ok_at: null, last_error: `R2 refused the credentials (${status}).` })
+    for (const text of [store.sync.last_error, ...log.mock.calls.map(([line]) => line)]) expect(text).not.toMatch(/sentinel/)
   })
 
   // The row's own deadline: whatever the download or the upload throws once it has fired.

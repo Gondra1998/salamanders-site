@@ -126,7 +126,9 @@ export function createR2({ accountId, bucket, accessKeyId, secretAccessKey, endp
     }
     // Let go of the reply (an empty body or an XML error) so the connection is freed; it is never surfaced.
     await res.body?.cancel()
-    if (!res.ok) throw new R2Error(`R2 refused the upload (${res.status}).`, res.status)
+    // A 401 or 403 is the token (wrong, rotated or out of scope), not this object: say so, without any value.
+    const what = res.status === 401 || res.status === 403 ? 'R2 refused the credentials' : 'R2 refused the upload'
+    if (!res.ok) throw new R2Error(`${what} (${res.status}).`, res.status)
   }
 
   function presignGet(key, { expiresSec = 900 } = {}) {

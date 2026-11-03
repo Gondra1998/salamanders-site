@@ -52,17 +52,28 @@ export function createGalleryStore(pool) {
 
   /**
    * Move an item from one of the `from` statuses to `to`, with its event. With `owner`, only that author's item
-   * moves. → { item }, 'conflict' (the item is there, in a status that cannot make this move) or 'missing'
+   * moves. With `review` (the default) the reviewer columns record `actor` and `note`; an owner's own removal is
+   * not a review, so it passes `review: false` and leaves them alone (the event names who did it).
+   * → { item }, 'conflict' (the item is there, in a status that cannot make this move) or 'missing'
    * (no item with this id, or, with `owner`, none of theirs: the caller does not learn which).
    */
-  const move = (id, { from, to, action, actor, note }, owner = null) =>
+  const move = (id, { from, to, action, actor, note }, { owner = null, review = true } = {}) =>
     inTx(async (q) => {
-      const params = [id, from, to, actor.id, actor.username, note ?? null]
-      if (owner) params.push(owner)
+      const params = [id, from, to]
+      let set = 'status = $3'
+      if (review) {
+        params.push(actor.id, actor.username, note ?? null)
+        set += ', reviewed_by = $4, reviewed_by_username = $5, review_note = $6'
+      }
+      let byOwner = ''
+      if (owner) {
+        params.push(owner)
+        byOwner = ` and author_discord_id = $${params.length}`
+      }
       const { rows } = await q.query(
         `update gallery_items
-            set status = $3, reviewed_by = $4, reviewed_by_username = $5, review_note = $6, updated_at = now()
-          where id = $1 and status = any($2::text[])${owner ? ' and author_discord_id = $7' : ''}
+            set ${set}, updated_at = now()
+          where id = $1 and status = any($2::text[])${byOwner}
           returning *`,
         params,
       )
@@ -135,7 +146,7 @@ export function createGalleryStore(pool) {
 
     /** A member takes down their own piece. → { item } | 'missing' | 'conflict' (see move). */
     removeByOwner: (id, user) =>
-      move(id, { from: OWNER_REMOVABLE, to: 'removed', action: 'removed', actor: user, note: null }, user.id),
+      move(id, { from: OWNER_REMOVABLE, to: 'removed', action: 'removed', actor: user }, { owner: user.id, review: false }),
 
     /** One page of a gallery, newest first. → { rows, next }: next is the cursor for `before`, or null on the last page. */
     async list({ kind, before = null }) {

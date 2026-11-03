@@ -153,6 +153,7 @@ describe('transition', () => {
     expect(sqls()).toEqual(['begin', has('update gallery_items'), has('insert into gallery_events'), 'commit'])
     expect(log[1].sql).toContain('where id = $1 and status = any($2::text[])')
     expect(log[1].sql).toContain('returning *')
+    expect(log[1].sql).toContain('reviewed_by = $4, reviewed_by_username = $5, review_note = $6')
     expect(log[1].params).toEqual(['9', ['pending'], 'approved', REVIEWER.id, REVIEWER.username, null])
     expect(log[2].params).toEqual(['9', 'approved', REVIEWER.id, REVIEWER.username, ''])
   })
@@ -201,9 +202,17 @@ describe('removeByOwner', () => {
     const { pool, log, sqls } = fakePool([['update gallery_items', [item]]])
     expect(await store(pool).removeByOwner('9', OWNER)).toEqual({ item })
     expect(sqls()).toEqual(['begin', has('update gallery_items'), has('insert into gallery_events'), 'commit'])
-    expect(log[1].sql).toContain('where id = $1 and status = any($2::text[]) and author_discord_id = $7')
-    expect(log[1].params).toEqual(['9', ['pending', 'approved', 'rejected'], 'removed', OWNER.id, OWNER.username, null, OWNER.id])
+    expect(log[1].sql).toContain('where id = $1 and status = any($2::text[]) and author_discord_id = $4')
+    expect(log[1].params).toEqual(['9', ['pending', 'approved', 'rejected'], 'removed', OWNER.id])
     expect(log[2].params).toEqual(['9', 'removed', OWNER.id, OWNER.username, ''])
+  })
+
+  it('leaves the reviewer columns alone, since an owner removing their own piece is not a review', async () => {
+    const { pool, log } = fakePool([['update gallery_items', [{ id: '9' }]]])
+    await store(pool).removeByOwner('9', OWNER)
+    expect(log[1].sql).toContain("set status = $3, updated_at = now()")
+    expect(log[1].sql).not.toContain('reviewed_by')
+    expect(log[1].sql).not.toContain('review_note')
   })
 
   it("answers 'missing' when there is no such item or it is someone else's, without saying which", async () => {

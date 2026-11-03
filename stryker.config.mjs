@@ -43,6 +43,7 @@ export default {
     'server/src/r2.js',
     'server/src/galleryAccess.js',
     'server/src/galleryHandler.js',
+    'src/lib/gallery/embed.js',
   ],
   coverageAnalysis: 'perTest',
   thresholds: { high: 100, low: 100, break: 100 },

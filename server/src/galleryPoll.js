@@ -39,6 +39,9 @@ export function createGalleryPoll({
   now = Date.now,
   log = console.error,
 }) {
+  for (const [name, ms] of Object.entries({ intervalMs, sweepMs, uploadTimeoutMs })) {
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) throw new TypeError(`${name} must be a finite number of milliseconds above 0`)
+  }
   let running = false
   let timer = null
   let lastSweepAt = null // in memory: a restart just sweeps sooner
@@ -75,7 +78,7 @@ export function createGalleryPoll({
         await storeRow(row)
       } catch (err) {
         if (isOutage(err) || !rejectsRow(err)) throw err
-        return skip(message, err)
+        skip(message, err) // that row only: its siblings in the message are still worth storing
       }
     }
   }
@@ -122,9 +125,10 @@ export function createGalleryPoll({
   // First run: start from the newest message, storing nothing (launch onward only). An empty channel
   // starts from the beginning, '0', so its first clip is copied rather than taken for history.
   async function seed() {
-    const [newest] = await discord.messagesAfter(channelId, null, 1)
+    const batch = await discord.messagesAfter(channelId, null, 1)
+    if (batch.length && typeof batch[0]?.id !== 'string') throw new TypeError('The newest clips message has no id.')
     const at = stamp()
-    await store.setSync(channelId, { last_message_id: newest?.id ?? '0', last_run_at: at, last_ok_at: at, last_error: null })
+    await store.setSync(channelId, { last_message_id: batch.length ? batch[0].id : '0', last_run_at: at, last_ok_at: at, last_error: null })
   }
 
   async function pass() {

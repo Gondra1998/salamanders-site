@@ -158,6 +158,25 @@ describe('copying the channel', () => {
     expect(store.sync.last_message_id).toBe(id(1))
   })
 
+  it.each([
+    ['no id', { content: '' }],
+    ['a number id', { id: 200000000000000301 }],
+  ])('a seed message with %s is a failed pass, not a cursor of 0', async (_, odd) => {
+    const discord = fakeDiscord()
+    discord.messagesAfter = async () => [odd]
+    const { poll, store } = setup({ discord })
+    await expect(poll.runOnce()).resolves.toBeUndefined()
+    expect(store.sync).toMatchObject({ last_message_id: null, last_ok_at: null, last_run_at: iso(T0) })
+    expect(store.sync.last_error).toBe('The clips poll failed (TypeError).')
+  })
+
+  it.each(['intervalMs', 'sweepMs', 'uploadTimeoutMs'])('refuses a %s that is not a finite number above 0', (name) => {
+    for (const bad of [0, -1, Infinity, NaN, '120000', null]) {
+      expect(() => setup({ [name]: bad })).toThrow(TypeError)
+    }
+    expect(() => setup({ [name]: 1 })).not.toThrow()
+  })
+
   it('copies each attachment to r2 under clips/<msg>/<att>.<ext> before inserting, status approved, event stored', async () => {
     const two = message(2, { attachments: [video(2), video(3, { content_type: 'image/png', size: 5 })], content: 'two shots' })
     const { poll, discord, r2, store, order } = setup({ cursor: id(0), channel: [clip(1), two] })
@@ -290,7 +309,7 @@ describe('a message that cannot be stored (Ruling 4)', () => {
     ['a guard', new TypeError('attachmentId must be a non-empty string')],
     ['a constraint', Object.assign(new Error('null value in column violates not-null constraint'), { code: '23502' })],
     ['a data error', Object.assign(new Error('value too long for type'), { code: '22001' })],
-  ])('the store rejecting a row with %s skips that message and goes on', async (_, err) => {
+  ])('the store rejecting a row with %s skips that row and goes on', async (_, err) => {
     const { poll, store } = setup({ cursor: id(0), channel: [clip(1), clip(2)] })
     const insert = store.insertDiscordItem
     store.insertDiscordItem = async (row, actor) => {
@@ -300,6 +319,20 @@ describe('a message that cannot be stored (Ruling 4)', () => {
     await poll.runOnce()
     expect(store.items.map((it) => it.messageId)).toEqual([id(2)])
     expect(store.sync).toMatchObject({ last_message_id: id(2), last_ok_at: iso(T0) })
+    expect(store.sync.last_error).toContain(`Skipped clips message ${id(1)}`)
+  })
+
+  it('a refused attachment does not lose its storable siblings in the same message', async () => {
+    const three = message(1, { attachments: [video(1), video(2), video(3)] })
+    const { poll, store } = setup({ cursor: id(0), channel: [three] })
+    const insert = store.insertDiscordItem
+    store.insertDiscordItem = async (row, actor) => {
+      if (row.attachmentId === attId(2)) throw Object.assign(new Error('value too long for type'), { code: '22001' })
+      return insert(row, actor)
+    }
+    await poll.runOnce()
+    expect(store.items.map((it) => it.attachmentId)).toEqual([attId(1), attId(3)])
+    expect(store.sync).toMatchObject({ last_message_id: id(1), last_ok_at: iso(T0) })
     expect(store.sync.last_error).toContain(`Skipped clips message ${id(1)}`)
   })
 

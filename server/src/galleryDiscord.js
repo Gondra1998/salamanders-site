@@ -4,7 +4,7 @@
  *
  * messagesAfter(channelId, afterId | null, limit) → message[] oldest-first (Discord answers newest-first).
  * newest(channelId, limit) → message[] as Discord gives them, newest-first.
- * exists(channelId, messageId) → true (200) | false (404).
+ * exists(channelId, messageId) → true (200) | false (404 Unknown Message, code 10008; any other 404 is Upstream).
  * download(url, { signal }?) → { body, contentLength, contentType }; no auth header (the CDN link is
  *   signed in its query). The caller's signal, when given, replaces the default timeout, so one
  *   deadline can cover the download and the upload it is streamed into.
@@ -15,6 +15,7 @@
 import { Upstream } from './discordRoles.js'
 
 const MAX_RETRY_AFTER_S = 30
+const UNKNOWN_MESSAGE = 10008 // Discord's JSON error code for a message that does not exist
 
 export function createGalleryDiscord({
   fetchImpl = fetch,
@@ -73,9 +74,11 @@ export function createGalleryDiscord({
 
     async exists(channelId, messageId) {
       const res = await bot(`/v10/channels/${channelId}/messages/${messageId}`)
-      await res.body?.cancel()
+      const body = await res.json().catch(() => null)
       if (res.status === 200) return true
-      if (res.status === 404) return false
+      // Only Unknown Message means the message is gone; any other 404 (Unknown Channel, say) would
+      // otherwise remove every clip in one sweep.
+      if (res.status === 404 && body?.code === UNKNOWN_MESSAGE) return false
       throw new Upstream(`Discord answered ${res.status} for a clips message.`)
     },
 

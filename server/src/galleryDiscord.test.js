@@ -89,17 +89,23 @@ describe('newest', () => {
 
 describe('exists', () => {
   it.each([
-    [200, true],
-    [404, false],
-  ])('a %i is %s', async (status, expected) => {
-    const f = fakeFetch({ status, body: {} })
+    ['a 200', { status: 200, body: { id: '200000000000000301' } }, true],
+    ['a 404 Unknown Message (10008)', { status: 404, body: { code: 10008, message: 'Unknown Message' } }, false],
+  ])('%s is %s', async (_, reply, expected) => {
+    const f = fakeFetch(reply)
     const { discord } = make(f)
     expect(await discord.exists(CHANNEL, '200000000000000301')).toBe(expected)
     expect(f.seen[0].url).toBe(`${API}/v10/channels/${CHANNEL}/messages/200000000000000301`)
   })
 
-  it('throws Upstream on anything else', async () => {
-    const { discord } = make(fakeFetch({ status: 500, body: {} }))
+  // Only a gone message is "gone": a gone or unreadable channel must not mark every clip removed.
+  it.each([
+    ['a 404 Unknown Channel (10003)', { status: 404, body: { code: 10003, message: 'Unknown Channel' } }],
+    ['a 404 with no JSON', { status: 404, raw: 'Not Found' }],
+    ['a 404 with an empty body', { status: 404, body: {} }],
+    ['a 500', { status: 500, body: {} }],
+  ])('throws Upstream on %s', async (_, reply) => {
+    const { discord } = make(fakeFetch(reply))
     await expect(discord.exists(CHANNEL, '200000000000000301')).rejects.toBeInstanceOf(Upstream)
   })
 })
@@ -115,7 +121,7 @@ describe('a 429', () => {
   })
 
   it('waits no more than 30 seconds', async () => {
-    const f = fakeFetch({ status: 429, headers: { 'Retry-After': '3600' } }, { status: 404, body: {} })
+    const f = fakeFetch({ status: 429, headers: { 'Retry-After': '3600' } }, { status: 404, body: { code: 10008 } })
     const { discord, slept } = make(f)
     expect(await discord.exists(CHANNEL, '200000000000000301')).toBe(false)
     expect(slept).toEqual([30_000])

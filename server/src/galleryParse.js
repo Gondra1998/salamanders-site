@@ -64,7 +64,8 @@ export function embedOf(url) {
       if (u.pathname === '/watch') return youtube(u.searchParams.get('v'))
       return seg[0] === 'shorts' ? youtube(seg[1]) : null
     case 'clips.twitch.tv':
-      return twitch(seg[0])
+      // Twitch's own player link names the clip in its query: clips.twitch.tv/embed?clip=SLUG.
+      return twitch(seg[0] === 'embed' ? u.searchParams.get('clip') : seg[0])
     case 'twitch.tv':
       return seg[1] === 'clip' ? twitch(seg[2]) : null
     case 'medal.tv':

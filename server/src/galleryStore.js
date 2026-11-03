@@ -18,6 +18,14 @@ const OWNER_REMOVABLE = ['pending', 'approved', 'rejected']
 const SYNC_COLUMNS = ['last_message_id', 'last_run_at', 'last_ok_at', 'last_error']
 const LIVE_CLIPS = "where kind = 'clip' and source = 'discord' and status = 'approved'"
 
+/**
+ * A guard for the values a statement's match depends on: a null or empty one would fall out of a predicate
+ * (an owner check) or out of a unique index (a null column never conflicts), so refuse before any query.
+ */
+function needId(value, what) {
+  if (typeof value !== 'string' || value === '') throw new TypeError(`${what} must be a non-empty string`)
+}
+
 /** The first `size` rows, and where the next page starts when `rows` held one more than that. */
 function paged(rows, size) {
   if (rows.length <= size) return { rows, next: null }
@@ -91,9 +99,13 @@ export function createGalleryStore(pool) {
     /**
      * A clip the poll found, stored approved. `row` is a parsed Candidate plus r2Key, contentType and bytes
      * (all null for an embed). → { id }, or 'exists' when the message and attachment are already held.
+     * A TypeError, before any query, unless both Discord ids are non-empty strings: a null attachment id
+     * would slip past the unique index and a re-poll would store the clip again.
      */
-    insertDiscordItem: (row, actor) =>
-      inTx(async (q) => {
+    insertDiscordItem: async (row, actor) => {
+      needId(row.messageId, 'messageId')
+      needId(row.attachmentId, 'attachmentId')
+      return inTx(async (q) => {
         const { rows } = await q.query(
           `insert into gallery_items
              (kind, source, status, discord_message_id, discord_attachment_id, author_discord_id, author_username,
@@ -119,7 +131,8 @@ export function createGalleryStore(pool) {
         const id = String(rows[0].id)
         await event(q, id, 'stored', actor, '')
         return { id }
-      }),
+      })
+    },
 
     /**
      * A member's upload, pending review. The key names the new id, so the row goes in with an empty key and
@@ -144,9 +157,15 @@ export function createGalleryStore(pool) {
     /** → { item } | 'missing' | 'conflict' (see move). `from` lists the statuses the item may be in now. */
     transition: (id, opts) => move(id, opts),
 
-    /** A member takes down their own piece. → { item } | 'missing' | 'conflict' (see move). */
-    removeByOwner: (id, user) =>
-      move(id, { from: OWNER_REMOVABLE, to: 'removed', action: 'removed', actor: user }, { owner: user.id, review: false }),
+    /**
+     * A member takes down their own piece. → { item } | 'missing' | 'conflict' (see move). A TypeError, before
+     * any query, unless the user has a non-empty id: move would otherwise drop the owner check and let
+     * anyone's piece be removed.
+     */
+    removeByOwner: async (id, user) => {
+      needId(user?.id, 'user.id')
+      return move(id, { from: OWNER_REMOVABLE, to: 'removed', action: 'removed', actor: user }, { owner: user.id, review: false })
+    },
 
     /** One page of a gallery, newest first. → { rows, next }: next is the cursor for `before`, or null on the last page. */
     async list({ kind, before = null }) {
@@ -195,12 +214,17 @@ export function createGalleryStore(pool) {
       return rows[0] ?? null
     },
 
-    /** Upsert the given columns only (a null clears one, e.g. last_error). Any other key is a TypeError. */
+    /**
+     * Upsert the given columns only (a null clears one, e.g. last_error). Any other key, an empty patch, or an
+     * undefined value is a TypeError: pg would send undefined as null and clear the cursor.
+     */
     async setSync(channelId, patch) {
       const keys = Object.keys(patch)
       const bad = keys.find((k) => !SYNC_COLUMNS.includes(k))
       if (bad !== undefined) throw new TypeError(`setSync: not a gallery_sync column: ${bad}`)
       if (!keys.length) throw new TypeError('setSync: nothing to set')
+      const unset = keys.find((k) => patch[k] === undefined)
+      if (unset !== undefined) throw new TypeError(`setSync: ${unset} is undefined (use null to clear it)`)
       await pool.query(
         `insert into gallery_sync (channel_id, ${keys.join(', ')}) values ($1, ${keys.map((_, i) => `$${i + 2}`).join(', ')})
          on conflict (channel_id) do update set ${keys.map((k) => `${k} = excluded.${k}`).join(', ')}`,

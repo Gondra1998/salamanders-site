@@ -97,6 +97,20 @@ describe('insertDiscordItem', () => {
     ])
   })
 
+  it.each([
+    ['messageId', null],
+    ['messageId', undefined],
+    ['messageId', ''],
+    ['messageId', 300000000000000010],
+    ['attachmentId', null],
+    ['attachmentId', undefined],
+    ['attachmentId', ''],
+  ])('refuses a %s of %j before any query, since a null id would escape the unique index', async (field, value) => {
+    const { pool, log } = fakePool()
+    await expect(store(pool).insertDiscordItem({ ...clip, [field]: value }, POLL_ACTOR)).rejects.toThrow(TypeError)
+    expect(log).toEqual([])
+  })
+
   it("skips a message and attachment it already holds: 'exists', and no event", async () => {
     const { pool, log, sqls } = fakePool([['insert into gallery_items', []]])
     expect(await store(pool).insertDiscordItem(clip, POLL_ACTOR)).toBe('exists')
@@ -213,6 +227,19 @@ describe('removeByOwner', () => {
     expect(log[1].sql).toContain("set status = $3, updated_at = now()")
     expect(log[1].sql).not.toContain('reviewed_by')
     expect(log[1].sql).not.toContain('review_note')
+  })
+
+  it.each([
+    ['no id', { username: 'Artist' }],
+    ['an undefined id', { id: undefined, username: 'Artist' }],
+    ['a null id', { id: null, username: 'Artist' }],
+    ['an empty id', { id: '', username: 'Artist' }],
+    ['a numeric id', { id: 300000000000000002, username: 'Artist' }],
+    ['no user at all', undefined],
+  ])('refuses a user with %s before any query, so the owner check can never be dropped', async (_name, user) => {
+    const { pool, log } = fakePool([['update gallery_items', [{ id: '9' }]]])
+    await expect(store(pool).removeByOwner('9', user)).rejects.toThrow(TypeError)
+    expect(log).toEqual([])
   })
 
   it("answers 'missing' when there is no such item or it is someone else's, without saying which", async () => {
@@ -351,6 +378,15 @@ describe('sync', () => {
     await expect(store(pool).setSync(CHANNEL, { channel_id: 'x' })).rejects.toThrow(TypeError)
     expect(log).toEqual([])
   })
+
+  it.each(['last_message_id', 'last_run_at', 'last_ok_at', 'last_error'])(
+    'setSync refuses an undefined %s, which pg would send as null and so clear it',
+    async (column) => {
+      const { pool, log } = fakePool()
+      await expect(store(pool).setSync(CHANNEL, { last_ok_at: 'a', [column]: undefined })).rejects.toThrow(TypeError)
+      expect(log).toEqual([])
+    },
+  )
 
   it('setSync refuses an empty patch', async () => {
     const { pool, log } = fakePool()

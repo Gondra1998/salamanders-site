@@ -9,8 +9,8 @@
  * before those checks, and no error message echoes what was sent. Responses are never cached.
  *
  * Media is served by link only: a presigned R2 GET (15 minutes) for a stored file, the embed URL for an
- * embed. An upload's bytes reach R2 only after the size, magic bytes, title and note all pass; if R2 then
- * refuses them the new row is removed, so a reviewer never sees a piece with no file.
+ * embed. An upload's bytes reach R2 only after the size, magic bytes, title and note all pass. A piece is
+ * pending while its file uploads; a failed upload removes it.
  */
 import { Upstream } from './discordRoles.js'
 import { COMMUNITY_MEMBER } from './displayNames.js'
@@ -30,7 +30,9 @@ const BAD_CURSOR = 'That page cursor is not valid.'
 const MALFORMED = 'Malformed request.'
 
 function send(status, text) {
-  return new Response(text, { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+  // A reply with no body (204) names no content type.
+  const type = text === null ? {} : { 'Content-Type': 'application/json' }
+  return new Response(text, { status, headers: { ...type, 'Cache-Control': 'no-store' } })
 }
 const reply = (status, body) => send(status, JSON.stringify(body))
 
@@ -116,7 +118,9 @@ export function createGalleryHandler({ access, store, r2, poll, displayNames, co
     try {
       await r2.put(r2Key, bytes, { contentType: type.contentType, contentLength: bytes.length, signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS) })
     } catch {
-      await store.transition(id, { from: ['pending'], to: 'removed', action: 'removed', actor: verdict.user, note: 'upload failed' })
+      // An approver may have approved it while the file was uploading: it goes either way.
+      const cleanup = await store.transition(id, { from: ['pending', 'approved'], to: 'removed', action: 'removed', actor: verdict.user, note: 'upload failed' })
+      if (!cleanup.item) console.error(`Reliquarium: art item ${id} could not be removed after its upload failed.`)
       return reply(502, { error: 'The file could not be stored. Try again.' })
     }
     const row = {

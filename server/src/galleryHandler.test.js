@@ -423,8 +423,38 @@ describe('POST /gallery/art', () => {
     expect(res.headers.get('Cache-Control')).toBe('no-store')
     expect(await res.json()).toEqual({ error: 'The file could not be stored. Try again.' })
     const id = [...ctx.store.items.keys()][0]
-    expect(ctx.store.transition).toHaveBeenCalledWith(id, { from: ['pending'], to: 'removed', action: 'removed', actor: MEMBER, note: 'upload failed' })
+    expect(ctx.store.transition).toHaveBeenCalledWith(id, { from: ['pending', 'approved'], to: 'removed', action: 'removed', actor: MEMBER, note: 'upload failed' })
     expect(ctx.store.items.get(id).status).toBe('removed')
+  })
+
+  it('removes the item even if an approver approved it while the file was uploading', async () => {
+    const ctx = setup()
+    ctx.r2.put.mockImplementationOnce(async (key) => {
+      ctx.store.items.get(key.split('/')[1].split('.')[0]).status = 'approved'
+      throw new Error('R2 is unreachable.')
+    })
+    const res = await upload(ctx, {})
+    expect(res.status).toBe(502)
+    const id = [...ctx.store.items.keys()][0]
+    expect(ctx.store.items.get(id).status).toBe('removed')
+  })
+
+  it('still answers 502, and logs the item id alone, when the cleanup cannot remove the item', async () => {
+    const ctx = setup()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      ctx.r2.put.mockRejectedValueOnce(new Error('R2 is unreachable.'))
+      ctx.store.transition.mockResolvedValueOnce('conflict')
+      const res = await upload(ctx, {})
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: 'The file could not be stored. Try again.' })
+      const id = [...ctx.store.items.keys()][0]
+      expect(log).toHaveBeenCalledTimes(1)
+      expect(log.mock.calls[0].join(' ')).toContain(id)
+      expect(log.mock.calls[0].join(' ')).not.toContain('Salamander')
+    } finally {
+      log.mockRestore()
+    }
   })
 
   it.each([
@@ -522,6 +552,7 @@ describe('DELETE /gallery/items/:id', () => {
     const res = await call(ctx, req('DELETE', `/gallery/items/${id}`, { who: 'member' }))
     expect(res.status).toBe(204)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
+    expect(res.headers.has('Content-Type')).toBe(false)
     expect(await res.text()).toBe('')
     expect(ctx.store.removeByOwner).toHaveBeenCalledWith(id, MEMBER)
     expect(ctx.store.items.get(id).status).toBe('removed')

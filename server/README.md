@@ -157,7 +157,7 @@ upload and removal checks Discord afresh. Any Discord failure answers 503.
 
 An item carries `url`: a presigned R2 link valid 15 minutes for a stored file, or the
 Medal / YouTube / Twitch link for an embed. The bucket is private; that link is the
-only way to a file. A move an item's status does not allow answers 409, an unknown id 404.
+only way to a file. A status change the item does not allow answers 409, an unknown id 404.
 
 Limits: an upload is one JPEG, PNG, WebP or GIF of at most 10 MB, checked by its
 bytes, not its name or declared type; a title is 1 to 120 characters and a note at

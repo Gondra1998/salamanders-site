@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { galleryItem, artItem } from '../../test-utils/galleryItem'
@@ -232,11 +232,13 @@ describe('GalleryGrid: full size', () => {
   it('opens a picture in the lightbox and closes it again', async () => {
     gallery.$patch({ art: { items: [artItem('9', { title: 'Dusk' })], next: null, loading: false } })
     const w = await mountGrid('art')
-    expect(w.find('[role="dialog"]').exists()).toBe(false)
+    // the dialog is teleported to <body>, above the navigation, so it is looked for on the document
+    const dialog = () => document.body.querySelector('[role="dialog"]')
+    expect(dialog()).toBeNull()
     await w.find('.rq-card img').trigger('click')
-    expect(w.find('[role="dialog"]').exists()).toBe(true)
-    expect(w.find('[role="dialog"]').text()).toContain('Dusk')
-    await w.find('[role="dialog"] button').trigger('click')
-    expect(w.find('[role="dialog"]').exists()).toBe(false)
+    expect(dialog()).not.toBeNull()
+    expect(dialog().textContent).toContain('Dusk')
+    await new DOMWrapper(dialog().querySelector('button')).trigger('click')
+    expect(dialog()).toBeNull()
   })
 })

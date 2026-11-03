@@ -46,7 +46,13 @@ const more = () => fill(() => gallery.moreEvents(auth.token))
 
 <template>
   <section class="rq-events">
-    <button type="button" class="btn-ghost btn-sm rq-events-toggle" :aria-expanded="open ? 'true' : 'false'" aria-controls="rq-events-body" @click="toggle">
+    <button
+      type="button"
+      class="btn-ghost btn-sm rq-events-toggle"
+      :aria-expanded="open ? 'true' : 'false'"
+      :aria-controls="open ? 'rq-events-body' : undefined"
+      @click="toggle"
+    >
       Recent activity
     </button>
     <div v-if="open" id="rq-events-body" class="rq-events-body">

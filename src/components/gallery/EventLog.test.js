@@ -59,6 +59,28 @@ describe('EventLog: before it is opened', () => {
   })
 })
 
+describe('EventLog: what the button controls', () => {
+  // aria-controls must point at something that exists: it is there only while the body is rendered.
+  it('has no aria-controls while it is shut, and points at the body once it is open', async () => {
+    listEvents.mockResolvedValue({ events: [event(1)], next: null })
+    const w = mountLog()
+    expect(toggle(w).attributes('aria-controls')).toBeUndefined()
+    await open(w)
+    const id = toggle(w).attributes('aria-controls')
+    expect(id).toBeTruthy()
+    expect(w.find(`#${id}`).exists()).toBe(true)
+  })
+
+  it('takes aria-controls away again when it is closed', async () => {
+    listEvents.mockResolvedValue({ events: [event(1)], next: null })
+    const w = mountLog()
+    await open(w)
+    await toggle(w).trigger('click')
+    expect(toggle(w).attributes('aria-controls')).toBeUndefined()
+    expect(w.find('.rq-events-body').exists()).toBe(false)
+  })
+})
+
 describe('EventLog: opening', () => {
   it('loads the newest page, with the token, the first time it is opened', async () => {
     listEvents.mockResolvedValue({ events: [event(2), event(1)], next: null })

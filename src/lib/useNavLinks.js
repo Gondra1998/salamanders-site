@@ -24,6 +24,7 @@ export function useNavLinks() {
           ...BASE_LINKS,
           { to: '/accolades', label: 'Accolades', section: true },
           { to: '/ranks', label: 'Ranks', section: true },
+          { to: '/reliquarium', label: 'Reliquarium', section: true },
           { to: '/reports', label: 'Reports', section: true },
         ]
       : [...BASE_LINKS]

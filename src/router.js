@@ -46,6 +46,14 @@ const routes = [
     component: () => import('./views/ReportsReview.vue'),
     meta: { title: 'Report Review' },
   },
+  // The members' galleries of clips and art. The tab is part of the address so a tab can be linked; the page
+  // itself falls back to Clips for a tab the person may not see.
+  {
+    path: '/reliquarium/:tab(clips|art|submit|mine|review)?',
+    name: 'reliquarium',
+    component: () => import('./views/Reliquarium.vue'),
+    meta: { title: 'Reliquarium' },
+  },
   {
     path: '/history',
     name: 'history',

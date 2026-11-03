@@ -101,3 +101,30 @@ describe('the Deathwatch routes', () => {
     }
   })
 })
+
+describe('the Reliquarium route', () => {
+  it.each([
+    ['/reliquarium', undefined],
+    ['/reliquarium/clips', 'clips'],
+    ['/reliquarium/art', 'art'],
+    ['/reliquarium/submit', 'submit'],
+    ['/reliquarium/mine', 'mine'],
+    ['/reliquarium/review', 'review'],
+  ])('takes %s, with the tab %s', (path, tab) => {
+    const route = router.resolve(path)
+    expect(route.name).toBe('reliquarium')
+    expect(route.params.tab).toBe(tab)
+    expect(route.meta.title).toBe('Reliquarium')
+  })
+
+  it('sends any other tab to the not-found page', () => {
+    expect(router.resolve('/reliquarium/gallery').name).toBe('not-found')
+    expect(router.resolve('/reliquarium/clips/extra').name).toBe('not-found')
+  })
+
+  it('loads the page on demand, so it is a chunk of its own and not part of the first load', () => {
+    const route = router.getRoutes().find((r) => r.name === 'reliquarium')
+    expect(route.components.default).toBeTypeOf('function')
+    expect(route.components.default.length).toBe(0)
+  })
+})

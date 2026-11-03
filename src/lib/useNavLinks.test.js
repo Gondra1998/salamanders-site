@@ -19,12 +19,33 @@ describe('useNavLinks', () => {
     expect(labels(useNavLinks())).toEqual(['Home', 'Perk Builder', 'Armoury', 'Builds', 'Companies'])
   })
 
-  it('also gives a member Accolades, Ranks and Reports, in order', () => {
+  it('also gives a member Accolades, Ranks, the Reliquarium and Reports, in order', () => {
     state.auth.member = { isMember: true }
     const links = useNavLinks()
-    expect(labels(links)).toEqual(['Home', 'Perk Builder', 'Armoury', 'Builds', 'Companies', 'Accolades', 'Ranks', 'Reports'])
+    expect(labels(links)).toEqual([
+      'Home',
+      'Perk Builder',
+      'Armoury',
+      'Builds',
+      'Companies',
+      'Accolades',
+      'Ranks',
+      'Reliquarium',
+      'Reports',
+    ])
     expect(links.value.find((l) => l.label === 'Reports')).toEqual({ to: '/reports', label: 'Reports', section: true })
+    expect(links.value.find((l) => l.label === 'Reliquarium')).toEqual({ to: '/reliquarium', label: 'Reliquarium', section: true })
     expect(links.value.find((l) => l.label === 'Home').section).toBeUndefined()
+  })
+
+  it('shows the Reliquarium to a member and to nobody else', () => {
+    for (const member of [null, { isMember: false }]) {
+      state.auth.member = member
+      expect(labels(useNavLinks())).not.toContain('Reliquarium')
+    }
+    state.auth.member = null
+    state.corrections.privileges = { historyViewer: true }
+    expect(labels(useNavLinks())).not.toContain('Reliquarium')
   })
 
   it('has no Roster link for anyone: the roster lives on Companies now', () => {

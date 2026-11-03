@@ -411,6 +411,33 @@ describe.each([
   })
 })
 
+describe('gallery store: a list that does not exist', () => {
+  it.each([['mine'], ['review'], ['status'], ['error'], ['constructor'], ['__proto__'], ['toString'], [''], [undefined], [null], [7]])(
+    'more() and refresh() throw a TypeError for %j before touching anything',
+    async (kind) => {
+      s.$patch({ mine: [item(1)], error: 'earlier' })
+      const before = JSON.parse(JSON.stringify(s.$state))
+      const message = `There is no "${String(kind)}" gallery list.`
+      const more = await s.more(kind, 'tok').catch((e) => e)
+      const refresh = await s.refresh(kind, 'tok').catch((e) => e)
+      for (const err of [more, refresh]) {
+        expect(err).toBeInstanceOf(TypeError)
+        expect(err.message).toBe(message)
+      }
+      expect(JSON.parse(JSON.stringify(s.$state))).toEqual(before)
+      expect(listClips).not.toHaveBeenCalled()
+      expect(listArt).not.toHaveBeenCalled()
+    },
+  )
+
+  it('does not let a refused kind disturb the lists that do exist', async () => {
+    await expect(s.refresh('mine', 'tok')).rejects.toBeInstanceOf(TypeError)
+    listClips.mockResolvedValue({ items: [item(1)], next: null })
+    await s.refresh('clips', 'tok')
+    expect(s.clips.items).toEqual([item(1)])
+  })
+})
+
 describe('gallery store: my items and the review queue', () => {
   it('loadMine() fills my items', async () => {
     listMine.mockResolvedValue({ items: [item(5, { status: 'pending' }), item(4)] })
@@ -444,6 +471,56 @@ describe('gallery store: my items and the review queue', () => {
     expect(s.error).toBe('Only approvers can do that.')
     expect(s.mine).toEqual([item(1)])
     expect(s.review.items).toEqual([item(2)])
+  })
+
+  describe('an answer that lands after reset()', () => {
+    it.each([
+      ['loadMine', 'mine', () => s.loadMine('tok'), listMine, { items: [item(1)] }],
+      ['loadReview', 'review', () => s.loadReview('tok'), listReview, { items: [item(2)], sync: { lastRunAt: 'x', lastOkAt: 'y', lastError: null } }],
+    ])('%s() leaves the cleared store as it is', async (_name, _slice, call, api, reply) => {
+      const d = deferred()
+      api.mockReturnValue(d.promise)
+      const p = call()
+      s.reset()
+      d.resolve(reply)
+      await p
+      expect(s.$state).toEqual(INITIAL)
+    })
+
+    it.each([
+      ['loadMine', () => s.loadMine('tok'), listMine],
+      ['loadReview', () => s.loadReview('tok'), listReview],
+    ])('%s() drops a failure that lands then: no error left behind, nothing thrown', async (_name, call, api) => {
+      const d = deferred()
+      api.mockReturnValue(d.promise)
+      const p = call()
+      s.reset()
+      d.reject(apiError(503, 'Discord is not answering.'))
+      await expect(p).resolves.toBeUndefined()
+      expect(s.$state).toEqual(INITIAL)
+    })
+
+    it('loadMine() still lands when only another list action came after it', async () => {
+      const d = deferred()
+      listMine.mockReturnValue(d.promise)
+      listReview.mockResolvedValue({ items: [], sync: null })
+      const p = s.loadMine('tok')
+      await s.loadReview('tok')
+      d.resolve({ items: [item(1)] })
+      await p
+      expect(s.mine).toEqual([item(1)])
+    })
+
+    it('is dropped as well when a new load() has started, since the clearance is being checked again', async () => {
+      const d = deferred()
+      listMine.mockReturnValue(d.promise)
+      getMe.mockResolvedValue({ access: true, approver: false })
+      const p = s.loadMine('tok')
+      await s.load('tok')
+      d.resolve({ items: [item(1)] })
+      await p
+      expect(s.mine).toEqual([])
+    })
   })
 
   it('clears an earlier error when the next action starts', async () => {

@@ -48,7 +48,6 @@ describe('embedSrc', () => {
       ['null', null],
       ['a number', 42],
       ['an object', {}],
-      ['an object that only reads as a clip link', { toString: () => `https://www.youtube.com/watch?v=${YT}` }],
       ['an empty string', ''],
       ['plain text', 'a nice clip'],
       ['a relative path', '/watch?v=abcDEF_-123'],

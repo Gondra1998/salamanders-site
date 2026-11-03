@@ -5,7 +5,8 @@ import * as api from '../lib/gallery/api'
 // they are an approver, and the lists the pages fill. It only decides what to show; the server enforces every read
 // and write again. Statuses: idle, checking, allowed, denied, signin, unavailable.
 // One counter for every load() and reset(): a load's answer lands only if no later load() or reset() has started
-// since, so a slow response can never bring back a state the user has already left (sign-out resets).
+// since, so a slow response can never bring back a state the user has already left (sign-out resets). The answers
+// of loadMine() and loadReview() obey it too.
 let seq = 0
 // The same for each list: reset() and refresh() start a new generation of it, and a page asked for under an
 // older one is dropped (answer or failure), so it cannot land in a list that was emptied or started again.
@@ -31,19 +32,36 @@ function dropItem(store, id) {
   store.art.items = store.art.items.filter((i) => i.id !== id)
 }
 
+const STALE = Symbol('stale')
+
+// → what `ask` answers, or STALE if `now()` (a counter of load()s and reset()s, or of one list's generations) moved
+// while it was asked for. A failure that arrives then is dropped too, not thrown.
+async function unlessStale(now, ask) {
+  const then = now()
+  try {
+    const got = await ask()
+    return then === now() ? got : STALE
+  } catch (err) {
+    if (then === now()) throw err
+    return STALE
+  }
+}
+
 // → { items, next } for one page of a list, or null if the list has moved on while it was asked for. Stops the
 // list's loading flag, unless a newer refresh() owns it now.
 async function fetchPage(store, kind, token, before) {
-  const mine = gen[kind]
+  const then = gen[kind]
   try {
-    const { items, next } = await PAGE[kind](token, before)
-    return mine === gen[kind] ? { items, next: next ?? null } : null
-  } catch (err) {
-    if (mine === gen[kind]) throw err
-    return null
+    const got = await unlessStale(() => gen[kind], () => PAGE[kind](token, before))
+    return got === STALE ? null : { items: got.items, next: got.next ?? null }
   } finally {
-    if (mine === gen[kind]) store[kind].loading = false
+    if (then === gen[kind]) store[kind].loading = false
   }
+}
+
+// The lists are clips and art; anything else (mine, review, a typo) is the caller's mistake, found before any state is touched.
+function checkKind(kind) {
+  if (!Object.hasOwn(PAGE, kind)) throw new TypeError(`There is no "${String(kind)}" gallery list.`)
 }
 
 // Runs one action: the message of a failure is kept in `error` for the page to show, and the failure goes on to the caller.
@@ -85,9 +103,10 @@ export const useGallery = defineStore('gallery', {
       this.$patch(initial())
     },
 
-    refresh(kind, token) {
+    async refresh(kind, token) {
+      checkKind(kind)
       gen[kind]++
-      return attempt(this, async () => {
+      await attempt(this, async () => {
         this.$patch({ [kind]: { items: [], next: null, loading: true } })
         const page = await fetchPage(this, kind, token, null)
         if (page) this.$patch({ [kind]: page })
@@ -95,6 +114,7 @@ export const useGallery = defineStore('gallery', {
     },
 
     async more(kind, token) {
+      checkKind(kind)
       const list = this[kind]
       // No cursor means the end of the list: asking without one would fetch the first page again.
       if (list.loading || list.next === null) return
@@ -110,14 +130,15 @@ export const useGallery = defineStore('gallery', {
 
     loadMine(token) {
       return attempt(this, async () => {
-        this.mine = (await api.listMine(token)).items
+        const got = await unlessStale(() => seq, () => api.listMine(token))
+        if (got !== STALE) this.mine = got.items
       })
     },
 
     loadReview(token) {
       return attempt(this, async () => {
-        const { items, sync } = await api.listReview(token)
-        this.review = { items, sync: sync ?? null }
+        const got = await unlessStale(() => seq, () => api.listReview(token))
+        if (got !== STALE) this.review = { items: got.items, sync: got.sync ?? null }
       })
     },
 

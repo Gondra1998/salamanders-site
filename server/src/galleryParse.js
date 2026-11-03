@@ -38,13 +38,15 @@ const MEDAL_PATH = /^\/(?:games\/[^/]+\/)?clips?\/([^/]+)/
 const valid = (re, s) => typeof s === 'string' && re.test(s)
 
 const youtube = (id) =>
-  valid(YOUTUBE_ID, id) ? { host: 'youtube', canonical: `https://www.youtube.com/watch?v=${id}` } : null
-const twitch = (slug) => (valid(SLUG, slug) ? { host: 'twitch', canonical: `https://clips.twitch.tv/${slug}` } : null)
-const medal = (id) => (valid(SLUG, id) ? { host: 'medal', canonical: `https://medal.tv/clips/${id}` } : null)
+  valid(YOUTUBE_ID, id) ? { host: 'youtube', id, canonical: `https://www.youtube.com/watch?v=${id}` } : null
+const twitch = (id) => (valid(SLUG, id) ? { host: 'twitch', id, canonical: `https://clips.twitch.tv/${id}` } : null)
+const medal = (id) => (valid(SLUG, id) ? { host: 'medal', id, canonical: `https://medal.tv/clips/${id}` } : null)
 
 /**
- * → { host: 'youtube' | 'twitch' | 'medal', canonical } for a link to a clip on one of those
- * sites, else null. Never throws: whatever `new URL` refuses is null.
+ * → { host: 'youtube' | 'twitch' | 'medal', id, canonical } for a link to a clip on one of those
+ * sites, else null; `id` is the clip's id or slug as the site names it, already checked to be only
+ * letters, digits, `_` and `-`. Never throws: whatever `new URL` refuses is null. The site shares this
+ * (src/lib/gallery/embed.js) so the page and the poll recognise exactly the same links.
  */
 export function embedOf(url) {
   let u
@@ -116,6 +118,7 @@ export function parseMessage(message) {
   }
 
   const seen = new Set()
+  // Stryker disable next-line ArrayDeclaration: a stray element is not a clip link, so embedOf drops it
   for (const link of content.match(LINK) ?? []) {
     const hit = embedOf(link.replace(LINK_TAIL, ''))
     if (hit && !seen.has(hit.canonical)) {

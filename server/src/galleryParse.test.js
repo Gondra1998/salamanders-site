@@ -354,10 +354,23 @@ describe('parseMessage fields', () => {
 })
 
 describe('embedOf', () => {
-  it('names the host and the canonical url', () => {
-    expect(embedOf(`https://youtu.be/${YT}`)).toEqual({ host: 'youtube', canonical: YT_CANON })
-    expect(embedOf(`https://clips.twitch.tv/${SLUG}`)).toEqual({ host: 'twitch', canonical: TW_CANON })
-    expect(embedOf(`https://medal.tv/clips/${MEDAL}`)).toEqual({ host: 'medal', canonical: MEDAL_CANON })
+  it('names the host, the id and the canonical url', () => {
+    expect(embedOf(`https://youtu.be/${YT}`)).toEqual({ host: 'youtube', id: YT, canonical: YT_CANON })
+    expect(embedOf(`https://clips.twitch.tv/${SLUG}`)).toEqual({ host: 'twitch', id: SLUG, canonical: TW_CANON })
+    expect(embedOf(`https://medal.tv/clips/${MEDAL}`)).toEqual({ host: 'medal', id: MEDAL, canonical: MEDAL_CANON })
+  })
+
+  it.each([
+    ['youtu.be/ID', `https://youtu.be/${YT}?t=42`, 'youtube', YT],
+    ['youtube.com/watch?v=ID', `https://m.youtube.com/watch?v=${YT}&t=3`, 'youtube', YT],
+    ['youtube.com/shorts/ID', `https://youtube.com/shorts/${YT}`, 'youtube', YT],
+    ['clips.twitch.tv/SLUG', `https://clips.twitch.tv/${SLUG}?filter=clips`, 'twitch', SLUG],
+    ['twitch.tv/chan/clip/SLUG', `https://www.twitch.tv/some_chan/clip/${SLUG}`, 'twitch', SLUG],
+    ['medal.tv/clips/ID', `https://medal.tv/clips/${MEDAL}`, 'medal', MEDAL],
+    ['medal.tv/clip/ID', `https://medal.tv/clip/${MEDAL}`, 'medal', MEDAL],
+    ['medal.tv/games/g/clips/ID/x', `https://medal.tv/games/halo/clips/${MEDAL}/d1337abc`, 'medal', MEDAL],
+  ])('names the id in %s alone', (_, url, host, id) => {
+    expect(embedOf(url)).toMatchObject({ host, id })
   })
 
   it('matches the host case-insensitively and strips www and m', () => {

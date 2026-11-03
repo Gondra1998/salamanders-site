@@ -124,12 +124,46 @@ describe('GalleryCard: Hide', () => {
     expect(card(galleryItem('30'), { canHide: true }).find('.rq-hide').exists()).toBe(true)
   })
 
-  it('asks to hide the item by its id', async () => {
+  // Hiding takes the item away from everyone and cannot be undone from the page, so it asks first, in the card.
+  const answer = (w, text) => w.findAll('button').find((b) => b.text() === text)
+
+  it('asks "Hide for everyone?" first, and hides nothing yet', async () => {
     const w = card(galleryItem('31'), { canHide: true })
     const hide = w.find('.rq-hide')
     expect(hide.text()).toBe('Hide')
     await hide.trigger('click')
-    expect(w.emitted('hide')).toEqual([['31']])
+    expect(w.text()).toContain('Hide for everyone?')
+    expect(answer(w, 'Yes')).toBeTruthy()
+    expect(answer(w, 'No')).toBeTruthy()
+    expect(w.find('.rq-hide').exists()).toBe(false)
+    expect(w.emitted('hide')).toBeUndefined()
+  })
+
+  it('goes back to the Hide button on No, with nothing emitted', async () => {
+    const w = card(galleryItem('32'), { canHide: true })
+    await w.find('.rq-hide').trigger('click')
+    await answer(w, 'No').trigger('click')
+    expect(w.text()).not.toContain('Hide for everyone?')
+    expect(w.find('.rq-hide').exists()).toBe(true)
+    expect(w.emitted('hide')).toBeUndefined()
+  })
+
+  it('asks to hide the item by its id, once, on Yes, and closes the question', async () => {
+    const w = card(galleryItem('33'), { canHide: true })
+    await w.find('.rq-hide').trigger('click')
+    await answer(w, 'Yes').trigger('click')
+    expect(w.emitted('hide')).toEqual([['33']])
+    expect(w.text()).not.toContain('Hide for everyone?')
+    expect(w.find('.rq-hide').exists()).toBe(true)
+  })
+
+  it('asks again each time, not once for good', async () => {
+    const w = card(galleryItem('34'), { canHide: true })
+    await w.find('.rq-hide').trigger('click')
+    await answer(w, 'No').trigger('click')
+    await w.find('.rq-hide').trigger('click')
+    await answer(w, 'Yes').trigger('click')
+    expect(w.emitted('hide')).toHaveLength(1)
   })
 })
 

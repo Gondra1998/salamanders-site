@@ -9,7 +9,7 @@ import { forgetReloads } from '../../lib/gallery/reloadOnce'
 const state = vi.hoisted(() => ({ auth: null }))
 vi.mock('../../stores/auth', () => ({ useAuth: () => state.auth }))
 vi.mock('../../lib/gallery/api')
-import { listReview, approve, reject } from '../../lib/gallery/api'
+import { listReview, listEvents, approve, reject } from '../../lib/gallery/api'
 import ReviewQueue from './ReviewQueue.vue'
 
 const apiError = (status, message = 'nope') => Object.assign(new Error(message), { status })
@@ -93,6 +93,29 @@ describe('ReviewQueue: the queue', () => {
     listReview.mockClear()
     await entries(w)[0].find('img').trigger('error')
     expect(listReview).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ReviewQueue: recent activity', () => {
+  const logged = { id: '9', itemId: '1', action: 'approved', actor: { id: '2', username: 'invented' }, note: '', createdAt: '2026-11-01T08:00:00.000Z' }
+
+  it('has a "Recent activity" button under the queue that loads nothing until it is tapped', async () => {
+    const w = await queueWith()
+    expect(w.find('.rq-events-toggle').text()).toBe('Recent activity')
+    expect(listEvents).not.toHaveBeenCalled()
+    expect(w.findAll('.rq-event')).toHaveLength(0)
+
+    listEvents.mockResolvedValue({ events: [logged], next: null })
+    await w.find('.rq-events-toggle').trigger('click')
+    await flushPromises()
+    expect(listEvents).toHaveBeenCalledWith('tok', null)
+    expect(w.findAll('.rq-event')).toHaveLength(1)
+  })
+
+  it('is there when the queue is empty too', async () => {
+    const w = await queueWith([])
+    expect(w.text()).toContain('Nothing waiting for review.')
+    expect(w.find('.rq-events-toggle').exists()).toBe(true)
   })
 })
 

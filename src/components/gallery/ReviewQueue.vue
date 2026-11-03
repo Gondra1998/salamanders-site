@@ -6,6 +6,7 @@ import { computed, onMounted, shallowRef } from 'vue'
 import { useAuth } from '../../stores/auth'
 import { useGallery } from '../../stores/gallery'
 import { useActionError } from '../../lib/gallery/useActionError'
+import EventLog from './EventLog.vue'
 import GalleryCard from './GalleryCard.vue'
 import Lightbox from './Lightbox.vue'
 
@@ -78,6 +79,8 @@ async function confirmReject(id) {
       </li>
     </ul>
     <p v-else-if="!error" class="rq-muted">Nothing waiting for review.</p>
+
+    <EventLog />
 
     <Lightbox v-if="viewing" :item="viewing" @close="viewing = null" />
   </div>

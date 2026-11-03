@@ -138,6 +138,22 @@ describe('GalleryGrid: Load more', () => {
 
 describe('GalleryGrid: Hide', () => {
   const hideButtons = (w) => w.findAll('.rq-hide')
+  // Hide asks "Hide for everyone?" in the card; this taps Hide on the first card and then Yes.
+  const hideFirst = async (w) => {
+    await hideButtons(w)[0].trigger('click')
+    await cards(w)[0].findAll('button').find((b) => b.text() === 'Yes').trigger('click')
+  }
+
+  it('hides nothing until the question is answered Yes', async () => {
+    gallery.$patch({ clips: { items: clips('1', '2'), next: null, loading: false }, approver: true })
+    const w = await mountGrid()
+    await hideButtons(w)[0].trigger('click')
+    expect(hide).not.toHaveBeenCalled()
+    await cards(w)[0].findAll('button').find((b) => b.text() === 'No').trigger('click')
+    await flushPromises()
+    expect(hide).not.toHaveBeenCalled()
+    expect(cards(w)).toHaveLength(2)
+  })
 
   it('is on the cards of an approver only', async () => {
     gallery.$patch({ clips: { items: clips('1', '2'), next: null, loading: false }, approver: false })
@@ -151,7 +167,7 @@ describe('GalleryGrid: Hide', () => {
     hide.mockResolvedValue({ item: {} })
     listReview.mockResolvedValue({ items: [], sync: null })
     const w = await mountGrid()
-    await hideButtons(w)[0].trigger('click')
+    await hideFirst(w)
     await flushPromises()
     expect(hide).toHaveBeenCalledWith('1', '', 'tok')
     expect(cards(w)).toHaveLength(1)
@@ -163,7 +179,7 @@ describe('GalleryGrid: Hide', () => {
     hide.mockResolvedValue({ item: {} })
     listReview.mockRejectedValue(apiError(503, 'The Reliquarium could not be reached.'))
     const w = await mountGrid()
-    await hideButtons(w)[0].trigger('click')
+    await hideFirst(w)
     await flushPromises()
     expect(cards(w)).toHaveLength(1)
     expect(w.find('[role="alert"]').text()).toBe("The change was saved, but the list couldn't be refreshed.")
@@ -173,7 +189,7 @@ describe('GalleryGrid: Hide', () => {
     gallery.$patch({ clips: { items: clips('1', '2'), next: null, loading: false }, approver: true })
     hide.mockRejectedValue(apiError(409, 'That item has already been decided.'))
     const w = await mountGrid()
-    await hideButtons(w)[0].trigger('click')
+    await hideFirst(w)
     await flushPromises()
     expect(cards(w)).toHaveLength(2)
     expect(w.find('[role="alert"]').text()).toBe('That item has already been decided.')
@@ -183,12 +199,12 @@ describe('GalleryGrid: Hide', () => {
     gallery.$patch({ clips: { items: clips('1', '2'), next: null, loading: false }, approver: true })
     hide.mockRejectedValueOnce(apiError(500, 'Try again.'))
     const w = await mountGrid()
-    await hideButtons(w)[0].trigger('click')
+    await hideFirst(w)
     await flushPromises()
     expect(w.find('[role="alert"]').exists()).toBe(true)
     hide.mockResolvedValue({ item: {} })
     listReview.mockResolvedValue({ items: [], sync: null })
-    await hideButtons(w)[0].trigger('click')
+    await hideFirst(w)
     await flushPromises()
     expect(w.find('[role="alert"]').exists()).toBe(false)
   })

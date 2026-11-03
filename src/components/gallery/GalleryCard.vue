@@ -23,6 +23,13 @@ const link = computed(() => (/^https?:\/\//i.test(props.item.url) ? props.item.u
 
 const playing = shallowRef(false)
 const failed = shallowRef(false)
+// Hiding takes the item away from everyone and cannot be undone from the page, so it asks first, in the card.
+const confirming = shallowRef(false)
+
+function hide() {
+  confirming.value = false
+  emit('hide', props.item.id)
+}
 
 const isImage = computed(() => props.item.media === 'image')
 const alt = computed(() => props.item.title || 'Artwork')
@@ -83,15 +90,22 @@ const onLoaded = () => loaded(props.item.id)
           {{ item.author?.name }} · <time :datetime="item.postedAt">{{ date }}</time>
         </p>
       </div>
-      <button
-        v-if="canHide"
-        type="button"
-        class="btn-ghost btn-sm rq-hide"
-        :aria-label="`Hide ${item.title || 'this item'}`"
-        @click="emit('hide', item.id)"
-      >
-        Hide
-      </button>
+      <template v-if="canHide">
+        <div v-if="confirming" class="rq-confirm">
+          <span class="rq-ask">Hide for everyone?</span>
+          <button type="button" class="btn-ember btn-sm" @click="hide">Yes</button>
+          <button type="button" class="btn-ghost btn-sm" @click="confirming = false">No</button>
+        </div>
+        <button
+          v-else
+          type="button"
+          class="btn-ghost btn-sm rq-hide"
+          :aria-label="`Hide ${item.title || 'this item'}`"
+          @click="confirming = true"
+        >
+          Hide
+        </button>
+      </template>
     </div>
   </article>
 </template>

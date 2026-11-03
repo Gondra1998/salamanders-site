@@ -21,6 +21,8 @@ const initial = () => ({
   art: { items: [], next: null, loading: false },
   mine: [],
   review: { items: [], sync: null },
+  // The audit log for approvers, newest first, a page at a time: `next` is the cursor of the following page.
+  events: { items: [], next: null },
   error: '',
 })
 
@@ -139,6 +141,28 @@ export const useGallery = defineStore('gallery', {
       return attempt(this, async () => {
         const got = await unlessStale(() => seq, () => api.listReview(token))
         if (got !== STALE) this.review = { items: got.items, sync: got.sync ?? null }
+      })
+    },
+
+    /** Approvers only. The newest page of the audit log, replacing what was held. */
+    loadEvents(token) {
+      return attempt(this, async () => {
+        const got = await unlessStale(() => seq, () => api.listEvents(token, null))
+        if (got !== STALE) this.events = { items: got.events, next: got.next ?? null }
+      })
+    },
+
+    /** The page of the audit log after the one held. Its answer lands only if the log has not moved on meanwhile. */
+    async moreEvents(token) {
+      const cursor = this.events.next
+      // No cursor means the end of the log: asking without one would fetch the first page again.
+      if (cursor === null) return
+      await attempt(this, async () => {
+        const got = await unlessStale(() => seq, () => api.listEvents(token, cursor))
+        // The same page asked for twice, or a fresh first page that landed first, would add it a second time.
+        if (got === STALE || this.events.next !== cursor) return
+        this.events.items.push(...got.events)
+        this.events.next = got.next ?? null
       })
     },
 

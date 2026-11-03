@@ -10,7 +10,7 @@ import { forgetReloads } from '../lib/gallery/reloadOnce'
 const state = vi.hoisted(() => ({ auth: null }))
 vi.mock('../stores/auth', () => ({ useAuth: () => state.auth }))
 vi.mock('../lib/gallery/api')
-import { getMe, listClips, listArt, listMine, listReview } from '../lib/gallery/api'
+import { getMe, listClips, listArt, listMine, listReview, listEvents } from '../lib/gallery/api'
 import { useGallery } from '../stores/gallery'
 import Reliquarium from './Reliquarium.vue'
 
@@ -214,6 +214,16 @@ describe('Reliquarium: the Review tab', () => {
     expect(w.text()).toContain('Waiting piece')
     expect(w.text()).toContain('Clips poll: last run never, last success never')
     expect(listReview).toHaveBeenCalledTimes(1)
+    // the activity log is on this tab, shut, and has asked for nothing
+    expect(w.find('.rq-events-toggle').text()).toBe('Recent activity')
+    expect(listEvents).not.toHaveBeenCalled()
+  })
+
+  it('shows a member no activity log, on any tab', async () => {
+    for (const path of ['/reliquarium/clips', '/reliquarium/review', '/reliquarium/mine']) {
+      const { w } = await visit(path)
+      expect(w.find('.rq-events-toggle').exists(), path).toBe(false)
+    }
   })
 
   it('fetches an approver\'s queue for the number on the tab even from another tab, and a member\'s never', async () => {

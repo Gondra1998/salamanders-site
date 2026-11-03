@@ -8,6 +8,7 @@ import {
   listArt,
   listMine,
   listReview,
+  listEvents,
   submitArt,
   removeItem,
   approve,
@@ -38,6 +39,7 @@ const INITIAL = {
   art: { items: [], next: null, loading: false },
   mine: [],
   review: { items: [], sync: null },
+  events: { items: [], next: null },
   error: '',
 }
 
@@ -647,5 +649,124 @@ describe('gallery store: what an approver does', () => {
     expect(listReview).not.toHaveBeenCalled()
     expect(s.clips.items).toEqual([item(1)])
     expect(s.review.items).toEqual([item(1, { status: 'pending' })])
+  })
+})
+
+describe('gallery store: the activity log', () => {
+  // The audit rows for approvers, newest first, a page at a time. Ids are invented.
+  const event = (id, extra = {}) => ({
+    id: String(id),
+    itemId: '1',
+    action: 'approved',
+    actor: { id: '100000000000000001', username: 'invented' },
+    note: '',
+    createdAt: '2026-11-01T08:00:00.000Z',
+    ...extra,
+  })
+
+  it('loadEvents() fills the first page and its cursor', async () => {
+    listEvents.mockResolvedValue({ events: [event(9), event(8)], next: '8' })
+    await s.loadEvents('tok')
+    expect(listEvents).toHaveBeenCalledWith('tok', null)
+    expect(s.events).toEqual({ items: [event(9), event(8)], next: '8' })
+  })
+
+  it('loadEvents() starts again from the newest: it replaces what was there', async () => {
+    s.$patch({ events: { items: [event(5)], next: '5' } })
+    listEvents.mockResolvedValue({ events: [event(9)], next: null })
+    await s.loadEvents('tok')
+    expect(s.events).toEqual({ items: [event(9)], next: null })
+  })
+
+  it('treats a reply with no cursor as the end of the log', async () => {
+    listEvents.mockResolvedValue({ events: [event(1)] })
+    await s.loadEvents('tok')
+    expect(s.events.next).toBeNull()
+  })
+
+  it('moreEvents() asks for the page after the cursor and adds it to the end', async () => {
+    s.$patch({ events: { items: [event(9), event(8)], next: '8' } })
+    listEvents.mockResolvedValue({ events: [event(7)], next: null })
+    await s.moreEvents('tok')
+    expect(listEvents).toHaveBeenCalledWith('tok', '8')
+    expect(s.events).toEqual({ items: [event(9), event(8), event(7)], next: null })
+  })
+
+  it('moreEvents() with no cursor asks for nothing: that is the end, and a first page would repeat the log', async () => {
+    s.$patch({ events: { items: [event(9)], next: null } })
+    await s.moreEvents('tok')
+    expect(listEvents).not.toHaveBeenCalled()
+    expect(s.events.items).toEqual([event(9)])
+  })
+
+  it('moreEvents() asked twice for the same page adds it once', async () => {
+    s.$patch({ events: { items: [event(9)], next: '9' } })
+    const d = deferred()
+    listEvents.mockReturnValue(d.promise)
+    const first = s.moreEvents('tok')
+    const second = s.moreEvents('tok')
+    d.resolve({ events: [event(8)], next: null })
+    await Promise.all([first, second])
+    expect(s.events.items).toEqual([event(9), event(8)])
+  })
+
+  it('moreEvents() drops its page when the log was started again meanwhile', async () => {
+    s.$patch({ events: { items: [event(9)], next: '9' } })
+    const d = deferred()
+    listEvents.mockReturnValueOnce(d.promise)
+    const more = s.moreEvents('tok')
+    listEvents.mockResolvedValueOnce({ events: [event(20), event(19)], next: '19' })
+    await s.loadEvents('tok')
+    d.resolve({ events: [event(8)], next: null })
+    await more
+    expect(s.events).toEqual({ items: [event(20), event(19)], next: '19' })
+  })
+
+  it.each([
+    ['loadEvents', () => s.loadEvents('tok')],
+    ['moreEvents', () => s.moreEvents('tok')],
+  ])('%s() that fails reports it, rethrows and keeps the log as it was', async (_name, call) => {
+    s.$patch({ events: { items: [event(9)], next: '9' } })
+    listEvents.mockRejectedValue(apiError(403, 'Only approvers can do that.'))
+    await expect(call()).rejects.toMatchObject({ status: 403 })
+    expect(s.error).toBe('Only approvers can do that.')
+    expect(s.events).toEqual({ items: [event(9)], next: '9' })
+  })
+
+  describe('an answer that lands after reset() or a new load()', () => {
+    it.each([
+      ['loadEvents', () => s.loadEvents('tok')],
+      ['moreEvents', () => s.moreEvents('tok')],
+    ])('%s() leaves the cleared store as it is', async (name, call) => {
+      if (name === 'moreEvents') s.$patch({ events: { items: [event(9)], next: '9' } })
+      const d = deferred()
+      listEvents.mockReturnValue(d.promise)
+      const p = call()
+      s.reset()
+      d.resolve({ events: [event(1)], next: null })
+      await p
+      expect(s.$state).toEqual(INITIAL)
+    })
+
+    it('drops a failure that lands then: no error left behind, nothing thrown', async () => {
+      const d = deferred()
+      listEvents.mockReturnValue(d.promise)
+      const p = s.loadEvents('tok')
+      s.reset()
+      d.reject(apiError(503, 'Discord is not answering.'))
+      await expect(p).resolves.toBeUndefined()
+      expect(s.$state).toEqual(INITIAL)
+    })
+
+    it('is dropped as well when a new load() has started, since the clearance is being checked again', async () => {
+      const d = deferred()
+      listEvents.mockReturnValue(d.promise)
+      getMe.mockResolvedValue({ access: true, approver: true })
+      const p = s.loadEvents('tok')
+      await s.load('tok')
+      d.resolve({ events: [event(1)], next: null })
+      await p
+      expect(s.events).toEqual({ items: [], next: null })
+    })
   })
 })

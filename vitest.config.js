@@ -41,6 +41,7 @@ const GATED = [
   'server/src/galleryParse.js',
   'server/src/r2.js',
   'server/src/galleryAccess.js',
+  'server/src/galleryHandler.js',
 ]
 
 export default defineConfig({

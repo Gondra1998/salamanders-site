@@ -38,6 +38,7 @@ const GATED = [
   'server/src/companyNotablesStore.js',
   'server/src/companyNotablesHandler.js',
   'server/src/galleryValidate.js',
+  'server/src/galleryParse.js',
 ]
 
 export default defineConfig({

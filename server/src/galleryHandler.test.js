@@ -173,11 +173,17 @@ describe('galleryHandler routing and gates', () => {
     ['POST', '/gallery/items/101/delete'],
     ['DELETE', '/gallery/items/101/approve'],
     ['POST', '/gallery/me'],
+    // The read-only routes answer GET alone.
+    ['POST', '/gallery/clips'],
+    ['DELETE', '/gallery/mine'],
+    ['PUT', '/gallery/review'],
+    ['POST', '/gallery/events'],
   ])('%s %s is 404 before anything else, even unconfigured', async (method, path) => {
     const ctx = setup({ configured: false })
     const res = await call(ctx, req(method, path, { who: 'member' }))
     expect(res.status).toBe(404)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
+    expect(res.headers.get('Content-Type')).toBe('application/json')
     expect(await res.json()).toEqual({ error: 'Not found.' })
     expect(ctx.access.resolve).not.toHaveBeenCalled()
   })
@@ -254,6 +260,7 @@ describe('GET /gallery/me', () => {
     const res = await call(ctx, req('GET', '/gallery/me', { who }))
     expect(res.status).toBe(200)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
+    expect(res.headers.get('Content-Type')).toBe('application/json')
     expect(await res.json()).toEqual(expected)
   })
 })
@@ -415,16 +422,22 @@ describe('POST /gallery/art', () => {
     expect(item.author).toEqual({ id: MEMBER.id, name: MEMBER.username })
   })
 
-  it('removes the item and answers 502 when R2 refuses the file', async () => {
+  it('removes the item and answers 502 when R2 refuses the file, logging nothing when the cleanup works', async () => {
     const ctx = setup()
-    ctx.r2.put.mockRejectedValueOnce(new Error('R2 refused the upload (500).'))
-    const res = await upload(ctx, {})
-    expect(res.status).toBe(502)
-    expect(res.headers.get('Cache-Control')).toBe('no-store')
-    expect(await res.json()).toEqual({ error: 'The file could not be stored. Try again.' })
-    const id = [...ctx.store.items.keys()][0]
-    expect(ctx.store.transition).toHaveBeenCalledWith(id, { from: ['pending', 'approved'], to: 'removed', action: 'removed', actor: MEMBER, note: 'upload failed' })
-    expect(ctx.store.items.get(id).status).toBe('removed')
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      ctx.r2.put.mockRejectedValueOnce(new Error('R2 refused the upload (500).'))
+      const res = await upload(ctx, {})
+      expect(res.status).toBe(502)
+      expect(res.headers.get('Cache-Control')).toBe('no-store')
+      expect(await res.json()).toEqual({ error: 'The file could not be stored. Try again.' })
+      const id = [...ctx.store.items.keys()][0]
+      expect(ctx.store.transition).toHaveBeenCalledWith(id, { from: ['pending', 'approved'], to: 'removed', action: 'removed', actor: MEMBER, note: 'upload failed' })
+      expect(ctx.store.items.get(id).status).toBe('removed')
+      expect(log).not.toHaveBeenCalled()
+    } finally {
+      log.mockRestore()
+    }
   })
 
   it('removes the item even if an approver approved it while the file was uploading', async () => {
@@ -461,6 +474,7 @@ describe('POST /gallery/art', () => {
     [{}, 'no Content-Type'],
     [{ 'Content-Type': 'application/json' }, 'JSON'],
     [{ 'Content-Type': 'text/plain; boundary=x' }, 'text'],
+    [{ 'Content-Type': 'application/x-multipart/form-data; boundary=x' }, 'a type that only ends like a form'],
   ])('is 415 for %o (%s), without reading the body', async (headers) => {
     const ctx = setup()
     const request = fakeUpload({ headers })
@@ -653,6 +667,30 @@ describe('approve, reject, hide', () => {
     expect(await res.json()).toEqual({ error: 'Send JSON (Content-Type: application/json).' })
   })
 
+  it('reads a JSON media type with spaces before its parameters', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'pending' })
+    const opts = { body: JSON.stringify({ reason: 'why' }), headers: { 'Content-Type': 'Application/JSON ; charset=utf-8' } }
+    const res = await call(ctx, req('POST', `/gallery/items/${id}/reject`, { who: 'approver', ...opts }))
+    expect(res.status).toBe(200)
+    expect(ctx.store.transition.mock.calls[0][1].note).toBe('why')
+  })
+
+  it('reads a JSON body of exactly 16 KB, counted in bytes', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'pending' })
+    const head = JSON.stringify({ reason: 'why', pad: '' })
+    // Each é is two bytes in UTF-8, so a count in characters would come out under the limit.
+    const room = 16_384 - new TextEncoder().encode(head).length
+    const pad = 'é'.repeat(Math.floor(room / 2)) + 'x'.repeat(room % 2)
+    const body = JSON.stringify({ reason: 'why', pad })
+    expect(new TextEncoder().encode(body).length).toBe(16_384)
+    const res = await call(ctx, req('POST', `/gallery/items/${id}/reject`, { who: 'approver', body, headers: { 'Content-Type': 'application/json' } }))
+    expect(res.status).toBe(200)
+    const over = await call(ctx, req('POST', `/gallery/items/${id}/reject`, { who: 'approver', body: `${body} `, headers: { 'Content-Type': 'application/json' } }))
+    expect(over.status).toBe(413)
+  })
+
   it('refuses a JSON body over the size limit (413)', async () => {
     const ctx = setup()
     const id = ctx.store.add({ status: 'pending' })
@@ -674,6 +712,14 @@ describe('approve, reject, hide', () => {
     const ctx = setup()
     const id = ctx.store.add({ status: 'pending' })
     const res = await call(ctx, req('POST', `/gallery/items/${id}/hide`, { who: 'approver', body: '', headers: { 'Content-Type': 'application/json' } }))
+    expect(res.status).toBe(200)
+    expect(ctx.store.transition.mock.calls[0][1].note).toBe('')
+  })
+
+  it('hides with a JSON body that is only whitespace, as no note', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'pending' })
+    const res = await call(ctx, req('POST', `/gallery/items/${id}/hide`, { who: 'approver', body: ' \n\t ', headers: { 'Content-Type': 'application/json' } }))
     expect(res.status).toBe(200)
     expect(ctx.store.transition.mock.calls[0][1].note).toBe('')
   })

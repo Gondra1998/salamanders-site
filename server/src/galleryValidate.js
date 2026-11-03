@@ -74,8 +74,11 @@ const GIF89A = ascii('GIF89a')
 const RIFF = ascii('RIFF')
 const WEBP = ascii('WEBP')
 
-/** Whether `sig` sits at `offset` in `bytes`. Reads only those bytes, and is false when they are not all there. */
-const hasAt = (bytes, offset, sig) => bytes.length >= offset + sig.length && sig.every((b, i) => bytes[offset + i] === b)
+/**
+ * Whether `sig` sits at `offset` in `bytes`. Reads only those bytes, and is false when they are not all there:
+ * an index past the end of a byte array reads undefined, which equals no byte.
+ */
+const hasAt = (bytes, offset, sig) => sig.every((b, i) => bytes[offset + i] === b)
 
 /**
  * What an uploaded file really is, by its magic bytes: JPEG, PNG, WebP or GIF. Anything else, including a file

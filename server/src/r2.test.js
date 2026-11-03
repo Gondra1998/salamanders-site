@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createR2, R2Error, canonicalRequest, stringToSign, signature, presignQuery } from './r2'
+import { createR2, R2Error, canonicalRequest, canonicalQuery, stringToSign, signature, presignQuery } from './r2'
 
 // The AWS SigV4 test suite's published example credentials, not a real account.
 const AWS_SECRET = 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY'
@@ -45,8 +45,10 @@ describe('SigV4 known answers', () => {
     expect(signature({ ...VANILLA, secret: AWS_SECRET, stringToSign: sts })).toBe('5fa00fa31553b73ebf1942676e86291e8372ff2a2260956d9b8aae1d763fbf31')
   })
 
-  it('signs the AWS get-vanilla-query-order-key-case vector (query given in canonical order)', () => {
-    const sts = stringToSign({ ...VANILLA, canonical: vanilla('Param1=value1&Param2=value2') })
+  it('signs the AWS get-vanilla-query-order-key-case vector (query parameters sorted by name)', () => {
+    const query = canonicalQuery({ Param2: 'value2', Param1: 'value1' })
+    expect(query).toBe('Param1=value1&Param2=value2')
+    const sts = stringToSign({ ...VANILLA, canonical: vanilla(query) })
     expect(signature({ ...VANILLA, secret: AWS_SECRET, stringToSign: sts })).toBe('b97d918cfa904a5beff61c982a1b6f458b799221646efd99d3219ec94cdf2500')
   })
 
@@ -68,6 +70,10 @@ describe('SigV4 known answers', () => {
     expect(signature({ ...ctx, secret: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', stringToSign: sts })).toBe(
       'aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404',
     )
+  })
+
+  it('encodes every query name and value per AWS rules', () => {
+    expect(canonicalQuery({ 'b c': "!'()*", a: 'é/+=~' })).toBe('a=%C3%A9%2F%2B%3D~&b%20c=%21%27%28%29%2A')
   })
 
   it('sorts headers by name and trims and folds their values', () => {
@@ -97,7 +103,9 @@ describe('configured', () => {
     const err = await r2.put('k', new Uint8Array(1), { contentType: 'image/png', contentLength: 1 }).catch((e) => e)
     expect(err).toBeInstanceOf(R2Error)
     expect(err.status).toBe(0)
+    expect(err.message).toBe('R2 is not configured.')
     expect(() => r2.presignGet('k')).toThrow(R2Error)
+    expect(() => r2.presignGet('k')).toThrow('R2 is not configured.')
     expect(calls).toHaveLength(0)
   })
 })
@@ -143,7 +151,11 @@ describe('presignGet', () => {
   })
 
   it.each([0, -1, 1.5, 604801, '900'])('refuses an expiry of %s', (expiresSec) => {
-    expect(() => make().r2.presignGet('k', { expiresSec })).toThrow(TypeError)
+    expect(() => make().r2.presignGet('k', { expiresSec })).toThrow(new TypeError('expiresSec must be a whole number from 1 to 604800.'))
+  })
+
+  it.each([1, 604800])('signs for an expiry of exactly %i seconds, the edge of the range', (expiresSec) => {
+    expect(make().r2.presignGet('k', { expiresSec })).toContain(`&X-Amz-Expires=${expiresSec}&`)
   })
 
   it('never puts the secret in the link', () => {
@@ -260,7 +272,7 @@ describe('put', () => {
     const err = await r2.put('k', new Uint8Array(1), { contentType: 'image/png', contentLength: 1 }).catch((e) => e)
     expect(err).toBeInstanceOf(R2Error)
     expect(err.status).toBe(0)
-    expect(err.message).not.toContain(SETTINGS.secretAccessKey)
+    expect(err.message).toBe('R2 is unreachable.')
     expect(err.cause).toBeUndefined()
   })
 
@@ -282,20 +294,23 @@ describe('put', () => {
     const err = await r2.put('k', new Uint8Array(1), { contentType: 'image/png', contentLength: 1, signal: AbortSignal.abort() }).catch((e) => e)
     expect(err).toBeInstanceOf(R2Error)
     expect(err.status).toBe(0)
+    expect(err.message).toBe('R2 is unreachable.')
     expect(err.cause).toBeUndefined()
   })
 
+  const BAD_LENGTH = 'contentLength must be a whole number of bytes.'
+  const BAD_TYPE = 'contentType must be a plain header value.'
   it.each([
-    [{ contentType: 'image/png', contentLength: -1 }],
-    [{ contentType: 'image/png', contentLength: 1.5 }],
-    [{ contentType: 'image/png', contentLength: '1' }],
-    [{ contentType: '', contentLength: 1 }],
-    [{ contentType: 'image/png\r\nx-evil: 1', contentLength: 1 }],
-    [{ contentType: ' image/png', contentLength: 1 }],
-    [{ contentLength: 1 }],
-  ])('refuses bad upload headers %o without touching the network', async (opts) => {
+    [{ contentType: 'image/png', contentLength: -1 }, BAD_LENGTH],
+    [{ contentType: 'image/png', contentLength: 1.5 }, BAD_LENGTH],
+    [{ contentType: 'image/png', contentLength: '1' }, BAD_LENGTH],
+    [{ contentType: '', contentLength: 1 }, BAD_TYPE],
+    [{ contentType: 'image/png\r\nx-evil: 1', contentLength: 1 }, BAD_TYPE],
+    [{ contentType: ' image/png', contentLength: 1 }, BAD_TYPE],
+    [{ contentLength: 1 }, BAD_TYPE],
+  ])('refuses bad upload headers %o without touching the network', async (opts, message) => {
     const { r2, calls } = make()
-    await expect(r2.put('k', new Uint8Array(1), opts)).rejects.toThrow(TypeError)
+    await expect(r2.put('k', new Uint8Array(1), opts)).rejects.toThrow(new TypeError(message))
     expect(calls).toHaveLength(0)
   })
 })

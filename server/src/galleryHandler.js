@@ -36,6 +36,7 @@ function send(status, text) {
 }
 const reply = (status, body) => send(status, JSON.stringify(body))
 
+// Stryker disable next-line StringLiteral: a missing header and any other default are neither application/json nor multipart/form-data
 const mediaType = (request) => (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase()
 
 /**
@@ -96,8 +97,8 @@ export function createGalleryHandler({ access, store, r2, poll, displayNames, co
 
   async function submit(request, verdict) {
     if (!mediaType(request).startsWith('multipart/form-data')) return reply(415, { error: 'Send the form as multipart/form-data.' })
-    const length = request.headers.get('Content-Length')
-    if (length !== null && Number(length) > MAX_ART_BYTES + FORM_SLACK) return reply(413, { error: TOO_LARGE })
+    // A missing Content-Length reads as 0 and an unreadable one as NaN: neither is refused here, the file size check below still runs.
+    if (Number(request.headers.get('Content-Length')) > MAX_ART_BYTES + FORM_SLACK) return reply(413, { error: TOO_LARGE })
     let form
     try {
       form = await request.formData()

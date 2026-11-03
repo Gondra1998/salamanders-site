@@ -36,9 +36,12 @@ const hmac = (key, text) => createHmac('sha256', key).update(text).digest()
 const encode = (s) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
 const scopeOf = ({ amzDate, region, service }) => `${amzDate.slice(0, 8)}/${region}/${service}/aws4_request`
 
+// The names of the signed headers in canonical (byte) order: the order they are hashed in and the SignedHeaders list.
+const namesOf = (headers) => Object.keys(headers).sort()
+
 /** headers: lowercase name → value; all of them are signed. */
 export function canonicalRequest({ method, path, query, headers, payloadHash }) {
-  const names = Object.keys(headers).sort()
+  const names = namesOf(headers)
   const lines = names.map((n) => `${n}:${String(headers[n]).trim().replace(/\s+/g, ' ')}\n`).join('')
   return [method, path, query, lines, names.join(';'), payloadHash].join('\n')
 }
@@ -53,19 +56,23 @@ export function signature({ secret, amzDate, region, service, stringToSign: text
   return createHmac('sha256', key).update(text).digest('hex')
 }
 
+/** params: name → value. The canonical query string: sorted by name, every name and value encoded. */
+export function canonicalQuery(params) {
+  return Object.keys(params)
+    .sort()
+    .map((k) => `${encode(k)}=${encode(params[k])}`)
+    .join('&')
+}
+
 /** The canonical query of a presigned link, before X-Amz-Signature is appended. */
 export function presignQuery({ accessKeyId, amzDate, region, service, expiresSec }) {
-  const params = {
+  return canonicalQuery({
     'X-Amz-Algorithm': ALGORITHM,
     'X-Amz-Credential': `${accessKeyId}/${scopeOf({ amzDate, region, service })}`,
     'X-Amz-Date': amzDate,
     'X-Amz-Expires': String(expiresSec),
     'X-Amz-SignedHeaders': 'host',
-  }
-  return Object.keys(params)
-    .sort()
-    .map((k) => `${encode(k)}=${encode(params[k])}`)
-    .join('&')
+  })
 }
 
 // An absolute http(s) origin, a trailing slash allowed; a path, query, fragment or credentials would change what is signed.
@@ -73,7 +80,7 @@ export function presignQuery({ accessKeyId, amzDate, region, service, expiresSec
 export function parseEndpoint(endpoint) {
   try {
     const u = new URL(endpoint)
-    return /^https?:$/.test(u.protocol) && u.href === `${u.origin}/` ? u : null
+    return ['http:', 'https:'].includes(u.protocol) && u.href === `${u.origin}/` ? u : null
   } catch {
     return null
   }
@@ -111,7 +118,7 @@ export function createR2({ accountId, bucket, accessKeyId, secretAccessKey, endp
         'Content-Type': contentType,
         'x-amz-content-sha256': UNSIGNED,
         'x-amz-date': ctx.amzDate,
-        Authorization: `${ALGORITHM} Credential=${accessKeyId}/${scopeOf(ctx)}, SignedHeaders=${Object.keys(signed).sort().join(';')}, Signature=${sig}`,
+        Authorization: `${ALGORITHM} Credential=${accessKeyId}/${scopeOf(ctx)}, SignedHeaders=${namesOf(signed).join(';')}, Signature=${sig}`,
       },
       body,
       signal,

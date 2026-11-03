@@ -169,3 +169,58 @@ create table if not exists company_notables (
   entries     jsonb not null check (jsonb_typeof(entries) = 'array'),
   updated_at  timestamptz not null default now()
 );
+
+-- Reliquarium: members-only art and clips galleries (see docs/superpowers/specs/2026-11-02-reliquarium-design.md).
+-- Nothing in the API deletes from these three tables; status and the event trail carry the history.
+-- A Discord message with several attachments is several rows sharing discord_message_id; an embed row uses the
+-- link's URL as its attachment id.
+create table if not exists gallery_items (
+  id                     bigserial primary key,
+  kind                   text not null check (kind in ('clip', 'art')),
+  source                 text not null check (source in ('discord', 'site')),
+  discord_message_id     text,
+  discord_attachment_id  text,
+  author_discord_id      text not null,
+  author_username        text not null,
+  title                  text not null default '',
+  note                   text not null default '',
+  media                  text not null check (media in ('video', 'image', 'embed')),
+  r2_key                 text,
+  embed_url              text,
+  content_type           text,
+  bytes                  bigint,
+  status                 text not null check (status in ('pending', 'approved', 'rejected', 'hidden', 'removed')),
+  reviewed_by            text,
+  reviewed_by_username   text,
+  review_note            text,
+  posted_at              timestamptz not null,
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now()
+);
+
+create index if not exists gallery_items_list_idx on gallery_items (kind, status, id desc);
+create index if not exists gallery_items_author_idx on gallery_items (author_discord_id);
+-- A re-poll of the same message cannot insert the same attachment twice.
+create unique index if not exists gallery_items_discord_idx
+  on gallery_items (discord_message_id, discord_attachment_id) where discord_message_id is not null;
+
+create table if not exists gallery_events (
+  id                bigserial primary key,
+  item_id           bigint not null references gallery_items (id),
+  action            text not null check (action in ('stored', 'submitted', 'approved', 'rejected', 'hidden', 'removed', 'discord_deleted')),
+  actor_discord_id  text not null,
+  actor_username    text not null,
+  note              text not null default '',
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists gallery_events_item_idx on gallery_events (item_id, id desc);
+
+-- One row per polled channel: the cursor and the outcome of the last pass (last_error is null when it succeeded).
+create table if not exists gallery_sync (
+  channel_id       text primary key,
+  last_message_id  text,
+  last_run_at      timestamptz,
+  last_ok_at       timestamptz,
+  last_error       text
+);

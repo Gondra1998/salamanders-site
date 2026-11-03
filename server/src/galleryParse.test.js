@@ -8,6 +8,7 @@ const SLUG = 'AwkwardHelplessSalamander-x1Y2z3'
 const TW_CANON = `https://clips.twitch.tv/${SLUG}`
 const MEDAL = 'cAbC123xyz'
 const MEDAL_CANON = `https://medal.tv/clips/${MEDAL}`
+const FFFD = String.fromCharCode(0xfffd) // the replacement character
 
 const message = (over = {}) => ({
   id: '200000000000000101',
@@ -115,6 +116,43 @@ describe('parseMessage attachments', () => {
     )
     expect(rows).toEqual([])
     expect(skipped).toEqual([{ attachmentId: '200000000000000301', reason: 'not-media' }])
+  })
+
+  it.each([
+    ['a missing size', undefined],
+    ['a null size', null],
+    ['a size sent as text', '1024'],
+    ['a negative size', -1],
+    ['a NaN size', NaN],
+    ['an infinite size', Infinity],
+  ])('skips a media attachment with %s as not-media, since it cannot be held against the cap', (_, size) => {
+    const { rows, skipped } = parseMessage(
+      message({
+        attachments: [
+          attachment('200000000000000301', 'video/mp4', { size }),
+          attachment('200000000000000302', 'image/png'),
+        ],
+      }),
+    )
+    expect(skipped).toEqual([{ attachmentId: '200000000000000301', reason: 'not-media' }])
+    expect(rows.map((r) => r.attachmentId)).toEqual(['200000000000000302'])
+  })
+
+  it('skips an attachment whose size key is absent altogether', () => {
+    const a = attachment('200000000000000301', 'image/png')
+    delete a.size
+    expect(parseMessage(message({ attachments: [a] }))).toEqual({
+      rows: [],
+      skipped: [{ attachmentId: '200000000000000301', reason: 'not-media' }],
+    })
+  })
+
+  it('keeps a zero-byte attachment: zero is a size', () => {
+    const { rows, skipped } = parseMessage(
+      message({ attachments: [attachment('200000000000000301', 'image/png', { size: 0 })] }),
+    )
+    expect(skipped).toEqual([])
+    expect(rows[0].download.size).toBe(0)
   })
 
   it('calls an oversized non-media file not-media, not too-large', () => {
@@ -261,6 +299,41 @@ describe('parseMessage fields', () => {
     expect(title).toBe('x'.repeat(119))
     expect(title.isWellFormed()).toBe(true)
     expect(withContent('x'.repeat(118) + '\u{1F525}').title).toBe('x'.repeat(118) + '\u{1F525}')
+  })
+
+  it('drops U+0000 from the title', () => {
+    expect(withContent('ab\u0000cd').title).toBe('abcd')
+    expect(withContent('\u0000\u0000').title).toBe('')
+  })
+
+  it('turns a lone surrogate into U+FFFD, wherever it sits', () => {
+    expect(withContent('a\uD800b').title).toBe(`a${FFFD}b`)
+    expect(withContent('a\uDC00b').title).toBe(`a${FFFD}b`)
+    expect(withContent('end\uD800').title).toBe(`end${FFFD}`)
+    expect(withContent('a\u{1F525}b').title).toBe('a\u{1F525}b')
+  })
+
+  it('cuts first and sanitises after, so a title is never over 120 units and always storable', () => {
+    const noisy = withContent('\u0000x\uD800'.repeat(100)).title
+    expect(noisy.length).toBeLessThanOrEqual(120)
+    expect(noisy).not.toContain('\u0000')
+    expect(noisy.isWellFormed()).toBe(true)
+    // the cut lands on a lone high surrogate and drops it (119 units); the NULs go, the other lone surrogates become U+FFFD
+    expect(noisy).toBe(`x${FFFD}`.repeat(39) + 'x')
+    // a cut that lands on the high half of a real pair still drops the pair, not a U+FFFD
+    expect(withContent('x'.repeat(119) + '\u{1F525}\u0000').title).toBe('x'.repeat(119))
+  })
+
+  it('always yields a title Postgres can store, whatever the message says', () => {
+    const piece = fc.constantFrom('a', ' ', '\u0000', '\uD800', '\uDC00', '\u{1F525}')
+    fc.assert(
+      fc.property(fc.array(piece, { maxLength: 300 }), (parts) => {
+        const { title } = withContent(parts.join(''))
+        expect(title.length).toBeLessThanOrEqual(120)
+        expect(title).not.toContain('\u0000')
+        expect(title.isWellFormed()).toBe(true)
+      }),
+    )
   })
 
   it('takes posted_at from the timestamp as sent, and the author id and username', () => {

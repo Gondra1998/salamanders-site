@@ -72,16 +72,25 @@ export function embedOf(url) {
   }
 }
 
-/** The text, trimmed and cut to 120 UTF-16 units without leaving half a surrogate pair at the cut. */
+/**
+ * The text, trimmed and cut to 120 UTF-16 units, always something Postgres can store: a cut never
+ * leaves half a surrogate pair, U+0000 is dropped and any other lone surrogate becomes U+FFFD.
+ */
 function titleOf(content) {
-  const cut = content.trim().slice(0, TITLE_MAX)
-  return HIGH_SURROGATE_END.test(cut) ? cut.slice(0, -1) : cut
+  const text = content.trim()
+  let cut = text.slice(0, TITLE_MAX)
+  if (cut.length < text.length && HIGH_SURROGATE_END.test(cut)) cut = cut.slice(0, -1)
+  return cut.replaceAll('\u0000', '').toWellFormed()
 }
+
+/** A size we can hold against MAX_CLIP_BYTES. */
+const isSize = (n) => Number.isFinite(n) && n >= 0
 
 /**
  * → { rows, skipped }. Rows are the message's attachments in order, then its distinct
  * embeddable links in order. Skipped are attachments not kept: 'not-media' (a content type
- * outside TYPES, or none) or 'too-large' (over MAX_CLIP_BYTES).
+ * outside TYPES or none, or a size that is not a finite non-negative number, which cannot be
+ * held against the cap) or 'too-large' (over MAX_CLIP_BYTES).
  */
 export function parseMessage(message) {
   const content = message.content ?? ''
@@ -98,7 +107,7 @@ export function parseMessage(message) {
 
   for (const a of message.attachments ?? []) {
     const type = TYPES.get(a.content_type)
-    if (!type) skipped.push({ attachmentId: a.id, reason: 'not-media' })
+    if (!type || !isSize(a.size)) skipped.push({ attachmentId: a.id, reason: 'not-media' })
     else if (a.size > MAX_CLIP_BYTES) skipped.push({ attachmentId: a.id, reason: 'too-large' })
     else {
       const download = { url: a.url, size: a.size, contentType: a.content_type, ext: type.ext }

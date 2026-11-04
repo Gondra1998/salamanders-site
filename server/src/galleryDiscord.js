@@ -7,20 +7,24 @@
  * exists(channelId, messageId) → true (200) | false (404 Unknown Message, code 10008; any other 404 is Upstream).
  * download(url, { signal }?) → { body, contentLength, contentType }; no auth header (the CDN link is
  *   signed in its query). The caller's signal, when given, replaces the default timeout, so one
- *   deadline can cover the download and the upload it is streamed into.
+ *   deadline can cover the download and the upload it is streamed into. contentLength is 0 when the
+ *   CDN gives none or the body is content-encoded: fetch hands over the decoded bytes, whose length
+ *   the header does not state.
  *
  * A 429 on a bot call waits Retry-After seconds (at most 30) and retries once; a second 429 is Upstream.
  * Every failure is Upstream, whose message names a status at most: never the token, a url or a CDN link.
- * A download the CDN answers with 400, 403, 404, 410 or 415 is the subclass DownloadRefused: that link
- * will never work (Discord answers 403 for a stripped or expired signed link). Anything else (a network
- * error, a 401, 408, 429 or 5xx) is a plain Upstream: the next pass tries again.
+ * A download the CDN answers with 400, 404, 410 or 415 is the subclass DownloadRefused: that link
+ * will never work. Anything else (a network error, a 401, 403, 408, 429 or 5xx) is a plain Upstream:
+ * the next pass tries again. A 403 is not a refusal (Ruling 25): Discord answers it for an expired
+ * signed link, which the next pass re-reads fresh, and for a blocked address, which must never skip
+ * every clip.
  */
 import { Upstream } from './discordRoles.js'
 
 /** The CDN refused this one link for good. Still an Upstream to any caller that only knows that. */
 export class DownloadRefused extends Upstream {}
 
-const LINK_REFUSED = new Set([400, 403, 404, 410, 415])
+const LINK_REFUSED = new Set([400, 404, 410, 415])
 
 const MAX_RETRY_AFTER_S = 30
 const UNKNOWN_MESSAGE = 10008 // Discord's JSON error code for a message that does not exist
@@ -96,9 +100,11 @@ export function createGalleryDiscord({
         await res.body?.cancel()
         throw new (LINK_REFUSED.has(res.status) ? DownloadRefused : Upstream)(`Discord's CDN answered ${res.status}.`)
       }
+      const encoding = res.headers.get('content-encoding')
+      const encoded = encoding != null && encoding !== 'identity'
       return {
         body: res.body,
-        contentLength: Number(res.headers.get('content-length')) || 0,
+        contentLength: encoded ? 0 : Number(res.headers.get('content-length')) || 0,
         contentType: res.headers.get('content-type'),
       }
     },

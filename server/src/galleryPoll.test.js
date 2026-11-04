@@ -412,7 +412,7 @@ describe('an attachment that cannot be copied (Ruling 23)', () => {
     expect(store.sync).toMatchObject({ last_message_id: id(0), last_ok_at: null, last_run_at: iso(T0), last_error: error })
   }
 
-  it.each([400, 403, 404, 410, 415])('a CDN %i skips that row: its siblings are stored and the cursor advances', async (status) => {
+  it.each([400, 404, 410, 415])('a CDN %i skips that row: its siblings are stored and the cursor advances', async (status) => {
     const { poll, store, discord, r2, log } = setup({ cursor: id(0), channel: channel() })
     failOne(discord, cdn(status))
     await poll.runOnce()
@@ -426,6 +426,7 @@ describe('an attachment that cannot be copied (Ruling 23)', () => {
     [503, "Discord's CDN answered 503."],
     [429, "Discord's CDN answered 429."],
     [401, "Discord's CDN answered 401."],
+    [403, "Discord's CDN answered 403."], // Ruling 25: an expired link or a blocked address, never a skip
     [408, "Discord's CDN answered 408."],
   ])('a CDN %i ends the pass and leaves the cursor, as before', async (status, error) => {
     const { poll, store, discord } = setup({ cursor: id(0), channel: channel() })

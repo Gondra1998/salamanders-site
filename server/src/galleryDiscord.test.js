@@ -171,6 +171,16 @@ describe('download', () => {
     expect(f.seen[0].signal).toBe(signal)
   })
 
+  it.each(['gzip', 'br', 'deflate'])('a %s-encoded body reports no length: fetch hands over the decoded bytes', async (enc) => {
+    const f = fakeFetch({ status: 200, raw: 'xx', headers: { 'content-length': '5', 'content-encoding': enc } })
+    expect((await make(f).discord.download(CDN)).contentLength).toBe(0)
+  })
+
+  it('an identity-encoded body keeps its length', async () => {
+    const f = fakeFetch({ status: 200, raw: 'xx', headers: { 'content-length': '2', 'content-encoding': 'identity' } })
+    expect((await make(f).discord.download(CDN)).contentLength).toBe(2)
+  })
+
   it('a missing length is 0', async () => {
     const { discord } = make(fakeFetch({ status: 200, raw: null }))
     expect((await discord.download(CDN)).contentLength).toBe(0)
@@ -192,7 +202,7 @@ describe('download', () => {
   })
 
   // The poll skips a refused link for good but retries the others next pass (Ruling 23), so the two must differ.
-  it.each([400, 403, 404, 410, 415])('a %i is DownloadRefused: that link will never work', async (status) => {
+  it.each([400, 404, 410, 415])('a %i is DownloadRefused: that link will never work', async (status) => {
     const err = await make(fakeFetch({ status, raw: 'gone' })).discord.download(CDN).catch((e) => e)
     expect(err).toBeInstanceOf(DownloadRefused)
     expect(err).toBeInstanceOf(Upstream)
@@ -201,6 +211,9 @@ describe('download', () => {
 
   it.each([
     ['a 401', { status: 401, raw: 'no' }],
+    // Ruling 25: Discord answers 403 for an expired signed link (re-read fresh next pass) and for a
+    // blocked address, which must never skip every clip.
+    ['a 403', { status: 403, raw: 'expired' }],
     ['a 405', { status: 405, raw: 'no' }],
     ['a 408', { status: 408, raw: 'slow' }],
     ['a 429', { status: 429, raw: 'slow down' }],

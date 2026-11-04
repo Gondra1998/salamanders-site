@@ -20,10 +20,15 @@ const busy = computed(() => store.status === 'idle' || store.status === 'checkin
 const signIn = () => auth.signIn({ returnTo: route.fullPath })
 const retry = () => store.load(auth.token)
 
-// The cogitator's wake (DeathwatchBoot) plays over the gate every time the area is entered (the gate stays mounted
-// while moving inside it), and never with reduced motion (or where that cannot be asked, as in tests).
-const boot = ref(!!globalThis.matchMedia && !matchMedia('(prefers-reduced-motion: reduce)').matches)
-const booted = () => (boot.value = false)
+// The cogitator's wake (DeathwatchBoot) plays over the gate once per visit to the site (the tab's session): once it
+// ends cleared, it is not shown again until the tab is closed. Refused, it plays again on the next try. Never with
+// reduced motion (or where that cannot be asked, as in tests). The key is read by DeathwatchBanner too.
+const BOOTED = 'dw-booted'
+const boot = ref(!!globalThis.matchMedia && !matchMedia('(prefers-reduced-motion: reduce)').matches && !sessionStorage.getItem(BOOTED))
+const booted = (cleared) => {
+  boot.value = false
+  if (cleared) sessionStorage.setItem(BOOTED, '1')
+}
 </script>
 
 <template>

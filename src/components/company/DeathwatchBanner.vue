@@ -20,7 +20,9 @@ let timer = 0
 onBeforeUnmount(() => clearTimeout(timer))
 function enter() {
   if (dimming.value) return
-  if (!globalThis.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches) return router.push('/deathwatch')
+  // Nor once the boot screen has played this visit (DeathwatchGate's key): there is no boot screen to dim into.
+  if (!globalThis.matchMedia || matchMedia('(prefers-reduced-motion: reduce)').matches || sessionStorage.getItem('dw-booted'))
+    return router.push('/deathwatch')
   dimming.value = true
   timer = setTimeout(() => router.push('/deathwatch'), DIM_MS)
 }

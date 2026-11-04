@@ -24,6 +24,7 @@ beforeEach(() => {
   auth.signedIn = false
   auth.signIn.mockReset()
   vi.unstubAllGlobals()
+  sessionStorage.clear()
 })
 
 describe('DeathwatchBanner', () => {
@@ -72,6 +73,16 @@ describe('DeathwatchBanner', () => {
 
   it('goes in at once with reduced motion', () => {
     vi.stubGlobal('matchMedia', (q) => ({ matches: q.includes('reduce') }))
+    auth.signedIn = true
+    const { w, push } = mountBanner()
+    click(w)
+    expect(push).toHaveBeenCalledWith('/deathwatch')
+    expect(document.querySelector('.dw-dim')).toBeNull()
+  })
+
+  it('goes in at once once the boot screen has played this visit', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false }))
+    sessionStorage.setItem('dw-booted', '1')
     auth.signedIn = true
     const { w, push } = mountBanner()
     click(w)

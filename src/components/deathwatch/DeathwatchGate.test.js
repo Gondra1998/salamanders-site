@@ -228,15 +228,42 @@ describe("DeathwatchGate: the cogitator's wake", () => {
     expect(w.find('.dwb-small').text()).toBe('Welcome to the Vigil')
     await vi.advanceTimersByTimeAsync(1900 + 400) // open to 5.6 s, then a short fade (six seconds in all)
     expect(w.find('.dwb').exists()).toBe(false)
+    expect(sessionStorage.getItem('dw-booted')).toBe('1')
   })
 
-  it('steps aside at once when not cleared', async () => {
+  it('plays once per visit', async () => {
     motion(false)
     storeMember()
+    getMe.mockResolvedValue({ access: true, watchCommander: false })
+    sessionStorage.setItem('dw-booted', '1')
+    expect((await mountGate()).find('.dwb').exists()).toBe(false)
+  })
+
+  it('shuts the gate when refused, and stays with a way back', async () => {
+    motion(false)
+    vi.useFakeTimers()
+    storeMember()
     getMe.mockResolvedValue({ access: false, watchCommander: false })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:rest(.*)*', component: { template: '<div />' } }] })
+    router.push(PAGE)
+    await router.isReady()
+    const w = mount(DeathwatchGate, { slots: { default: () => h(Probe) }, global: { plugins: [pinia, router] } })
+    await vi.advanceTimersByTimeAsync(1000 + 4 * 500)
+    expect(w.findAll('.dwb-log li').at(-1).text()).toContain('withheld')
+    await vi.advanceTimersByTimeAsync(700 + 5000)
+    expect(w.find('.dwb').classes()).toContain('shut')
+    expect(w.find('.dwb-big').text()).toBe('The gate stays shut')
+    expect(w.find('.dwb-back').attributes('href')).toBe('/companies')
+    expect(w.find('.page').exists()).toBe(false)
+  })
+
+  it('steps aside at once when signed out', async () => {
+    motion(false)
     const w = await mountGate()
     expect(w.find('.dwb').exists()).toBe(false)
-    expect(w.text()).toContain('Your clearance is not on record.')
+    expect(w.text()).toContain('Sign in with Discord')
   })
 
   it('never plays with reduced motion', async () => {

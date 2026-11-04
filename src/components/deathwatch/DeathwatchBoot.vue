@@ -3,7 +3,8 @@
 // crest sits in an auspex ring that fills as the vox log runs its rites, while the gate asks the server who they
 // are (the store); the last line is that answer. Cleared, the ring burns whole, "The gate is open" welcomes them,
 // and the screen fades onto the page that is already behind it; not cleared, it steps aside at once so the gate can
-// say why. Only a lead-in: the gate (and the server) decide access, never this.
+// say why, unless they were refused: then the ring burns red and "The gate stays shut" stays up, with a way back
+// to the companies. Only a lead-in: the gate (and the server) decide access, never this.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAuth } from '../../stores/auth'
 import { useDeathwatch } from '../../stores/deathwatch'
@@ -33,11 +34,12 @@ const shown = ref(0)
 const leaving = ref(false)
 const busy = computed(() => store.status === 'idle' || store.status === 'checking')
 const cleared = computed(() => store.status === 'allowed')
+const refused = computed(() => store.status === 'denied')
 const done = computed(() => shown.value === RITES.length)
 const operator = computed(() => auth.member?.username || '—')
 // The ring: a fifth for each rite, the last for the answer.
 const RING = 2 * Math.PI * 92
-const ring = computed(() => RING * (1 - (shown.value + (done.value && cleared.value ? 1 : 0)) / (RITES.length + 1)))
+const ring = computed(() => RING * (1 - (shown.value + (done.value && !busy.value ? 1 : 0)) / (RITES.length + 1)))
 
 const timers = []
 const later = (fn, ms) => timers.push(setTimeout(fn, ms))
@@ -52,17 +54,18 @@ onMounted(() => {
 })
 onBeforeUnmount(() => timers.forEach(clearTimeout))
 
-// Not cleared (signed out, refused, unreachable): out of the way at once, so the gate can say why. Cleared: once the
-// rites are run, hold on the answer, open the gate, then fade. `done` says whether it ended cleared.
+// Signed out or unreachable: out of the way at once, so the gate can say why (and offer sign-in or a retry). Cleared
+// or refused: once the rites are run, hold on the answer, then open the gate and fade, or shut it and stay.
+// `done` says whether it ended cleared.
 watch(
   [done, busy],
   ([ran, waiting]) => {
     if (waiting) return
-    if (!cleared.value) emit('done', false)
+    if (!cleared.value && !refused.value) emit('done', false)
     else if (ran)
       later(() => {
-        phase.value = 'open'
-        later(leave, OPEN_MS)
+        phase.value = cleared.value ? 'open' : 'shut'
+        if (cleared.value) later(leave, OPEN_MS)
       }, HOLD_MS)
   },
   { immediate: true },
@@ -92,6 +95,11 @@ watch(
           <p class="dwb-big">The gate is open</p>
           <p class="dwb-small">Welcome to the Vigil</p>
         </div>
+        <div v-else-if="phase === 'shut'" key="shut" class="dwb-say">
+          <p class="dwb-big">The gate stays shut</p>
+          <p class="dwb-small">Your clearance is not on record</p>
+          <RouterLink class="dwb-back" to="/companies">Return to the companies</RouterLink>
+        </div>
         <div v-else key="log" class="dwb-log">
           <ol>
             <li v-for="([k, v], i) in RITES" :key="k" :class="{ on: i < shown }">
@@ -120,6 +128,7 @@ watch(
   display: grid;
   place-items: center;
   padding: 1rem;
+  --dwb-no: #e0705a; /* refused */
   color: var(--dw-ink);
   background:
     var(--dw-scan),
@@ -233,9 +242,15 @@ watch(
   stroke-width: 7;
   stroke-dasharray: 1 7.6;
 }
-/* The gate open: the ring burns gold. */
+/* The gate open: the ring burns gold. Shut: red, and the crest goes dark again. */
 .dwb.open .dwb-ring-fill {
   stroke: var(--dw-gold);
+}
+.dwb.shut .dwb-ring-fill {
+  stroke: var(--dwb-no);
+}
+.dwb.shut .dwb-ring-glow {
+  stroke: color-mix(in oklab, var(--dwb-no) 22%, transparent);
 }
 .dwb-net {
   margin: 0;
@@ -273,6 +288,10 @@ watch(
 .dwb.open .dwb-big {
   color: var(--dw-gold);
   text-shadow: 0 0 16px color-mix(in oklab, var(--dw-gold) 55%, transparent);
+}
+.dwb.shut .dwb-big {
+  color: var(--dwb-no);
+  text-shadow: 0 0 16px color-mix(in oklab, var(--dwb-no) 50%, transparent);
 }
 .dwb-small {
   font: 500 0.75rem / 1.4 ui-monospace, monospace;
@@ -328,7 +347,30 @@ watch(
   color: var(--dw-gold);
 }
 .dwb-log i.no {
-  color: #e0705a;
+  color: var(--dwb-no);
+}
+/* The way back out when refused: the screen covers the site's bar. */
+.dwb-back {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 1rem;
+  padding: 0 1.2rem;
+  border: 1px solid var(--dw-line-2);
+  border-radius: 2px;
+  font: 600 0.75rem / 1 var(--dw-font-cond);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--dw-ink);
+  text-decoration: none;
+  transition:
+    color var(--dur-state) var(--ease-forge),
+    border-color var(--dur-state) var(--ease-forge);
+}
+.dwb-back:focus-visible {
+  outline: 2px solid var(--dw-accent);
+  outline-offset: 2px;
 }
 .dwb-ident {
   margin: 0.4rem 0 0;
@@ -349,6 +391,10 @@ watch(
 @media (hover: hover) and (pointer: fine) {
   .dwb-skip:hover {
     color: var(--dw-accent);
+  }
+  .dwb-back:hover {
+    color: var(--dw-accent);
+    border-color: var(--dw-accent);
   }
 }
 </style>

@@ -6,6 +6,7 @@
  * Every caller value goes in as a $n parameter. The only text built into a statement is a fixed
  * fragment or a gallery_sync column name taken from SYNC_COLUMNS.
  */
+import { createInTx } from './inTx.js'
 import { PAGE_SIZE } from './galleryValidate.js'
 
 /** Who the audit trail names for what the clips-channel poll does by itself (no Discord call needed). */
@@ -34,20 +35,7 @@ function paged(rows, size) {
 }
 
 export function createGalleryStore(pool) {
-  async function inTx(fn) {
-    const client = await pool.connect()
-    try {
-      await client.query('begin')
-      const out = await fn(client)
-      await client.query('commit')
-      return out
-    } catch (err) {
-      await client.query('rollback').catch(() => {})
-      throw err
-    } finally {
-      client.release()
-    }
-  }
+  const inTx = createInTx(pool)
 
   const event = (q, itemId, action, actor, note) =>
     q.query('insert into gallery_events (item_id, action, actor_discord_id, actor_username, note) values ($1,$2,$3,$4,$5)', [

@@ -4,26 +4,14 @@
  * `delete` op removes a deathwatch_docs row, and the history keeps what it held.
  * Tables are in schema.sql.
  */
+import { createInTx } from './inTx.js'
 import { MAX_ACTIVE_GRANTS } from './deathwatchValidate.js'
 
 // Any fixed bigint: serialises grant() so two callers cannot race past the limit.
 const GRANT_LOCK = 18_000_001
 
 export function createDeathwatchStore(pool) {
-  async function inTx(fn) {
-    const client = await pool.connect()
-    try {
-      await client.query('begin')
-      const out = await fn(client)
-      await client.query('commit')
-      return out
-    } catch (err) {
-      await client.query('rollback').catch(() => {})
-      throw err
-    } finally {
-      client.release()
-    }
-  }
+  const inTx = createInTx(pool)
 
   const history = (q, col, id, op, doc, actorId) =>
     q.query(

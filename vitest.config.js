@@ -43,6 +43,7 @@ const GATED = [
   'server/src/galleryAccess.js',
   'server/src/galleryHandler.js',
   'server/src/galleryConfig.js',
+  'server/src/inTx.js',
   'src/lib/gallery/embed.js',
 ]
 

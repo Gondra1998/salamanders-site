@@ -288,6 +288,15 @@ describe('GET /deathwatch/data', () => {
     }
   })
 
+  it('gives the 304 the content type and cache rule of the 200', async () => {
+    const { call } = setup()
+    const tag = (await call('watcher', 'GET', '/deathwatch/data')).headers.get('ETag')
+    const res = await call('watcher', 'GET', '/deathwatch/data', undefined, { headers: { 'If-None-Match': tag } })
+    expect(res.status).toBe(304)
+    expect(res.headers.get('Content-Type')).toBe('application/json')
+    expect(res.headers.get('Cache-Control')).toBe('no-store')
+  })
+
   it('answers 200 with the data when the tag does not match', async () => {
     const { call } = setup()
     const res = await call('watcher', 'GET', '/deathwatch/data', undefined, { headers: { 'If-None-Match': '"stale"' } })

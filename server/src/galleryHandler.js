@@ -15,6 +15,7 @@
 import { Upstream } from './discordRoles.js'
 import { COMMUNITY_MEMBER } from './displayNames.js'
 import { MAX_ART_BYTES, isItemId, parseArtFields, parseBefore, parseHideNote, parseReason, sniffImage } from './galleryValidate.js'
+import { mediaType, readJson as readJsonWithin, reply, send } from './httpReply.js'
 
 const ITEM_ROUTE = /^\/gallery\/items\/([^/]+)$/
 const ACTION_ROUTE = /^\/gallery\/items\/([^/]+)\/(approve|reject|hide)$/
@@ -29,32 +30,11 @@ const MOVED_ON = 'That item has already moved on.'
 const BAD_CURSOR = 'That page cursor is not valid.'
 const MALFORMED = 'Malformed request.'
 
-function send(status, text) {
-  // A reply with no body (204) names no content type.
-  const type = text === null ? {} : { 'Content-Type': 'application/json' }
-  return new Response(text, { status, headers: { ...type, 'Cache-Control': 'no-store' } })
-}
-const reply = (status, body) => send(status, JSON.stringify(body))
-
-// Stryker disable next-line StringLiteral: a missing header and any other default are neither application/json nor multipart/form-data
-const mediaType = (request) => (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase()
-
 /**
  * → { body, blank } from a JSON request, or { status, error } for the reply to give instead. `body` is
  * undefined for text that is not JSON; `blank` says there was no text at all, which a hide takes as "no note".
  */
-async function readJson(request) {
-  if (mediaType(request) !== 'application/json') return { status: 415, error: 'Send JSON (Content-Type: application/json).' }
-  const text = await request.text()
-  if (new TextEncoder().encode(text).length > JSON_MAX_BYTES) return { status: 413, error: 'The request is too large (16 KB at most).' }
-  let body
-  try {
-    body = JSON.parse(text)
-  } catch {
-    // left undefined
-  }
-  return { body, blank: text.trim() === '' }
-}
+const readJson = (request) => readJsonWithin(request, { maxBytes: JSON_MAX_BYTES, tooLarge: 'The request is too large (16 KB at most).' })
 
 export function createGalleryHandler({ access, store, r2, poll, displayNames, configured }) {
   /** A row as the site sees it: a link instead of a storage key, a display name for the author. */

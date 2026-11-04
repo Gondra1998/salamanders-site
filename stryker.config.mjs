@@ -45,6 +45,7 @@ export default {
     'server/src/galleryHandler.js',
     'server/src/galleryConfig.js',
     'server/src/inTx.js',
+    'server/src/httpReply.js',
     'src/lib/gallery/embed.js',
   ],
   coverageAnalysis: 'perTest',

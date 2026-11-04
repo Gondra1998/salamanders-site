@@ -52,6 +52,19 @@ services:
       # Throwaway key for the synthetic fixture only. Must match the web
       # service's E2E_ARCHIVE_KEY below.
       ARCHIVE_KEY: 'ZTJlLXRocm93YXdheS1rZXktMzItYnl0ZXMtbG9uZyE='
+      # The Reliquarium (tests/gallery-api.spec.js, tests/gallery.spec.js). discord-mock stands in for the clips
+      # channel, Discord's CDN and R2. The endpoint is an origin only (server/src/r2.js refuses one with a path),
+      # so objects live at http://discord-mock:4400/e2e-bucket/<key>, which the browser in the playwright
+      # container reaches too. Invented ids, the same as in discord-mock/server.js.
+      R2_ENDPOINT: http://discord-mock:4400
+      R2_ACCOUNT_ID: e2e
+      R2_BUCKET: e2e-bucket
+      R2_ACCESS_KEY_ID: e2e
+      R2_SECRET_ACCESS_KEY: e2e
+      GALLERY_CHANNEL_ID: '200000000000000300'
+      GALLERY_CURATOR_ROLE_ID: '200000000000000301'
+      # Every second, so a clip posted by a spec is stored, or a deleted one gone, within a couple of seconds.
+      GALLERY_POLL_MS: '1000'
     healthcheck:
       test: ['CMD', 'bun', '-e', "fetch('http://localhost:8787/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 2s

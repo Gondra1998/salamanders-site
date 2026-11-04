@@ -1,0 +1,450 @@
+/* The Reliquarium: the members' galleries of clips and art.
+ *
+ * Phone first. One column under 600px with 16px gutters, every control at least 44px tall on a touch screen or a
+ * phone (var(--tap): its own size on desktop), and no control that needs a hover to be found. Everything uses the
+ * site's tokens (style.css) and shared buttons (.btn-ember, .btn-drake, .btn-ghost, .btn-sm) and panels
+ * (.panel-forge, .surface); class names start with rq- so none reaches another page.
+ * tests: gallery.css.test.js pins the layout promises, motionPolicy.test.js sweeps the motion rules. */
+
+.rq {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 4rem 1rem 2rem;
+}
+@media (min-width: 600px) {
+  .rq {
+    padding-inline: 1.5rem;
+  }
+}
+
+/* The gate: the same height in every state, so the page does not jump when the answer arrives. */
+.rq-gate {
+  max-width: 34rem;
+  min-height: 12rem;
+  margin: 1.6rem 0;
+  padding: 2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  text-align: center;
+  border-radius: 3px;
+}
+.rq-gate p {
+  margin: 0;
+  max-width: 28rem;
+  line-height: 1.6;
+  color: var(--color-smoke);
+}
+.rq-gate .btn-ember {
+  min-height: 44px;
+  padding: 0.7rem 1.4rem;
+  justify-content: center;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+/* The tab bar wraps onto a second line on a narrow phone rather than scrolling sideways. */
+.rq-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1.6rem 0 1.2rem;
+}
+.rq-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+  color: var(--color-smoke);
+  background: rgba(14, 28, 22, 0.5);
+  border: 1px solid var(--color-ash);
+  padding: 0.5rem 0.9rem;
+  border-radius: 2px;
+  min-height: var(--tap);
+  transition:
+    transform var(--dur-press) var(--ease-forge),
+    color var(--dur-state) var(--ease-forge),
+    background-color var(--dur-state) var(--ease-forge),
+    border-color var(--dur-state) var(--ease-forge);
+}
+.rq-tab:active {
+  transform: scale(0.97);
+}
+.rq-tab[aria-current='page'] {
+  color: var(--color-drake);
+  background: rgba(89, 214, 108, 0.1);
+  border-color: rgba(89, 214, 108, 0.6);
+}
+@media (hover: hover) and (pointer: fine) {
+  .rq-tab:hover {
+    color: var(--color-bone);
+    border-color: var(--color-ash-2);
+  }
+  .rq-tab[aria-current='page']:hover {
+    color: var(--color-drake);
+    border-color: rgba(89, 214, 108, 0.8);
+  }
+}
+/* How many pieces are waiting for review. */
+.rq-badge {
+  min-width: 1.3rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.3rem;
+  color: #1a0d06;
+  background: var(--color-ember);
+}
+
+.rq-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.rq-muted {
+  margin: 0;
+  color: var(--color-faint);
+  line-height: 1.6;
+}
+.rq-error {
+  margin: 0;
+  color: var(--color-vacant);
+  line-height: 1.5;
+}
+.rq-done {
+  margin: 0;
+  color: var(--color-drake);
+}
+.rq-panel button:disabled,
+.rq-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The gallery: as many columns of at least 260px as fit, one under 600px. */
+.rq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (max-width: 599px) {
+  .rq-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.rq-grid > li {
+  min-width: 0;
+}
+.rq-more {
+  align-self: center;
+  cursor: pointer;
+}
+
+.rq-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 3px;
+}
+.rq-media {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--color-obsidian);
+}
+.rq-video,
+.rq-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--color-obsidian);
+}
+.rq-video {
+  object-fit: contain;
+}
+/* The whole picture is the button that opens it full size. */
+.rq-open {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.rq-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.rq-embed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1rem;
+  text-align: center;
+}
+.rq-provider {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-bone);
+}
+.rq-failed {
+  margin: 0;
+  padding: 1rem;
+  text-align: center;
+  color: var(--color-vacant);
+}
+.rq-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+}
+.rq-text {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+/* "Hide for everyone? Yes No" takes a row of its own under the name, so a narrow card never squeezes the title. */
+.rq-confirm {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.rq-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-bone);
+  overflow-wrap: anywhere;
+}
+.rq-byline {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-smoke);
+  overflow-wrap: anywhere;
+}
+.rq-note {
+  margin: 0;
+  color: var(--color-smoke);
+  line-height: 1.6;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.rq-hide {
+  flex: none;
+}
+
+/* Submit, and the reason box in the review queue. */
+.rq-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 36rem;
+  padding: 1.4rem;
+}
+.rq-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--color-bone);
+}
+.rq-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0.6rem 0.8rem;
+  background: rgba(14, 28, 22, 0.6);
+  border: 1px solid var(--color-ash);
+  border-radius: 3px;
+  color: var(--color-bone);
+  font: inherit;
+}
+.rq-submit {
+  align-self: flex-start;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0.7rem 1.4rem;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+/* Mine: one row per item, with where it stands. */
+.rq-mine {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rq-mine-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.7rem 1rem;
+}
+.rq-mine-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.rq-mine-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.rq-ask {
+  font-size: 0.9rem;
+  color: var(--color-smoke);
+}
+.rq-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--color-ash);
+  border-radius: 999px;
+  background: rgba(5, 10, 8, 0.6);
+  font-size: 0.8rem;
+  color: var(--color-smoke);
+  overflow-wrap: anywhere;
+}
+.rq-chip[data-status='pending'] {
+  color: var(--color-gold);
+  border-color: rgba(223, 184, 91, 0.5);
+}
+.rq-chip[data-status='approved'] {
+  color: var(--color-drake);
+  border-color: rgba(89, 214, 108, 0.5);
+}
+.rq-chip[data-status='rejected'] {
+  color: var(--color-vacant);
+  border-color: rgba(255, 154, 122, 0.5);
+}
+.rq-chip[data-status='hidden'] {
+  color: var(--color-smoke);
+}
+.rq-chip[data-status='removed'] {
+  color: var(--color-faint);
+}
+
+/* Review: the queue is a grid like the galleries; each card has its decision under it. */
+.rq-review-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.rq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.rq-reject {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* Recent activity: the audit log under the review queue, shut until it is asked for. */
+.rq-events {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+.rq-events-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+.rq-events-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rq-event {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.8rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--color-ash);
+  font-size: 0.9rem;
+  color: var(--color-smoke);
+}
+.rq-event-action {
+  font-weight: 600;
+  color: var(--color-bone);
+}
+.rq-event-note {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+
+/* The picture at full size, over the whole page and above the navigation. */
+.rq-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: rgba(5, 10, 8, 0.94);
+}
+.rq-lightbox-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  max-width: 100%;
+  margin: 0;
+}
+.rq-lightbox-img {
+  display: block;
+  max-width: 100%;
+  max-height: 75svh;
+  object-fit: contain;
+}
+.rq-lightbox-caption {
+  max-width: 40rem;
+  text-align: center;
+}
+.rq-close {
+  align-self: flex-end;
+  flex: none;
+  cursor: pointer;
+}

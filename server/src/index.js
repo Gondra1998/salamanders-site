@@ -25,6 +25,12 @@ import { createDeathwatchHandler } from './deathwatchHandler.js'
 import { createDeathwatchStore } from './deathwatchStore.js'
 import { createDiscordRoles } from './discordRoles.js'
 import { createDisplayNames } from './displayNames.js'
+import { createGalleryAccess } from './galleryAccess.js'
+import { CHANNEL_ID, galleryConfigReport, pollIntervalMs } from './galleryConfig.js'
+import { createGalleryDiscord } from './galleryDiscord.js'
+import { createGalleryHandler } from './galleryHandler.js'
+import { createGalleryPoll } from './galleryPoll.js'
+import { createGalleryStore } from './galleryStore.js'
 import { createHistoryStore } from './historyStore.js'
 import { createMembership } from './membership.js'
 import { createMembershipHandler } from './membershipHandler.js'
@@ -35,6 +41,8 @@ import { createRoster } from './roster.js'
 import { createRosterHandler } from './rosterHandler.js'
 import { createRosterPublicHandler } from './rosterPublicHandler.js'
 import { createReportsStore } from './reportsStore.js'
+import { createR2 } from './r2.js'
+import { CAPTAIN, LEGION_HIERARCHY_ROLE } from './rosterLadder.js'
 import { createNotifier } from './webhook.js'
 
 const PORT = Number(process.env.PORT || 8787)
@@ -107,6 +115,54 @@ const deathwatch = createDeathwatchHandler({
     deathwatchCommandRoleId: process.env.DEATHWATCH_COMMAND_ROLE_ID,
   }),
   store: deathwatchStore,
+})
+
+// The Reliquarium, members-only art and clips galleries — see galleryHandler.js. Until the clips channel
+// and all four R2 values are set, every /gallery route answers 503 and the clips poll does not start.
+// R2_ENDPOINT is for the e2e stack's mock only; an empty one must not replace Cloudflare's.
+const r2 = createR2({
+  accountId: process.env.R2_ACCOUNT_ID,
+  bucket: process.env.R2_BUCKET,
+  accessKeyId: process.env.R2_ACCESS_KEY_ID,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  endpoint: process.env.R2_ENDPOINT || undefined,
+})
+const galleryStore = createGalleryStore(pool)
+const GALLERY_CHANNEL_ID = process.env.GALLERY_CHANNEL_ID || ''
+const galleryConfigured = r2.configured && CHANNEL_ID.test(GALLERY_CHANNEL_ID)
+// Some gallery variables set but not a working gallery: say which, by name only, so the 503s are not a mystery.
+const galleryReport = galleryConfigReport(process.env)
+if (galleryReport) console.warn(galleryReport)
+// Not created unconfigured (its constructor refuses bad options); the Review tab then shows no runs.
+let galleryPoll = { status: async () => ({ lastRunAt: null, lastOkAt: null, lastError: null }) }
+if (galleryConfigured) {
+  galleryPoll = createGalleryPoll({
+    discord: createGalleryDiscord({ apiBase: DISCORD_API_BASE, botToken: BOT_TOKEN }),
+    r2,
+    store: galleryStore,
+    channelId: GALLERY_CHANNEL_ID,
+    // At least a second and at most setInterval's ceiling; unset or not above 0, two minutes (galleryConfig.js).
+    intervalMs: pollIntervalMs(process.env),
+  })
+  galleryPoll.start()
+}
+const gallery = createGalleryHandler({
+  access: createGalleryAccess({
+    roles,
+    memberRoleId: process.env.REPORTER_ROLE_ID || '1377787723976409211',
+    // The curator role is optional: unset, nobody is curator and the other approver roles still work.
+    approverRoleIds: [
+      process.env.RECLUSIARCH_ROLE_ID || '1323334632904855592',
+      CAPTAIN.id,
+      LEGION_HIERARCHY_ROLE,
+      process.env.GALLERY_CURATOR_ROLE_ID,
+    ],
+  }),
+  store: galleryStore,
+  r2,
+  poll: galleryPoll,
+  displayNames,
+  configured: galleryConfigured,
 })
 
 // Perk corrections, version history, privilege revocation — see perks.js.
@@ -203,9 +259,9 @@ async function createBuild(request) {
 
 Bun.serve({
   port: PORT,
-  // Bun's default is 128 MB. The largest legitimate body is a 2 MB Deathwatch edit; this refuses anything
-  // bigger (a chunked body included) before a handler reads it into memory.
-  maxRequestBodySize: 4 * 1024 * 1024,
+  // Bun's default is 128 MB. The largest legitimate body is a Reliquarium art upload (a 10 MB file plus its
+  // form fields); this refuses anything bigger (a chunked body included) before a handler reads it into memory.
+  maxRequestBodySize: 12 * 1024 * 1024,
   async fetch(request) {
     if (request.method === 'OPTIONS') return cors(new Response(null, { status: 204 }))
 
@@ -217,6 +273,8 @@ Bun.serve({
       if (reportsRes) return cors(reportsRes)
       const deathwatchRes = await deathwatch(request, url)
       if (deathwatchRes) return cors(deathwatchRes)
+      const galleryRes = await gallery(request, url)
+      if (galleryRes) return cors(galleryRes)
       const perksRes = await perks(request, url)
       if (perksRes) return cors(perksRes)
       const rosterPublicRes = await rosterPublicRoutes(request, url)

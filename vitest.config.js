@@ -45,6 +45,7 @@ const GATED = [
   'server/src/galleryConfig.js',
   'server/src/inTx.js',
   'server/src/httpReply.js',
+  'server/src/verdictCache.js',
   'src/lib/gallery/embed.js',
 ]
 

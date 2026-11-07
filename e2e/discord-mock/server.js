@@ -207,6 +207,13 @@ async function r2(request, key) {
     objects.set(key, { type: request.headers.get('Content-Type') || 'application/octet-stream', bytes })
     return new Response(null, { status: 200, headers: { ETag: `"${Bun.hash(bytes).toString(16)}"` } })
   }
+  // A DELETE, signed as r2.js signs one; real R2 answers 204 whether or not the object was there.
+  if (request.method === 'DELETE') {
+    const auth = request.headers.get('Authorization') || ''
+    if (!auth.startsWith('AWS4-HMAC-SHA256 Credential=') || !request.headers.get('x-amz-date')) return s3Error(403, 'AccessDenied')
+    objects.delete(key)
+    return new Response(null, { status: 204 })
+  }
   if (request.method !== 'GET' && request.method !== 'HEAD') return s3Error(405, 'MethodNotAllowed')
   // A presigned GET: its X-Amz-* query is ignored.
   const object = objects.get(key)

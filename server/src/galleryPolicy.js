@@ -6,11 +6,14 @@
  * OTHER_CLIPS_CAP_BYTES only #gameplay clips are copied, so other clips cannot crowd gameplay out.
  *
  * A file whose item is in a PURGEABLE status, and has been for PURGE_AFTER_DAYS, leaves R2 once the nightly
- * backup holds it (galleryPurge.js); its row and audit trail stay.
+ * backup holds it (galleryPurge.js); its row and audit trail stay. The backup copy goes at BACKUP_KEEP_DAYS, so a
+ * file taken down exists nowhere after that. A member's own removal, an approver's Delete for good and the owner's
+ * erase command do not wait: see galleryStore.js eraseByOwner, eraseFile and eraseItem.
  */
 export const STORAGE_CAP_BYTES = 9_000_000_000
 export const OTHER_CLIPS_CAP_BYTES = 7_000_000_000
 export const PURGE_AFTER_DAYS = 30
+export const BACKUP_KEEP_DAYS = 60
 export const PURGEABLE = Object.freeze(['rejected', 'hidden', 'removed'])
 
 // Links to these sites wait for review whatever the tag: nothing says the poster made the video.

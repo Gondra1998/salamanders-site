@@ -2,12 +2,22 @@
 # salamanders-r2-backup: nightly backup of the Reliquarium's R2 bucket, then the storage purge.
 #
 # 1. Copies into DEST every object in the bucket that DEST does not hold yet (rclone copy --ignore-existing:
-#    an object is written once under its own key and never changed, so nothing is sent twice). Nothing in DEST
-#    is ever deleted: the backup keeps every file, the ones the purge later takes out of R2 included.
+#    an object is written once under its own key and never changed, so nothing is sent twice). It copies, never
+#    syncs: R2 losing a file never takes it out of DEST. Files leave DEST only in step 4, by name.
 # 2. Checks, one way, that every object in R2 is in DEST at the same size and MD5 (rclone check).
 # 3. Lists both sides into a manifest and hands it to the API's purge (server/src/galleryPurgeRun.js), which
-#    takes out of R2 the files of items rejected, hidden or removed for 30 days, and only those DEST holds.
-#    The purge runs only after 1 and 2 passed.
+#    takes out of R2 the files of items rejected, hidden or removed for 30 days, and only those DEST holds, and
+#    the files deleted for good (a member's own takedown, an approver's Delete for good). The purge runs only
+#    after 1 and 2 passed.
+# 4. Deletes from DEST the files the purge names (`expire<TAB>key`): those deleted for good, and those of items
+#    taken down 60 days ago. Each key must be a storage key in exactly the shape the API makes; one that is not
+#    stops the run before anything is deleted. A dry run deletes nothing.
+#
+# The owner's erase command runs first when asked, under the same lock, for a "please forget me" request:
+#   salamanders-r2-backup --erase-item <item id>        one item, any status
+#   salamanders-r2-backup --erase-member <discord id>   everything one member posted
+# The items, their history and their files go from the database and R2 (server/src/galleryEraseRun.js), then this
+# run takes the files out of the backup.
 #
 # The R2 values are read from COMPOSE_DIR/.env (never sourced: only the four R2_ lines are read) and reach
 # rclone as environment variables passed by name, so the secret is never on a command line.
@@ -21,9 +31,10 @@
 #   RCLONE_IMAGE   rclone image, pinned by digest                  (rclone/rclone:1.76.0@sha256:...)
 #   STATE_DIR      status file + log                               (~/.local/state/salamanders-r2-backup)
 #
-# Exit codes: 0 ok | 2 bad config | 3 backup drive not mounted/usable | 4 R2 settings missing or malformed |
-# 5 copy failed | 6 the backup does not match R2 | 7 listing failed | 8 purge failed | 9 another run in
-# progress. STATE_DIR/last-run always holds the latest result.
+# Exit codes: 0 ok | 2 bad config or arguments | 3 backup drive not mounted/usable | 4 R2 settings missing or
+# malformed | 5 copy failed | 6 the backup does not match R2 | 7 listing failed | 8 purge failed, or it named a
+# file that is not a storage key | 9 another run in progress | 10 the erase failed. STATE_DIR/last-run always
+# holds the latest result.
 
 set -uo pipefail
 umask 077
@@ -66,7 +77,15 @@ exec 9> "$STATE_DIR/lock"
 flock -n 9 || { NO_STATUS=1; echo "another R2 backup run is in progress" >&2; exit 9; }
 
 # ---- validate at the boundary: nothing below runs on bad configuration -------------------------
+ERASE=()
+case "$#:${1:-}" in
+  0:) ;;
+  2:--erase-item) [[ $2 =~ ^[0-9]{1,15}$ ]] || fail 2 "--erase-item takes an item id"; ERASE=(--item "$2") ;;
+  2:--erase-member) [[ $2 =~ ^[0-9]{17,20}$ ]] || fail 2 "--erase-member takes a Discord user id"; ERASE=(--member "$2") ;;
+  *) fail 2 "usage: salamanders-r2-backup [--erase-item <id> | --erase-member <discord id>]" ;;
+esac
 [[ $PURGE =~ ^(0|1|dry)$ ]] || fail 2 "PURGE must be 0, 1 or dry (got '$PURGE')"
+[ ${#ERASE[@]} -eq 0 ] || [ "$PURGE" = 1 ] || fail 2 "an erase needs PURGE=1: the backup copy goes in the purge step"
 [[ $API_SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || fail 2 "API_SERVICE must be a plain name (got '$API_SERVICE')"
 [[ $RCLONE_IMAGE =~ ^[a-z0-9./_-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || fail 2 "RCLONE_IMAGE must be pinned as name:tag@sha256:<digest>"
 [ -n "$COMPOSE_DIR" ] || fail 2 "COMPOSE_DIR is empty"
@@ -110,6 +129,17 @@ rclone() {
     -v "$DEST_REAL:/backup" "$RCLONE_IMAGE" --config /dev/null "$@"
 }
 held() { find "$DEST_REAL" -type f | wc -l; }
+api() { docker compose -f "$COMPOSE_DIR/docker-compose.yml" exec -T "$API_SERVICE" bun run "$@"; }
+
+# ---- 0. the owner's erase, when asked: before the copy, so the night ends with the files gone -----
+ERASED=""
+if [ ${#ERASE[@]} -gt 0 ]; then
+  erase_out=$(api src/galleryEraseRun.js "${ERASE[@]}" 2>&1)
+  erase_code=$?
+  log "$erase_out"
+  [ "$erase_code" -eq 0 ] || fail 10 "the erase failed: $(printf '%s\n' "$erase_out" | tail -n 1)"
+  ERASED=" erase: $(printf '%s\n' "$erase_out" | head -n 1)"
+fi
 
 # ---- 1. copy what is new; 2. prove the backup holds everything R2 holds --------------------------
 before=$(held)
@@ -132,9 +162,26 @@ if [ "$PURGE" = 0 ]; then
 fi
 args=()
 [ "$PURGE" = dry ] && args=(--dry-run)
-out=$(docker compose -f "$COMPOSE_DIR/docker-compose.yml" exec -T "$API_SERVICE" bun run src/galleryPurgeRun.js "${args[@]}" < "$MANIFEST" 2>&1)
+out=$(api src/galleryPurgeRun.js "${args[@]}" < "$MANIFEST" 2>&1)
 code=$?
-log "$out"
+# The keys stay out of the log: they say which files went, and that is no business of a log file.
+log "$(printf '%s\n' "$out" | grep -v '^expire	')"
 [ "$code" -eq 0 ] || fail 8 "the purge failed: $(printf '%s\n' "$out" | tail -n 1)"
 SUMMARY="$SUMMARY $(printf '%s\n' "$out" | head -n 1)"
+
+# ---- 4. the backup lets go of what the purge names: every key checked before any file goes -------
+mapfile -t expire < <(printf '%s\n' "$out" | sed -n 's/^expire	//p')
+for key in "${expire[@]}"; do
+  [[ $key =~ ^(art/[0-9]{1,20}|clips/[0-9]{1,20}/[0-9]{1,20})\.(jpg|png|gif|webp|mp4|mov|webm)$ ]] || fail 8 "the purge named a file that is not a storage key; nothing was deleted from the backup"
+done
+expired=0
+if [ "$PURGE" = 1 ]; then
+  for key in "${expire[@]}"; do
+    [ -e "$DEST_REAL/$key" ] || continue
+    rm -f -- "$DEST_REAL/$key" || fail 8 "could not delete a file from the backup"
+    expired=$((expired + 1))
+  done
+  find "$DEST_REAL" -mindepth 1 -type d -empty -delete 2>/dev/null
+fi
+SUMMARY="$SUMMARY expired=$expired$ERASED"
 exit 0

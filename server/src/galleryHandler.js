@@ -19,6 +19,7 @@ import { capFor, fits } from './galleryPolicy.js'
 
 const ITEM_ROUTE = /^\/gallery\/items\/([^/]+)$/
 const ACTION_ROUTE = /^\/gallery\/items\/([^/]+)\/(approve|reject|hide)$/
+const ERASE_ROUTE = /^\/gallery\/items\/([^/]+)\/erase$/
 const LINK_SECONDS = 900 // R2 links live 15 minutes
 const FORM_SLACK = 65_536 // multipart boundaries and the text fields, on top of the file
 const UPLOAD_TIMEOUT_MS = 60_000
@@ -156,13 +157,36 @@ export function createGalleryHandler({ access, store, r2, poll, displayNames, co
     return reply(200, { item: await one(result.item) })
   }
 
+  /** Delete a file from R2 now if R2 lets us. Its key is already noted (gallery_erasures): if not now, tonight. */
+  async function dropFile(key) {
+    try {
+      await r2.remove(key)
+    } catch {
+      console.error('Reliquarium: a file could not be deleted from R2 now; the nightly backup run will delete it.')
+    }
+  }
+
+  /** A member takes their own piece down for good: the row and trail go, the file from R2 now and the backup tonight. */
   async function remove(id, verdict) {
     if (!isItemId(id)) return reply(404, { error: NO_SUCH_ITEM })
-    const result = await store.removeByOwner(id, verdict.user)
+    const result = await store.eraseByOwner(id, verdict.user)
     if (result === 'missing') return reply(404, { error: NO_SUCH_ITEM })
     if (result === 'conflict') return reply(409, { error: MOVED_ON })
+    if (result.key !== null) await dropFile(result.key)
     return send(204, null)
   }
+
+  /** An approver deletes a taken-down piece's file for good; the row and its moderation trail stay. */
+  async function erase(id, verdict) {
+    if (!isItemId(id)) return reply(404, { error: NO_SUCH_ITEM })
+    const result = await store.eraseFile(id, verdict.user)
+    if (result === 'missing') return reply(404, { error: NO_SUCH_ITEM })
+    if (result === 'conflict') return reply(409, { error: MOVED_ON })
+    if (result.inR2) await dropFile(result.key)
+    return send(204, null)
+  }
+
+  const takedowns = async () => reply(200, { items: await views(await store.takedowns()) })
 
   /** The note an action records: null for an approval, the reason for a rejection, the optional note for a hide. */
   const notes = {
@@ -230,6 +254,9 @@ export function createGalleryHandler({ access, store, r2, poll, displayNames, co
     if (method === 'GET' && pathname === '/gallery/mine') return { ...member, run: mine }
     if (method === 'GET' && pathname === '/gallery/review') return { ...approver, run: review }
     if (method === 'GET' && pathname === '/gallery/events') return { ...approver, run: events }
+    if (method === 'GET' && pathname === '/gallery/takedowns') return { ...approver, run: takedowns }
+    const eraseId = ERASE_ROUTE.exec(pathname)?.[1]
+    if (method === 'POST' && eraseId !== undefined) return { ...approver, run: (_request, verdict) => erase(eraseId, verdict) }
     const itemId = ITEM_ROUTE.exec(pathname)?.[1]
     if (method === 'DELETE' && itemId !== undefined) return { ...member, run: (_request, verdict) => remove(itemId, verdict) }
     const actionMatch = ACTION_ROUTE.exec(pathname)

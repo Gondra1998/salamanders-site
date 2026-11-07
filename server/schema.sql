@@ -239,3 +239,11 @@ alter table gallery_items add column if not exists file_purged_at timestamptz;
 alter table gallery_events
   drop constraint if exists gallery_events_action_check,
   add constraint gallery_events_action_check check (action in ('stored', 'submitted', 'approved', 'rejected', 'hidden', 'removed', 'discord_deleted', 'file_purged'));
+
+-- Erasures (galleryStore.js eraseByOwner, eraseItem, eraseFile): the storage key of a file deleted for good, noted
+-- until the nightly backup run has taken it out of R2 and out of the backup. A member's own takedown deletes the
+-- item's row and trail, so this key is all that is left, and it goes too once both copies have.
+create table if not exists gallery_erasures (
+  r2_key       text primary key,
+  requested_at timestamptz not null default now()
+);

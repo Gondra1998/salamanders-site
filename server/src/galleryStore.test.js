@@ -284,23 +284,48 @@ describe('transition', () => {
   })
 })
 
-describe('removeByOwner', () => {
-  it("removes the owner's own live item and records the removed event", async () => {
-    const item = { id: '9', status: 'removed' }
-    const { pool, log, sqls } = fakePool([['update gallery_items', [item]]])
-    expect(await store(pool).removeByOwner('9', OWNER)).toEqual({ item })
-    expect(sqls()).toEqual(['begin', has('update gallery_items'), has('insert into gallery_events'), 'commit'])
-    expect(log[1].sql).toContain("where id = $1 and status = any($2::text[]) and ($3 <> 'approved' or file_purged_at is null) and author_discord_id = $4")
-    expect(log[1].params).toEqual(['9', ['pending', 'approved', 'rejected'], 'removed', OWNER.id])
-    expect(log[2].params).toEqual(['9', 'removed', OWNER.id, OWNER.username, ''])
+describe('eraseByOwner: a member takes their own piece down, and nothing of it stays', () => {
+  const held = (over = {}) => [{ status: 'approved', r2_key: 'art/9.png', ...over }]
+
+  it('locks the row, notes the file key for the nightly run, then deletes the trail and the row, in one transaction', async () => {
+    const { pool, log, sqls, release } = fakePool([['from gallery_items where id = $1 and author', held()]])
+    expect(await store(pool).eraseByOwner('9', OWNER)).toEqual({ key: 'art/9.png' })
+    expect(sqls()).toEqual([
+      'begin',
+      'select status, r2_key from gallery_items where id = $1 and author_discord_id = $2 for update',
+      'insert into gallery_erasures (r2_key) values ($1) on conflict do nothing',
+      'delete from gallery_events where item_id = $1',
+      'delete from gallery_items where id = $1',
+      'commit',
+    ])
+    expect(log.slice(1, 5).map((l) => l.params)).toEqual([['9', OWNER.id], ['art/9.png'], ['9'], ['9']])
+    expect(release).toHaveBeenCalledTimes(1)
   })
 
-  it('leaves the reviewer columns alone, since an owner removing their own piece is not a review', async () => {
-    const { pool, log } = fakePool([['update gallery_items', [{ id: '9' }]]])
-    await store(pool).removeByOwner('9', OWNER)
-    expect(log[1].sql).toContain("set status = $3, updated_at = now()")
-    expect(log[1].sql).not.toContain('reviewed_by')
-    expect(log[1].sql).not.toContain('review_note')
+  it.each(['pending', 'approved', 'rejected'])('takes a %s piece', async (status) => {
+    const { pool } = fakePool([['from gallery_items where id = $1 and author', held({ status })]])
+    expect(await store(pool).eraseByOwner('9', OWNER)).toEqual({ key: 'art/9.png' })
+  })
+
+  it('notes no key for a piece with no file (a link), and still deletes it', async () => {
+    for (const r2_key of [null, '']) {
+      const { pool, sqls } = fakePool([['from gallery_items where id = $1 and author', held({ r2_key })]])
+      expect(await store(pool).eraseByOwner('9', OWNER)).toEqual({ key: null })
+      expect(sqls()).not.toContainEqual(has('gallery_erasures'))
+      expect(sqls()).toContain('delete from gallery_items where id = $1')
+    }
+  })
+
+  it("answers 'missing' for no such item or someone else's, without saying which, and deletes nothing", async () => {
+    const { pool, sqls } = fakePool([['from gallery_items where id = $1 and author', []]])
+    expect(await store(pool).eraseByOwner('9', OWNER)).toBe('missing')
+    expect(sqls()).toEqual(['begin', has('for update'), 'commit'])
+  })
+
+  it.each(['hidden', 'removed'])("answers 'conflict' for the owner's own %s piece, and deletes nothing", async (status) => {
+    const { pool, sqls } = fakePool([['from gallery_items where id = $1 and author', held({ status })]])
+    expect(await store(pool).eraseByOwner('9', OWNER)).toBe('conflict')
+    expect(sqls()).toEqual(['begin', has('for update'), 'commit'])
   })
 
   it.each([
@@ -311,40 +336,156 @@ describe('removeByOwner', () => {
     ['a numeric id', { id: 300000000000000002, username: 'Artist' }],
     ['no user at all', undefined],
   ])('refuses a user with %s before any query, so the owner check can never be dropped', async (_name, user) => {
-    const { pool, log } = fakePool([['update gallery_items', [{ id: '9' }]]])
-    const refused = store(pool).removeByOwner('9', user)
+    const { pool, log } = fakePool([['from gallery_items', held()]])
+    const refused = store(pool).eraseByOwner('9', user)
     await expect(refused).rejects.toThrow(TypeError)
     await expect(refused).rejects.toThrow('user.id must be a non-empty string')
     expect(log).toEqual([])
   })
 
-  it("answers 'missing' when there is no such item or it is someone else's, without saying which", async () => {
-    const { pool, log, sqls } = fakePool([
-      ['update gallery_items', []],
-      ['select 1 from gallery_items', []],
+  it('rolls back, keeping the row and its trail, when a delete fails', async () => {
+    const { pool, sqls } = fakePool([
+      ['from gallery_items where id = $1 and author', held()],
+      ['delete from gallery_items', new Error('boom')],
     ])
-    expect(await store(pool).removeByOwner('9', OWNER)).toBe('missing')
-    expect(log[2].sql).toContain('where id = $1 and author_discord_id = $2')
-    expect(log[2].params).toEqual(['9', OWNER.id])
-    expect(sqls()).toEqual(['begin', has('update gallery_items'), has('select 1 from gallery_items'), 'commit'])
+    await expect(store(pool).eraseByOwner('9', OWNER)).rejects.toThrow('boom')
+    expect(sqls().at(-1)).toBe('rollback')
+    expect(sqls()).not.toContain('commit')
+  })
+})
+
+describe('eraseItem: the owner command, for any piece in any status', () => {
+  it('deletes the piece as a member removal does, with no owner or status check', async () => {
+    const { pool, log, sqls } = fakePool([['select r2_key from gallery_items', [{ r2_key: 'clips/1/2.mp4' }]]])
+    expect(await store(pool).eraseItem('7')).toEqual({ key: 'clips/1/2.mp4' })
+    expect(sqls()).toEqual([
+      'begin',
+      'select r2_key from gallery_items where id = $1 for update',
+      'insert into gallery_erasures (r2_key) values ($1) on conflict do nothing',
+      'delete from gallery_events where item_id = $1',
+      'delete from gallery_items where id = $1',
+      'commit',
+    ])
+    expect(log[1].params).toEqual(['7'])
   })
 
-  it("answers 'conflict' only for the owner's own item that can no longer be removed", async () => {
+  it("answers 'missing' for no such item", async () => {
+    const { pool, sqls } = fakePool([['select r2_key from gallery_items', []]])
+    expect(await store(pool).eraseItem('7')).toBe('missing')
+    expect(sqls()).toEqual(['begin', has('for update'), 'commit'])
+  })
+
+  it.each([null, undefined, '', 7])('refuses an id of %j before any query', async (id) => {
+    const { pool, log } = fakePool()
+    await expect(store(pool).eraseItem(id)).rejects.toThrow('id must be a non-empty string')
+    expect(log).toEqual([])
+  })
+})
+
+describe('itemIdsBy', () => {
+  it("lists one member's pieces by id, as text, oldest first", async () => {
+    const { pool, log } = fakePool([['from gallery_items', [{ id: 3 }, { id: '12' }]]])
+    expect(await store(pool).itemIdsBy(OWNER.id)).toEqual(['3', '12'])
+    expect(log[0].sql).toBe('select id from gallery_items where author_discord_id = $1 order by id')
+    expect(log[0].params).toEqual([OWNER.id])
+  })
+
+  it.each([null, undefined, '', 300000000000000002])('refuses an author of %j before any query', async (who) => {
+    const { pool, log } = fakePool()
+    await expect(store(pool).itemIdsBy(who)).rejects.toThrow('authorId must be a non-empty string')
+    expect(log).toEqual([])
+  })
+})
+
+describe("eraseFile: an approver deletes a taken-down piece's file for good", () => {
+  const ERASABLE =
+    "select r2_key, file_purged_at from gallery_items where id = $1 and status = any($2::text[]) and r2_key is not null and r2_key <> '' and updated_at > now() - make_interval(days => $3) and not exists (select 1 from gallery_erasures e where e.r2_key = gallery_items.r2_key) for update"
+
+  it('notes the key, marks the file gone from R2 and records who did it, in one transaction; the row stays', async () => {
+    const { pool, log, sqls } = fakePool([['select r2_key, file_purged_at', [{ r2_key: 'art/4.png', file_purged_at: null }]]])
+    expect(await store(pool).eraseFile('4', REVIEWER)).toEqual({ key: 'art/4.png', inR2: true })
+    expect(sqls()).toEqual([
+      'begin',
+      ERASABLE,
+      'insert into gallery_erasures (r2_key) values ($1) on conflict do nothing',
+      'update gallery_items set file_purged_at = now() where id = $1',
+      has('insert into gallery_events'),
+      'commit',
+    ])
+    expect(log[1].params).toEqual(['4', [...PURGEABLE], 60])
+    expect(log[2].params).toEqual(['art/4.png'])
+    expect(log[3].params).toEqual(['4'])
+    expect(log[4].params).toEqual(['4', 'file_purged', REVIEWER.id, REVIEWER.username, 'deleted for good'])
+    expect(sqls()).not.toContainEqual(has('delete from'))
+  })
+
+  it('for a file the purge already took out of R2, only notes the key for the backup', async () => {
+    const { pool, sqls } = fakePool([['select r2_key, file_purged_at', [{ r2_key: 'art/4.png', file_purged_at: '2026-12-01' }]]])
+    expect(await store(pool).eraseFile('4', REVIEWER)).toEqual({ key: 'art/4.png', inR2: false })
+    expect(sqls()).not.toContain('update gallery_items set file_purged_at = now() where id = $1')
+    expect(sqls()).toContainEqual(has('insert into gallery_events'))
+  })
+
+  it("answers 'conflict' for a piece that is live, has no file, was erased already or is past 60 days", async () => {
     const { pool, sqls } = fakePool([
-      ['update gallery_items', []],
+      ['select r2_key, file_purged_at', []],
       ['select 1 from gallery_items', [{ one: 1 }]],
     ])
-    expect(await store(pool).removeByOwner('9', OWNER)).toBe('conflict')
-    expect(sqls()).toEqual(['begin', has('update gallery_items'), has('select 1 from gallery_items'), 'commit'])
+    expect(await store(pool).eraseFile('4', REVIEWER)).toBe('conflict')
+    expect(sqls()).toEqual(['begin', ERASABLE, 'select 1 from gallery_items where id = $1', 'commit'])
   })
 
-  it('rolls back and rethrows when the event cannot be written', async () => {
-    const { pool, sqls } = fakePool([
-      ['update gallery_items', [{ id: '9' }]],
-      ['insert into gallery_events', new Error('boom')],
-    ])
-    await expect(store(pool).removeByOwner('9', OWNER)).rejects.toThrow('boom')
-    expect(sqls().at(-1)).toBe('rollback')
+  it("answers 'missing' for no such item", async () => {
+    const { pool } = fakePool([['select r2_key, file_purged_at', []]])
+    expect(await store(pool).eraseFile('4', REVIEWER)).toBe('missing')
+  })
+
+  it.each([null, undefined, '', 4])('refuses an id of %j before any query', async (id) => {
+    const { pool, log } = fakePool()
+    await expect(store(pool).eraseFile(id, REVIEWER)).rejects.toThrow('id must be a non-empty string')
+    expect(log).toEqual([])
+  })
+})
+
+describe('takedowns: what an approver can still delete for good', () => {
+  it('lists taken-down pieces with a file that R2 or the backup still holds and nobody erased, newest first', async () => {
+    const rows = [{ id: '5' }]
+    const { pool, log } = fakePool([['from gallery_items', rows]])
+    expect(await store(pool).takedowns()).toEqual(rows)
+    expect(log[0].sql).toBe(
+      "select * from gallery_items where status = any($1::text[]) and r2_key is not null and r2_key <> '' and updated_at > now() - make_interval(days => $2) and not exists (select 1 from gallery_erasures e where e.r2_key = gallery_items.r2_key) order by id desc",
+    )
+    expect(log[0].params).toEqual([[...PURGEABLE], 60])
+  })
+})
+
+describe('the erasure notes', () => {
+  it('erasures lists every noted key, in order', async () => {
+    const { pool, log } = fakePool([['from gallery_erasures', [{ r2_key: 'a' }, { r2_key: 'b' }]]])
+    expect(await store(pool).erasures()).toEqual(['a', 'b'])
+    expect(log[0].sql).toBe('select r2_key from gallery_erasures order by r2_key')
+  })
+
+  it('dropErasure deletes one note by its key', async () => {
+    const { pool, log } = fakePool()
+    await store(pool).dropErasure('art/4.png')
+    expect(log[0].sql).toBe('delete from gallery_erasures where r2_key = $1')
+    expect(log[0].params).toEqual(['art/4.png'])
+  })
+
+  it.each([null, undefined, ''])('dropErasure refuses a key of %j before any query', async (key) => {
+    const { pool, log } = fakePool()
+    await expect(store(pool).dropErasure(key)).rejects.toThrow('key must be a non-empty string')
+    expect(log).toEqual([])
+  })
+
+  it('expiredKeys lists the files of pieces taken down 60 days ago or more, already out of R2', async () => {
+    const { pool, log } = fakePool([['from gallery_items', [{ r2_key: 'art/1.png' }]]])
+    expect(await store(pool).expiredKeys()).toEqual(['art/1.png'])
+    expect(log[0].sql).toBe(
+      "select r2_key from gallery_items where status = any($1::text[]) and file_purged_at is not null and r2_key is not null and r2_key <> '' and updated_at < now() - make_interval(days => $2) order by id",
+    )
+    expect(log[0].params).toEqual([[...PURGEABLE], 60])
   })
 })
 
@@ -559,7 +700,9 @@ describe('every write rolls back and releases its client when a statement fails'
       (s) => s.transition('9', { from: ['pending'], to: 'approved', action: 'approved', actor: REVIEWER }),
       'update gallery_items',
     ],
-    ['removeByOwner', (s) => s.removeByOwner('9', OWNER), 'update gallery_items'],
+    ['eraseByOwner', (s) => s.eraseByOwner('9', OWNER), 'from gallery_items'],
+    ['eraseItem', (s) => s.eraseItem('9'), 'from gallery_items'],
+    ['eraseFile', (s) => s.eraseFile('9', REVIEWER), 'from gallery_items'],
     ['markDiscordDeleted', (s) => s.markDiscordDeleted('300000000000000040'), 'update gallery_items'],
   ]
   it.each(writes)('%s', async (_name, run, failing) => {
@@ -595,7 +738,11 @@ describe('values never reach the SQL text', () => {
     await s.hasDiscordItem(mark, mark)
     await s.insertArt({ title: mark, note: mark, ext: 'png', contentType: mark, bytes: 1 }, { id: mark, username: mark })
     await s.transition(mark, { from: [mark], to: mark, action: mark, actor: { id: mark, username: mark }, note: mark })
-    await s.removeByOwner(mark, { id: mark, username: mark })
+    await s.eraseByOwner(mark, { id: mark, username: mark })
+    await s.eraseItem(mark)
+    await s.eraseFile(mark, { id: mark, username: mark })
+    await s.itemIdsBy(mark)
+    await s.dropErasure(mark)
     await s.list({ kind: mark, before: mark })
     await s.mine(mark)
     await s.events({ before: mark })
@@ -750,5 +897,21 @@ describe('schema.sql for the storage purge', () => {
     expect(sql).toMatch(
       /alter table gallery_events\s+drop constraint if exists gallery_events_action_check,\s+add constraint gallery_events_action_check check \(action in \('stored', 'submitted', 'approved', 'rejected', 'hidden', 'removed', 'discord_deleted', 'file_purged'\)\);/,
     )
+  })
+})
+
+describe('schema.sql gallery_erasures', () => {
+  const sql = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8')
+  const table = /create table if not exists gallery_erasures \(([\s\S]*?)\r?\n\);/.exec(sql)?.[1] ?? ''
+
+  it('holds a storage key and when it was noted, and nothing else: no person, no title, no item id', () => {
+    const columns = table
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('--'))
+      .map((line) => line.split(/\s+/)[0])
+    expect(columns).toEqual(['r2_key', 'requested_at'])
+    expect(table).toContain('r2_key       text primary key')
+    expect(table).toContain('requested_at timestamptz not null default now()')
   })
 })

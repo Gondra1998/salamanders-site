@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import * as fc from 'fast-check'
 import {
+  BACKUP_KEEP_DAYS,
   OTHER_CLIPS_CAP_BYTES,
   PURGEABLE,
   PURGE_AFTER_DAYS,
@@ -15,6 +16,7 @@ describe('constants', () => {
     expect(STORAGE_CAP_BYTES).toBe(9_000_000_000)
     expect(OTHER_CLIPS_CAP_BYTES).toBe(7_000_000_000)
     expect(PURGE_AFTER_DAYS).toBe(30)
+    expect(BACKUP_KEEP_DAYS).toBe(60)
     expect(PURGEABLE).toStrictEqual(['rejected', 'hidden', 'removed'])
   })
 
@@ -22,6 +24,10 @@ describe('constants', () => {
     // 10 GB is R2's free storage in either reading of GB; 100 MiB is the largest clip the poll copies.
     expect(STORAGE_CAP_BYTES + 104_857_600).toBeLessThan(10_000_000_000)
     expect(OTHER_CLIPS_CAP_BYTES).toBeLessThan(STORAGE_CAP_BYTES)
+  })
+
+  it('keeps a backup copy longer than the file stays in R2, so the purge only ever takes a backed-up file', () => {
+    expect(BACKUP_KEEP_DAYS).toBeGreaterThan(PURGE_AFTER_DAYS)
   })
 
   it('cannot be changed at run time', () => {

@@ -43,6 +43,7 @@ case "$1" in
     [ "${args[1]}" = "r2:$FAKE_BUCKET" ] || { echo "fake: no such bucket ${args[1]}" >&2; exit 1; }
     case "${args[0]}" in
       copy)
+        echo copy >> "$FAKE_STATE/order"
         [ "${FAKE_COPY_FAIL:-}" = 1 ] && { echo "fake: copy failed" >&2; exit 1; }
         [[ " ${args[*]} " == *" --ignore-existing "* ]] || { echo "fake: copy without --ignore-existing would overwrite" >&2; exit 95; }
         (cd "$FAKE_R2" && find . -type f) | while read -r f; do
@@ -67,13 +68,26 @@ case "$1" in
     shift 2
     [ "$1 $2 $3" = "exec -T api" ] || { echo "fake: not exec -T api: $*" >&2; exit 93; }
     shift 3
+    if [ "$1 $2 $3" = "bun run src/galleryEraseRun.js" ]; then
+      shift 3
+      echo erase >> "$FAKE_STATE/order"
+      printf '%s\n' "$*" > "$FAKE_STATE/erase-args"
+      [ "${FAKE_ERASE_FAIL:-}" = 1 ] && { echo "Erase failed: Error: db down"; exit 1; }
+      echo "Erased 2 items (1 with a file); 0 files R2 would not delete now, left for the backup run to retry."
+      exit 0
+    fi
     [ "$1 $2 $3" = "bun run src/galleryPurgeRun.js" ] || { echo "fake: wrong purge command" >&2; exit 92; }
     shift 3
+    echo purge >> "$FAKE_STATE/order"
     cat > "$FAKE_STATE/manifest"
     printf '%s\n' "$*" > "$FAKE_STATE/purge-args"
     [ "${FAKE_PURGE_FAIL:-}" = 1 ] && { echo "Purge failed: R2Error: R2 is unreachable."; exit 1; }
     echo "Purged 0 of 0 candidates (0.0 MB); 0 gone, 0 waiting for the backup, 0 changed meanwhile."
     echo "Stored: 0.0 MB by the database, 0.0 MB listed in R2 before the purge."
+    # The keys the backup is to let go of, one a line; the real purge names none in a dry run.
+    if [ "$*" != "--dry-run" ] || [ "${FAKE_EXPIRE_EVEN_DRY:-}" = 1 ]; then
+      while IFS= read -r k; do [ -n "$k" ] && printf 'expire\t%s\n' "$k"; done <<< "${FAKE_EXPIRE:-}"
+    fi
     exit 0 ;;
 esac
 echo "fake docker: unexpected $*" >&2; exit 99
@@ -100,7 +114,7 @@ fresh() {
     FAKE_ACCOUNT="$ACCOUNT" FAKE_BUCKET="$BUCKET" FAKE_IMAGE="$IMAGE" FAKE_COMPOSE_FILE="$W/server/docker-compose.yml"
     COMPOSE_DIR="$W/server" DEST="$W/mnt/backup" REQUIRE_MOUNT="$W/mnt" STATE_DIR="$W/state")
 }
-run() { env "${ENVV[@]}" "$@" bash "$SCRIPT" > "$W/out" 2>&1; CODE=$?; }
+run() { env "${ENVV[@]}" bash "$SCRIPT" "$@" > "$W/out" 2>&1; CODE=$?; }
 ok() { if eval "$1"; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); echo "FAIL [$CASE] $2 (exit $CODE)"; sed 's/^/    | /' "$W/out" | tail -5; fi; }
 status() { cat "$W/state/last-run" 2>/dev/null; }
 purged() { [ -e "$W/fake/manifest" ]; }
@@ -196,7 +210,7 @@ fresh "an empty DEST is refused, never the production default"
 ENVV+=(DEST=""); run
 ok '[ $CODE -eq 2 ]' "exit 2"
 ok 'grep -q "reason=DEST is empty" "$W/state/last-run"' "says why"
-ok '[ ! -e /mnt/bretpc/salamanders-r2-backup/art/3.png ] || [ "$(cat /mnt/bretpc/salamanders-r2-backup/art/3.png)" != "art three" ]' "nothing written to production"
+ok '[ "$(prod_state)" = "$PROD_BEFORE" ]' "nothing written to production (compared by listing, never by reading a file there)"
 
 fresh "a DEST outside the required mount is refused"
 ENVV+=(DEST="$ROOT/elsewhere"); run
@@ -271,6 +285,75 @@ exec 8>&-
 fresh "a failed night records the failure as the latest result"
 run; ENVV+=(FAKE_COPY_FAIL=1); run
 ok 'grep -q "FAILED exit=5" "$W/state/last-run" && [ "$(wc -l < "$W/state/last-run")" -eq 1 ]' "one line, the failure"
+
+# ---- the backup lets go of what the purge names -------------------------------------------------
+held_by_backup() { mkdir -p "$(dirname "$W/mnt/backup/$1")" && printf 'old' > "$W/mnt/backup/$1"; }
+
+fresh "the purge's expire lines delete exactly those files from the backup, and the folders left empty"
+held_by_backup art/1.png; held_by_backup clips/9/8.mp4
+ENVV+=(FAKE_EXPIRE=$'art/1.png\nclips/9/8.mp4\nart/77.png'); run
+ok '[ $CODE -eq 0 ]' "exit 0"
+ok '[ ! -e "$W/mnt/backup/art/1.png" ] && [ ! -e "$W/mnt/backup/clips/9/8.mp4" ]' "both named files gone"
+ok '[ ! -e "$W/mnt/backup/clips/9" ]' "the empty folder went with them"
+ok '[ -e "$W/mnt/backup/art/3.png" ] && [ -e "$W/mnt/backup/clips/1/2.mp4" ]' "what R2 still holds stays"
+ok 'grep -q "expired=2" "$W/state/last-run"' "counts the two it deleted, not the one it did not hold"
+ok '! grep -q "clips/9/8.mp4\|art/1.png" "$W/state/backup.log" "$W/state/last-run"' "no key in the log or status"
+
+for bad in "../escape.png" "/etc/passwd" "art/1.png/../../x.png" "art/../art/1.png" "art/x.png" "art/1.exe" "art/1.png " " art/1.png" "clips/1/a.mp4" "art//1.png" "ART/1.png" "art/1.PNG" "clips/1.mp4" "art/1" "art/12345678901234567890123.png"; do
+  fresh "a purge that names '$bad' stops the run and the backup loses nothing"
+  held_by_backup art/1.png
+  ENVV+=(FAKE_EXPIRE="art/1.png"$'\n'"$bad"); run
+  ok '[ $CODE -eq 8 ]' "exit 8"
+  ok '[ -e "$W/mnt/backup/art/1.png" ]' "not even the good key before it was deleted"
+  ok 'grep -q "reason=the purge named a file that is not a storage key" "$W/state/last-run"' "says why"
+done
+
+fresh "a dry run deletes nothing from the backup, whatever the purge says"
+held_by_backup art/1.png
+ENVV+=(PURGE=dry FAKE_EXPIRE_EVEN_DRY=1 FAKE_EXPIRE=art/1.png); run
+ok '[ $CODE -eq 0 ]' "exit 0"
+ok '[ -e "$W/mnt/backup/art/1.png" ]' "still there"
+ok 'grep -q "expired=0" "$W/state/last-run"' "nothing counted"
+
+fresh "with PURGE=0 there is no purge, so nothing leaves the backup"
+held_by_backup art/1.png
+ENVV+=(PURGE=0 FAKE_EXPIRE=art/1.png); run
+ok '[ $CODE -eq 0 ] && [ -e "$W/mnt/backup/art/1.png" ]' "still there"
+
+# ---- the owner's erase -----------------------------------------------------------------------------
+fresh "--erase-item erases that item first, then runs the night, so its backup copy goes too"
+held_by_backup art/42.png
+ENVV+=(FAKE_EXPIRE=art/42.png); run --erase-item 42
+ok '[ $CODE -eq 0 ]' "exit 0"
+ok '[ "$(cat "$W/fake/erase-args")" = "--item 42" ]' "the API erased item 42"
+ok '[ "$(tr "\n" " " < "$W/fake/order")" = "erase copy purge " ]' "erase, then copy, then purge"
+ok '[ ! -e "$W/mnt/backup/art/42.png" ]' "and the backup copy is gone"
+ok 'grep -q "expired=1 erase: Erased 2 items" "$W/state/last-run"' "status says both"
+
+fresh "--erase-member erases everything one member posted"
+run --erase-member 111111111111111111
+ok '[ $CODE -eq 0 ]' "exit 0"
+ok '[ "$(cat "$W/fake/erase-args")" = "--member 111111111111111111" ]' "the API erased that member"
+
+for args in "--erase-item abc" "--erase-item" "--erase-item 1234567890123456" "--erase-item -1" "--erase-member 1234" "--erase-member 123456789012345678901" "--erase-member" "--erase-item 1 --erase-member 111111111111111111" "--bogus" "extra" "--erase-item 1 extra"; do
+  fresh "'$args' is refused before anything runs"
+  read -ra A <<< "$args"; run "${A[@]}"
+  ok '[ $CODE -eq 2 ]' "exit 2"
+  ok '[ ! -e "$W/fake/argv" ]' "docker never ran"
+done
+
+for p in 0 dry; do
+  fresh "an erase with PURGE=$p is refused: the backup copy would stay"
+  ENVV+=(PURGE=$p); run --erase-item 42
+  ok '[ $CODE -eq 2 ]' "exit 2"
+  ok '[ ! -e "$W/fake/argv" ]' "docker never ran"
+done
+
+fresh "a failed erase stops the night before the copy, with the API's reason"
+ENVV+=(FAKE_ERASE_FAIL=1); run --erase-item 42
+ok '[ $CODE -eq 10 ]' "exit 10"
+ok '[ "$(cat "$W/fake/order")" = "erase" ]' "nothing ran after it"
+ok 'grep -q "reason=the erase failed: Erase failed: Error: db down" "$W/state/last-run"' "reason recorded"
 
 CASE="canary"; CODE=-
 ok '[ "$(prod_state)" = "$PROD_BEFORE" ]' "the real backup directory ($PROD) did not change"

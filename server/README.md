@@ -148,12 +148,14 @@ upload and removal checks Discord afresh. Any Discord failure answers 503.
 | `GET /gallery/art?before=<id>` | member | the same for art |
 | `GET /gallery/mine` | member | `{ items }`: the caller's own items in every status |
 | `POST /gallery/art` | member | multipart form: `file`, `title`, optional `note`; 201 `{ item }`, pending review |
-| `DELETE /gallery/items/:id` | the item's owner | 204; 404 if not theirs, 409 if already hidden or removed |
+| `DELETE /gallery/items/:id` | the item's owner | for good: the row, its trail and its file go (R2 now, the backup tonight); 204; 404 if not theirs or gone, 409 if hidden or removed |
 | `GET /gallery/review` | approver | `{ items, sync }`: the pending queue and the clips poll's `lastRunAt`, `lastOkAt`, `lastError` |
 | `POST /gallery/items/:id/approve` | approver | from pending or rejected; `{ item }` |
 | `POST /gallery/items/:id/reject` | approver | JSON `{ reason }`, required; from pending; `{ item }` |
 | `POST /gallery/items/:id/hide` | approver | optional JSON `{ note }`; from pending, approved or rejected; `{ item }` |
 | `GET /gallery/events?before=<id>` | approver | 100 audit rows, newest first: `{ events, next }` |
+| `GET /gallery/takedowns` | approver | `{ items }`: rejected, hidden or removed pieces whose file R2 or the backup still holds |
+| `POST /gallery/items/:id/erase` | approver | Delete for good: the file leaves R2 now and the backup tonight; the row and trail stay; 204; 409 if live or erased already |
 
 An item carries `url`: a presigned R2 link valid 15 minutes for a stored file, or the
 Medal / YouTube / Twitch link for an embed. The bucket is private; that link is the
@@ -171,7 +173,11 @@ downloaded and named on the Review tab's poll line. A link holds no file and alw
 A file whose item has been rejected, hidden or removed for 30 days leaves R2 once the nightly
 backup holds it (`galleryPurge.js`, run by `backup/salamanders-r2-backup`): the row and its
 trail stay, `file_purged_at` is set, a `file_purged` event names the storage purge, and the
-item can no longer be approved. The backup keeps every file.
+item can no longer be approved. The backup copy goes 60 days after the takedown. A member's own
+removal, an approver's Delete for good and the owner's `salamanders-r2-backup --erase-item <id>` /
+`--erase-member <discord id>` do not wait: the key goes into `gallery_erasures` (nothing else is
+kept there), the file leaves R2 at once and the backup that night, and the note is dropped once
+both are gone. A member's removal and the owner command also delete the row and its trail.
 
 **The clips channel.** Posting in it is the publish step: the poll (every 2 minutes)
 copies each video or image attachment into R2, and records Medal / YouTube / Twitch links

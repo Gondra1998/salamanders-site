@@ -4,8 +4,10 @@
  *   docker compose exec -T api bun run src/galleryPurgeRun.js [--dry-run] < manifest
  *
  * server/backup/salamanders-r2-backup calls it after a backup that copied and checked cleanly. Prints one line of
- * counts and one of storage, never a key or a name. Exits 1 when the manifest is refused, R2 is not configured or
- * the purge fails part way (what it did by then stays done; the next run carries on).
+ * counts and one of storage, then (not in a dry run) one `expire<TAB>key` line for each file the backup run is to
+ * delete from the backup. A key is a storage key (art/<id>.<ext>, clips/<message>/<attachment>.<ext>), never a
+ * name. Exits 1 when the manifest is refused, R2 is not configured or the purge fails part way (what it did by
+ * then stays done; the next run carries on).
  */
 import { Pool } from 'pg'
 import { createR2 } from './r2.js'
@@ -44,12 +46,14 @@ try {
   const inR2 = [...manifest.r2.values()].reduce((n, size) => n + size, 0)
   console.log(
     `${dryRun ? 'Dry run, would purge' : 'Purged'} ${out.purged} of ${out.candidates} candidates (${mb(out.freedBytes)}); ` +
-      `${out.gone} gone, ${out.waiting} waiting for the backup, ${out.changed} changed meanwhile.`,
+      `${out.gone} gone, ${out.waiting} waiting for the backup, ${out.changed} changed meanwhile; ` +
+      `${out.erased} deleted for good from R2, ${out.cleared} erasures done, ${out.expire.length} to delete from the backup.`,
   )
   console.log(
     `Stored: ${mb(stored)} by the database, ${mb(inR2)} listed in R2 before the purge. ` +
       `Caps: ${mb(OTHER_CLIPS_CAP_BYTES)} for other clips, ${mb(STORAGE_CAP_BYTES)} in all.`,
   )
+  if (!dryRun) for (const key of out.expire) console.log(`expire\t${key}`)
 } catch (err) {
   console.error(`Purge failed: ${err?.name ?? 'Error'}: ${err?.message ?? ''}`)
   process.exitCode = 1

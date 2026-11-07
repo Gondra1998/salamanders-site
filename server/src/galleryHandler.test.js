@@ -3,7 +3,7 @@ import { createGalleryHandler } from './galleryHandler'
 import { Upstream } from './discordRoles'
 import { COMMUNITY_MEMBER } from './displayNames'
 import { MAX_ART_BYTES } from './galleryValidate'
-import { OTHER_CLIPS_CAP_BYTES, STORAGE_CAP_BYTES } from './galleryPolicy'
+import { OTHER_CLIPS_CAP_BYTES, PURGEABLE, STORAGE_CAP_BYTES } from './galleryPolicy'
 
 // Invented ids only: the real role and user ids never enter the repo.
 const MEMBER = Object.freeze({ id: '200000000000000401', username: 'brother' })
@@ -45,6 +45,7 @@ const row = (over) => ({
 function memStore() {
   const items = new Map()
   const events = []
+  const erasures = new Set()
   let seq = 100
   const add = (over) => {
     const id = String(++seq)
@@ -86,10 +87,31 @@ function memStore() {
       return { id, r2Key }
     }),
     transition: vi.fn(async (id, opts) => move(id, opts)),
-    removeByOwner: vi.fn(async (id, user) => {
+    erasures,
+    // As galleryStore.js: a member's own piece goes, row and trail, its file key noted.
+    eraseByOwner: vi.fn(async (id, user) => {
       if (!user?.id) throw new TypeError('user.id must be a non-empty string')
-      return move(id, { from: ['pending', 'approved', 'rejected'], to: 'removed', action: 'removed', actor: user }, user.id)
+      const item = items.get(id)
+      if (!item || item.author_discord_id !== user.id) return 'missing'
+      if (!['pending', 'approved', 'rejected'].includes(item.status)) return 'conflict'
+      items.delete(id)
+      const key = typeof item.r2_key === 'string' && item.r2_key !== '' ? item.r2_key : null
+      if (key) erasures.add(key)
+      return { key }
     }),
+    // A taken-down piece's file, for good: noted, marked gone from R2, the row kept.
+    eraseFile: vi.fn(async (id) => {
+      const item = items.get(id)
+      if (!item) return 'missing'
+      if (!PURGEABLE.includes(item.status) || !item.r2_key || erasures.has(item.r2_key)) return 'conflict'
+      erasures.add(item.r2_key)
+      const inR2 = !item.file_purged_at
+      item.file_purged_at = POSTED
+      return { key: item.r2_key, inR2 }
+    }),
+    takedowns: vi.fn(async () =>
+      [...items.values()].filter((r) => PURGEABLE.includes(r.status) && r.r2_key && !erasures.has(r.r2_key)).reverse(),
+    ),
     list: vi.fn(async ({ kind, before }) => ({
       rows: [...items.values()].filter((r) => r.kind === kind && r.status === 'approved' && (!before || Number(r.id) < Number(before))).reverse(),
       next: kind === 'clip' ? '7' : null,
@@ -106,6 +128,7 @@ function setup({ configured = true } = {}) {
   const store = memStore()
   const r2 = {
     put: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
     presignGet: vi.fn((key) => `signed:${key}`),
   }
   const poll = { status: vi.fn(async () => SYNC) }
@@ -171,6 +194,8 @@ const ROUTES = [
   ['POST', '/gallery/items/101/reject', true],
   ['POST', '/gallery/items/101/hide', true],
   ['GET', '/gallery/events', true],
+  ['GET', '/gallery/takedowns', true],
+  ['POST', '/gallery/items/101/erase', true],
 ]
 
 describe('galleryHandler routing and gates', () => {
@@ -189,6 +214,9 @@ describe('galleryHandler routing and gates', () => {
     ['GET', '/gallery/items/101'],
     ['POST', '/gallery/items/101/delete'],
     ['DELETE', '/gallery/items/101/approve'],
+    ['POST', '/gallery/takedowns'],
+    ['GET', '/gallery/items/101/erase'],
+    ['DELETE', '/gallery/items/101/erase'],
     ['POST', '/gallery/me'],
     // The read-only routes answer GET alone.
     ['POST', '/gallery/clips'],
@@ -228,7 +256,7 @@ describe('galleryHandler routing and gates', () => {
     expect(res.status).toBe(403)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
     expect(await res.json()).toEqual({ error: 'Restricted to the XVIIIth Legion.' })
-    for (const fn of ['insertArt', 'transition', 'removeByOwner', 'list', 'mine', 'pending', 'events']) expect(ctx.store[fn]).not.toHaveBeenCalled()
+    for (const fn of ['insertArt', 'transition', 'eraseByOwner', 'eraseFile', 'takedowns', 'list', 'mine', 'pending', 'events']) expect(ctx.store[fn]).not.toHaveBeenCalled()
   })
 
   it.each(ROUTES.filter(([, , approver]) => approver))('%s %s is 403 for a member who is not an approver', async (method, path) => {
@@ -623,44 +651,174 @@ describe('POST /gallery/art', () => {
   })
 })
 
-describe('DELETE /gallery/items/:id', () => {
-  it('removes the caller\'s own item with 204 and no body', async () => {
+describe('DELETE /gallery/items/:id: a member takes their own piece down, for good', () => {
+  const del = (ctx, id, who = 'member') => call(ctx, req('DELETE', `/gallery/items/${id}`, { who }))
+
+  it("deletes the caller's own piece and its file at once, with 204 and no body", async () => {
     const ctx = setup()
-    const id = ctx.store.add({ status: 'approved' })
-    const res = await call(ctx, req('DELETE', `/gallery/items/${id}`, { who: 'member' }))
+    const id = ctx.store.add({ status: 'approved', r2_key: 'art/7.png' })
+    const res = await del(ctx, id)
     expect(res.status).toBe(204)
     expect(res.headers.get('Cache-Control')).toBe('no-store')
     expect(res.headers.has('Content-Type')).toBe(false)
     expect(await res.text()).toBe('')
-    expect(ctx.store.removeByOwner).toHaveBeenCalledWith(id, MEMBER)
-    expect(ctx.store.items.get(id).status).toBe('removed')
+    expect(ctx.store.items.has(id)).toBe(false)
+    expect(ctx.store.erasures.has('art/7.png')).toBe(true)
+    expect(ctx.r2.remove).toHaveBeenCalledWith('art/7.png')
+  })
+
+  it('leaves nothing for a second removal to find: 404', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'pending', r2_key: 'art/7.png' })
+    expect((await del(ctx, id)).status).toBe(204)
+    expect((await del(ctx, id)).status).toBe(404)
+  })
+
+  it('asks R2 for nothing when the piece holds no file (a link)', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'approved', media: 'embed', embed_url: 'https://medal.tv/clips/x' })
+    expect((await del(ctx, id)).status).toBe(204)
+    expect(ctx.r2.remove).not.toHaveBeenCalled()
+  })
+
+  it('still takes the piece down when R2 will not delete the file now: its key is noted for the nightly run', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'rejected', r2_key: 'art/7.png', title: 'Salamander at rest' })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      ctx.r2.remove.mockRejectedValueOnce(new Error('R2 is unreachable.'))
+      expect((await del(ctx, id)).status).toBe(204)
+      expect(ctx.store.items.has(id)).toBe(false)
+      expect(ctx.store.erasures.has('art/7.png')).toBe(true)
+      // The operator learns why the file is still in R2 for now; the log names no member and no piece.
+      expect(log).toHaveBeenCalledTimes(1)
+      expect(log.mock.calls[0].join(' ')).toContain('the nightly backup run will delete it')
+      expect(log.mock.calls[0].join(' ')).not.toMatch(/Salamander|Tuoni|art\/7/)
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it('logs nothing when R2 deletes the file', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'approved', r2_key: 'art/7.png' })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect((await del(ctx, id)).status).toBe(204)
+      expect(log).not.toHaveBeenCalled()
+    } finally {
+      log.mockRestore()
+    }
   })
 
   it.each([
-    ['someone else\'s', () => ({ author_discord_id: APPROVER.id })],
+    ["someone else's", () => ({ author_discord_id: APPROVER.id })],
     ['an unknown', null],
-  ])('is 404 for %s item', async (_, over) => {
+  ])('is 404 for %s item, and deletes nothing', async (_, over) => {
     const ctx = setup()
     const id = over ? ctx.store.add(over()) : '999'
-    const res = await call(ctx, req('DELETE', `/gallery/items/${id}`, { who: 'member' }))
+    const res = await del(ctx, id)
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'No such item.' })
+    if (over) expect(ctx.store.items.has(id)).toBe(true)
+    expect(ctx.r2.remove).not.toHaveBeenCalled()
+  })
+
+  it.each(['abc', '1234567890123456', '1.5'])('is 404 for the id %s, without asking the store', async (id) => {
+    const ctx = setup()
+    const res = await del(ctx, id)
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'No such item.' })
+    expect(ctx.store.eraseByOwner).not.toHaveBeenCalled()
+  })
+
+  it('is 409 for a piece a moderator has already hidden, which stays as it is', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'hidden', r2_key: 'art/7.png' })
+    const res = await del(ctx, id)
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'That item has already moved on.' })
+    expect(ctx.store.items.has(id)).toBe(true)
+    expect(ctx.r2.remove).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET /gallery/takedowns', () => {
+  it('lists, for an approver, the taken-down pieces whose file can still be deleted for good', async () => {
+    const ctx = setup()
+    ctx.store.add({ status: 'approved', r2_key: 'art/1.png' })
+    const hidden = ctx.store.add({ status: 'hidden', r2_key: 'art/2.png' })
+    const purged = ctx.store.add({ status: 'rejected', r2_key: 'art/3.png', file_purged_at: POSTED })
+    ctx.store.add({ status: 'removed', r2_key: 'art/4.png' })
+    ctx.store.erasures.add('art/4.png')
+    const res = await call(ctx, req('GET', '/gallery/takedowns', { who: 'approver' }))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Cache-Control')).toBe('no-store')
+    const { items } = await res.json()
+    expect(items.map((i) => [i.id, i.status, i.url])).toEqual([
+      [purged, 'rejected', null],
+      [hidden, 'hidden', 'signed:art/2.png'],
+    ])
+  })
+})
+
+describe('POST /gallery/items/:id/erase: an approver deletes a taken-down file for good', () => {
+  const erase = (ctx, id, who = 'approver') => call(ctx, req('POST', `/gallery/items/${id}/erase`, { who }))
+
+  it('deletes the file from R2 at once and answers 204; the row stays, the file marked gone', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'hidden', r2_key: 'art/2.png' })
+    const res = await erase(ctx, id)
+    expect(res.status).toBe(204)
+    expect(await res.text()).toBe('')
+    expect(ctx.store.eraseFile).toHaveBeenCalledWith(id, APPROVER)
+    expect(ctx.r2.remove).toHaveBeenCalledWith('art/2.png')
+    expect(ctx.store.items.get(id).status).toBe('hidden')
+    expect(ctx.store.items.get(id).file_purged_at).toBe(POSTED)
+    const { items } = await (await call(ctx, req('GET', '/gallery/takedowns', { who: 'approver' }))).json()
+    expect(items).toEqual([])
+  })
+
+  it('asks R2 for nothing when the purge already took the file out of R2: only the backup copy is left', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'rejected', r2_key: 'art/3.png', file_purged_at: POSTED })
+    expect((await erase(ctx, id)).status).toBe(204)
+    expect(ctx.r2.remove).not.toHaveBeenCalled()
+    expect(ctx.store.erasures.has('art/3.png')).toBe(true)
+  })
+
+  it('answers 204 even when R2 will not delete now: the key is noted for the nightly run', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'removed', r2_key: 'art/2.png' })
+    ctx.r2.remove.mockRejectedValueOnce(new Error('R2 is unreachable.'))
+    expect((await erase(ctx, id)).status).toBe(204)
+    expect(ctx.store.erasures.has('art/2.png')).toBe(true)
+  })
+
+  it('is 409 for a live piece, which must be taken down first, and for one erased already', async () => {
+    const ctx = setup()
+    const live = ctx.store.add({ status: 'approved', r2_key: 'art/1.png' })
+    const res = await erase(ctx, live)
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'That item has already moved on.' })
+    const hidden = ctx.store.add({ status: 'hidden', r2_key: 'art/2.png' })
+    expect((await erase(ctx, hidden)).status).toBe(204)
+    expect((await erase(ctx, hidden)).status).toBe(409)
+    expect(ctx.r2.remove).toHaveBeenCalledTimes(1)
+  })
+
+  it('is 404 for an unknown item', async () => {
+    const res = await erase(setup(), '999')
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'No such item.' })
   })
 
   it.each(['abc', '1234567890123456', '1.5'])('is 404 for the id %s, without asking the store', async (id) => {
     const ctx = setup()
-    const res = await call(ctx, req('DELETE', `/gallery/items/${id}`, { who: 'member' }))
+    const res = await erase(ctx, id)
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'No such item.' })
-    expect(ctx.store.removeByOwner).not.toHaveBeenCalled()
-  })
-
-  it('is 409 for an item already hidden', async () => {
-    const ctx = setup()
-    const id = ctx.store.add({ status: 'hidden' })
-    const res = await call(ctx, req('DELETE', `/gallery/items/${id}`, { who: 'member' }))
-    expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({ error: 'That item has already moved on.' })
+    expect(ctx.store.eraseFile).not.toHaveBeenCalled()
   })
 })
 

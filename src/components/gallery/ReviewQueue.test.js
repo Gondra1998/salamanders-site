@@ -9,7 +9,7 @@ import { forgetReloads } from '../../lib/gallery/reloadOnce'
 const state = vi.hoisted(() => ({ auth: null }))
 vi.mock('../../stores/auth', () => ({ useAuth: () => state.auth }))
 vi.mock('../../lib/gallery/api')
-import { listReview, listEvents, approve, reject } from '../../lib/gallery/api'
+import { listReview, listEvents, listTakedowns, approve, reject } from '../../lib/gallery/api'
 import ReviewQueue from './ReviewQueue.vue'
 
 const apiError = (status, message = 'nope') => Object.assign(new Error(message), { status })
@@ -93,6 +93,19 @@ describe('ReviewQueue: the queue', () => {
     listReview.mockClear()
     await entries(w)[0].find('img').trigger('error')
     expect(listReview).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ReviewQueue: taken down', () => {
+  it('has a "Taken down" list under the queue that loads nothing until it is tapped', async () => {
+    const w = await queueWith()
+    expect(w.find('.rq-takedowns-toggle').text()).toBe('Taken down')
+    expect(listTakedowns).not.toHaveBeenCalled()
+    listTakedowns.mockResolvedValue({ items: [artItem('8', { status: 'hidden' })] })
+    await w.find('.rq-takedowns-toggle').trigger('click')
+    await flushPromises()
+    expect(listTakedowns).toHaveBeenCalledWith('tok')
+    expect(w.find('.rq-takedowns').findAll('.rq-mine-row')).toHaveLength(1)
   })
 })
 

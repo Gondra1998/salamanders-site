@@ -154,7 +154,7 @@ describe('EventLog: a line per event', () => {
   })
 
   it('has a plain word for each action the server records, and the raw word for one it does not know', async () => {
-    const actions = ['stored', 'submitted', 'approved', 'rejected', 'hidden', 'removed', 'discord_deleted', 'something_new']
+    const actions = ['stored', 'submitted', 'approved', 'rejected', 'hidden', 'removed', 'discord_deleted', 'file_purged', 'something_new']
     listEvents.mockResolvedValue({ events: actions.map((action, i) => event(i + 1, { action })), next: null })
     const w = mountLog()
     await open(w)
@@ -166,6 +166,7 @@ describe('EventLog: a line per event', () => {
       'Hidden',
       'Removed',
       'Deleted on Discord',
+      'File deleted',
       'something_new',
     ])
   })

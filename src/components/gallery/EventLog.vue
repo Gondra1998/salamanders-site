@@ -15,6 +15,7 @@ const WORDS = {
   hidden: 'Hidden',
   removed: 'Removed',
   discord_deleted: 'Deleted on Discord',
+  file_purged: 'File deleted',
 }
 
 const auth = useAuth()

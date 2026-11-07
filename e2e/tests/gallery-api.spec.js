@@ -197,16 +197,41 @@ test.describe('Reliquarium API', () => {
     expect((await post(request, `/gallery/items/${item.id}/approve`, CURATOR)).status()).toBe(409)
   })
 
-  test('the artist removes their own piece, and only theirs', async ({ request }) => {
+  test('the artist removes their own piece, and only theirs, and nothing of it stays', async ({ request }) => {
     const item = await submitted(request, `E2E to remove ${RUN}`)
+    expect((await request.get(item.url)).status()).toBe(200)
     // Someone else's piece is not found, even by another member.
     expect((await del(request, `/gallery/items/${item.id}`, CAPTAIN)).status()).toBe(404)
     expect((await del(request, `/gallery/items/${item.id}`, MEMBER)).status()).toBe(204)
-    // Gone already: the second removal finds nothing left to remove.
-    expect((await del(request, `/gallery/items/${item.id}`, MEMBER)).status()).toBe(409)
+    // Gone for good: the second removal finds nothing, the file is out of R2, and neither the artist's list, the
+    // review queue nor the trail knows of it.
+    expect((await del(request, `/gallery/items/${item.id}`, MEMBER)).status()).toBe(404)
     expect((await del(request, '/gallery/items/999999999', MEMBER)).status()).toBe(404)
-    const [mine] = await titled(request, '/gallery/mine', item.title)
-    expect(mine.status).toBe('removed')
+    expect((await request.get(item.url)).status()).toBe(404)
+    expect(await titled(request, '/gallery/mine', item.title)).toEqual([])
+    const queue = (await (await get(request, '/gallery/review', CURATOR)).json()).items
+    expect(queue.filter((i) => i.id === item.id)).toEqual([])
+    expect(await eventsFor(request, item.id)).toEqual([])
+  })
+
+  test('an approver deletes a taken-down file for good; the record of it stays', async ({ request }) => {
+    const item = await submitted(request, `E2E to erase ${RUN}`)
+    // Live or waiting, it is not on the list and cannot be erased: it must be taken down first.
+    expect((await post(request, `/gallery/items/${item.id}/erase`, CURATOR)).status()).toBe(409)
+    expect((await post(request, `/gallery/items/${item.id}/hide`, CAPTAIN, { note: 'e2e erase' })).status()).toBe(200)
+    const takedowns = async () => (await (await get(request, '/gallery/takedowns', CURATOR)).json()).items.filter((i) => i.id === item.id)
+    expect((await takedowns()).map((i) => i.status)).toEqual(['hidden'])
+    expect((await get(request, '/gallery/takedowns', MEMBER)).status()).toBe(403)
+    expect((await post(request, `/gallery/items/${item.id}/erase`, MEMBER)).status()).toBe(403)
+
+    expect((await post(request, `/gallery/items/${item.id}/erase`, CURATOR)).status()).toBe(204)
+    expect((await request.get(item.url)).status()).toBe(404)
+    expect(await takedowns()).toEqual([])
+    expect((await post(request, `/gallery/items/${item.id}/erase`, CURATOR)).status()).toBe(409)
+    // The trail keeps why it went, and who deleted the file.
+    const actions = (await eventsFor(request, item.id)).map((e) => [e.action, e.note])
+    expect(actions).toContainEqual(['hidden', 'e2e erase'])
+    expect(actions).toContainEqual(['file_purged', 'deleted for good'])
   })
 
   test('a member cannot approve, and two approvers at once make one approval', async ({ request }) => {

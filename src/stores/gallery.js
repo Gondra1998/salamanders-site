@@ -23,6 +23,8 @@ const initial = () => ({
   review: { items: [], sync: null },
   // The audit log for approvers, newest first, a page at a time: `next` is the cursor of the following page.
   events: { items: [], next: null },
+  // For approvers: taken-down pieces whose file can still be deleted for good.
+  takedowns: [],
   error: '',
 })
 
@@ -163,6 +165,23 @@ export const useGallery = defineStore('gallery', {
         if (got === STALE || this.events.next !== cursor) return
         this.events.items.push(...got.events)
         this.events.next = got.next ?? null
+      })
+    },
+
+    /** Approvers only. The taken-down pieces whose file can still be deleted for good. */
+    loadTakedowns(token) {
+      return attempt(this, async () => {
+        const got = await unlessStale(() => seq, () => api.listTakedowns(token))
+        if (got !== STALE) this.takedowns = got.items
+      })
+    },
+
+    /** Approvers only. Deletes the piece's file for good, takes it off the list, then fetches the list again. */
+    eraseFile(id, token) {
+      return attempt(this, async () => {
+        await api.eraseFile(id, token)
+        this.takedowns = this.takedowns.filter((i) => i.id !== id)
+        await this.loadTakedowns(token)
       })
     },
 

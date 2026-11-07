@@ -10,7 +10,10 @@
  *   - R2 does not list it and the backup holds it: removed (a no-op if it is gone) and marked (purged);
  *   - neither holds it, as after an upload that never landed: marked without a request, nothing to lose (gone);
  *   - the store finds it no longer qualifies (approved meanwhile): left alone (changed).
- * A file the backup does not hold is never removed. The first failure ends the run; what was done stays done.
+ * A file the backup does not hold is never removed by that rule. A file deleted for good (noted in gallery_erasures)
+ * does not wait for the backup: it leaves R2 at once (erased), and its note is dropped once neither side holds it
+ * (cleared). `expire` lists, for the backup run to delete, every noted file and every file of an item taken down
+ * BACKUP_KEEP_DAYS ago that the backup still holds. The first failure ends the run; what was done stays done.
  */
 import { PURGE_AFTER_DAYS } from './galleryPolicy.js'
 
@@ -37,10 +40,10 @@ export function parseManifest(text) {
   return out
 }
 
-/** → { candidates, purged, gone, waiting, changed, freedBytes }, freedBytes by R2's own sizes. */
+/** → { candidates, purged, gone, waiting, changed, freedBytes, erased, cleared, expire }, freedBytes by R2's own sizes. */
 export async function purgeBackedUp({ store, r2, manifest, dryRun = false }) {
   const candidates = await store.purgeCandidates({ days: PURGE_AFTER_DAYS })
-  const out = { candidates: candidates.length, purged: 0, gone: 0, waiting: 0, changed: 0, freedBytes: 0 }
+  const out = { candidates: candidates.length, purged: 0, gone: 0, waiting: 0, changed: 0, freedBytes: 0, erased: 0, cleared: 0 }
   for (const { id, r2_key: key } of candidates) {
     const held = manifest.r2.get(key)
     const saved = manifest.backup.get(key)
@@ -58,5 +61,20 @@ export async function purgeBackedUp({ store, r2, manifest, dryRun = false }) {
     out[outcome]++
     out.freedBytes += held ?? 0
   }
+
+  const noted = await store.erasures()
+  for (const key of noted) {
+    const held = manifest.r2.get(key)
+    if (held !== undefined) {
+      if (!dryRun) await r2.remove(key)
+      out.erased++
+      out.freedBytes += held
+    } else if (!manifest.backup.has(key)) {
+      if (!dryRun) await store.dropErasure(key)
+      out.cleared++
+    }
+  }
+  const due = new Set([...noted, ...(await store.expiredKeys())])
+  out.expire = [...due].filter((key) => manifest.backup.has(key)).sort()
   return out
 }

@@ -15,6 +15,7 @@
 import { Upstream } from './discordRoles.js'
 import { COMMUNITY_MEMBER } from './displayNames.js'
 import { MAX_ART_BYTES, isItemId, parseArtFields, parseBefore, parseHideNote, parseReason, sniffImage } from './galleryValidate.js'
+import { capFor, fits } from './galleryPolicy.js'
 
 const ITEM_ROUTE = /^\/gallery\/items\/([^/]+)$/
 const ACTION_ROUTE = /^\/gallery\/items\/([^/]+)\/(approve|reject|hide)$/
@@ -24,6 +25,7 @@ const UPLOAD_TIMEOUT_MS = 60_000
 const JSON_MAX_BYTES = 16_384
 
 const TOO_LARGE = 'The file is too large (10 MB at most).'
+const NO_ROOM = 'The Reliquarium has no room for new art right now. Try again later.'
 const NO_SUCH_ITEM = 'No such item.'
 const MOVED_ON = 'That item has already moved on.'
 const BAD_CURSOR = 'That page cursor is not valid.'
@@ -61,7 +63,9 @@ export function createGalleryHandler({ access, store, r2, poll, displayNames, co
   function view(row, nameFor) {
     const named = nameFor(row.author_discord_id)
     let url = row.embed_url || null
-    if (typeof row.r2_key === 'string' && row.r2_key !== '') url = r2.presignGet(row.r2_key, { expiresSec: LINK_SECONDS })
+    // A purged file is gone from R2: no link, rather than one that answers 404.
+    const kept = typeof row.r2_key === 'string' && row.r2_key !== '' && !row.file_purged_at
+    if (kept) url = r2.presignGet(row.r2_key, { expiresSec: LINK_SECONDS })
     return {
       id: String(row.id),
       kind: row.kind,
@@ -114,6 +118,8 @@ export function createGalleryHandler({ access, store, r2, poll, displayNames, co
     if (!type) return reply(400, { error: 'That file is not a JPEG, PNG, WebP or GIF.' })
     const fields = parseArtFields({ title: form.get('title'), note: form.get('note') ?? '' })
     if (typeof fields === 'string') return reply(400, { error: fields })
+    // 507 Insufficient Storage: R2's free tier is the limit (galleryPolicy.js), and nothing is stored or uploaded.
+    if (!fits(await store.storedBytes(), bytes.length, capFor({ kind: 'art' }))) return reply(507, { error: NO_ROOM })
 
     const { id, r2Key } = await store.insertArt({ ...fields, ...type, bytes: bytes.length }, verdict.user)
     try {

@@ -229,3 +229,13 @@ create table if not exists gallery_sync (
   last_ok_at       timestamptz,
   last_error       text
 );
+
+-- Storage purge (galleryPolicy.js, galleryPurge.js): a file can leave R2 once its item has been rejected, hidden or
+-- removed for 30 days and the nightly backup holds it. The row and its trail stay; file_purged_at says the file went.
+-- gallery_items exists in production, so the column and the new event action come as their own alter statements.
+alter table gallery_items add column if not exists file_purged_at timestamptz;
+
+-- One statement, so the table is never without its check. Re-running it is harmless.
+alter table gallery_events
+  drop constraint if exists gallery_events_action_check,
+  add constraint gallery_events_action_check check (action in ('stored', 'submitted', 'approved', 'rejected', 'hidden', 'removed', 'discord_deleted', 'file_purged'));

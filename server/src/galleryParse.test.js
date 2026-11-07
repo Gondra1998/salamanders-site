@@ -55,6 +55,7 @@ describe('parseMessage attachments', () => {
       authorUsername: 'brother_test',
       title: '',
       postedAt: '2026-11-02T18:30:00.123000+00:00',
+      gameplay: false,
       attachmentId: '200000000000000301',
       media: 'video',
       download: {
@@ -65,6 +66,7 @@ describe('parseMessage attachments', () => {
       },
     })
     expect(rows[0]).not.toHaveProperty('embedUrl')
+    expect(rows[0]).not.toHaveProperty('host')
   })
 
   it.each([
@@ -195,9 +197,11 @@ describe('parseMessage embed links', () => {
         authorUsername: 'brother_test',
         title: `look at this ${link} lads`,
         postedAt: '2026-11-02T18:30:00.123000+00:00',
+        gameplay: false,
         attachmentId: canonical,
         media: 'embed',
         embedUrl: canonical,
+        host: embedOf(canonical).host,
       },
     ])
     expect(rows[0]).not.toHaveProperty('download')
@@ -429,6 +433,109 @@ describe('embedOf', () => {
       fc.property(fc.webUrl(), (s) => {
         const hit = embedOf(s)
         expect(hit === null || typeof hit.canonical === 'string').toBe(true)
+      }),
+    )
+  })
+})
+
+describe('the #gameplay tag', () => {
+  const file = attachment('200000000000000301', 'video/mp4')
+  const parsed = (content) => parseMessage(message({ content, attachments: [file] })).rows[0]
+  const tagged = (content) => parsed(content).gameplay
+
+  it('marks every row of the message, file and link alike, and is taken out of their title', () => {
+    const content = `#gameplay ace https://youtu.be/${YT}`
+    const { rows } = parseMessage(message({ content, attachments: [file] }))
+    expect(rows.map((r) => [r.media, r.gameplay, r.title])).toStrictEqual([
+      ['video', true, `ace https://youtu.be/${YT}`],
+      ['embed', true, `ace https://youtu.be/${YT}`],
+    ])
+  })
+
+  it('names the site of each link row, so a policy can tell Medal from YouTube and Twitch', () => {
+    const content = `https://youtu.be/${YT} https://clips.twitch.tv/${SLUG} https://medal.tv/clips/${MEDAL}`
+    expect(parseMessage(message({ content })).rows.map((r) => r.host)).toStrictEqual(['youtube', 'twitch', 'medal'])
+  })
+
+  it('is found anywhere in the text, in any case, as often as it is written', () => {
+    expect(tagged('#gameplay')).toBe(true)
+    expect(tagged('sick clutch #gameplay')).toBe(true)
+    expect(tagged('#GamePlay sick')).toBe(true)
+    expect(tagged('#GAMEPLAY')).toBe(true)
+    expect(tagged('line one\n#gameplay')).toBe(true)
+    expect(tagged('(#gameplay)')).toBe(true)
+    expect(tagged('#gameplay, gg')).toBe(true)
+    expect(tagged('##gameplay')).toBe(true)
+  })
+
+  it('is not a tag when it runs into a word, or is only the word, or is spelled apart', () => {
+    for (const content of ['clip#gameplay', '_#gameplay', '#gameplays', '#gameplay2', '#gameplay_x', '#gameplay-ish', 'gameplay', '# gameplay', '#game play', '#gamepla', '']) {
+      expect(tagged(content)).toBe(false)
+    }
+  })
+
+  it('is not a tag inside a link, which keeps the link whole in the title', () => {
+    for (const content of ['https://example.test/page#gameplay', 'https://example.test/a,#gameplay', `https://medal.tv/clips/${MEDAL}#gameplay`]) {
+      const row = parsed(content)
+      expect(row.gameplay).toBe(false)
+      expect(row.title).toBe(content)
+    }
+  })
+
+  it('is a tag right after a link, once a space parts them', () => {
+    const row = parsed('https://example.test/a #gameplay')
+    expect(row.gameplay).toBe(true)
+    expect(row.title).toBe('https://example.test/a')
+  })
+
+  it('leaves the rest of the title as written, with the space after the tag taken too', () => {
+    expect(parsed('sick #gameplay clutch').title).toBe('sick clutch')
+    expect(parsed('#gameplay sick').title).toBe('sick')
+    expect(parsed('#gameplay \t sick').title).toBe('sick')
+    expect(parsed('sick #gameplay').title).toBe('sick')
+    expect(parsed('#gameplay').title).toBe('')
+    expect(parsed('a #gameplay b #GAMEPLAY c').title).toBe('a b c')
+    expect(parsed('#gameplay\nsecond line').title).toBe('second line')
+  })
+
+  it('takes the Discord markdown wrapped round the tag with it', () => {
+    expect(parsed('**#gameplay** sick').title).toBe('sick')
+    expect(parsed('__#gameplay__ sick').title).toBe('sick')
+    expect(parsed('~~#gameplay~~ sick').title).toBe('sick')
+    expect(parsed('||#gameplay|| sick').title).toBe('sick')
+    expect(parsed('*#gameplay* sick').title).toBe('sick')
+    // Unmatched markdown is left where it was: only a pair is the tag's own.
+    expect(parsed('**#gameplay sick').title).toBe('**sick')
+    expect(parsed('**#gameplay** sick').gameplay).toBe(true)
+  })
+
+  it('is cut to 120 characters after the tag is taken out, not before', () => {
+    expect(parsed(`#gameplay ${'x'.repeat(120)}`).title).toBe('x'.repeat(120))
+  })
+
+  it('never changes a message that does not hold it', () => {
+    // Text short enough not to be cut and with nothing the title has to mend, so the title is exactly the text.
+    const text = fc
+      .string({ unit: 'binary', maxLength: 140 })
+      .filter((s) => !/#gameplay/i.test(s) && s.trim().length <= 120 && s.isWellFormed() && !s.includes('\u0000'))
+    fc.assert(
+      fc.property(text, (content) => {
+        const plain = parsed(content)
+        expect(plain.gameplay).toBe(false)
+        expect(plain.title).toBe(content.trim())
+      }),
+    )
+  })
+
+  it('is found wherever it is put among words, and leaves exactly those words', () => {
+    const word = fc.stringMatching(/^[a-z]{1,8}$/)
+    fc.assert(
+      fc.property(fc.array(word, { minLength: 1, maxLength: 10 }), fc.nat(), fc.constantFrom('#gameplay', '#Gameplay', '#GAMEPLAY'), (words, at, tag) => {
+        const i = at % (words.length + 1)
+        const content = [...words.slice(0, i), tag, ...words.slice(i)].join(' ')
+        const row = parsed(content)
+        expect(row.gameplay).toBe(true)
+        expect(row.title).toBe(words.join(' '))
       }),
     )
   })

@@ -3,6 +3,7 @@ import { createGalleryHandler } from './galleryHandler'
 import { Upstream } from './discordRoles'
 import { COMMUNITY_MEMBER } from './displayNames'
 import { MAX_ART_BYTES } from './galleryValidate'
+import { OTHER_CLIPS_CAP_BYTES, STORAGE_CAP_BYTES } from './galleryPolicy'
 
 // Invented ids only: the real role and user ids never enter the repo.
 const MEMBER = Object.freeze({ id: '200000000000000401', username: 'brother' })
@@ -36,6 +37,7 @@ const row = (over) => ({
   status: 'approved',
   review_note: null,
   posted_at: POSTED,
+  file_purged_at: null,
   ...over,
 })
 
@@ -53,12 +55,27 @@ function memStore() {
     const item = items.get(id)
     if (!item || (owner && item.author_discord_id !== owner)) return 'missing'
     if (!from.includes(item.status)) return 'conflict'
+    if (to === 'approved' && item.file_purged_at) return 'conflict'
     item.status = to
     if (!owner) item.review_note = note ?? null
     events.push({ id: String(events.length + 1), item_id: id, action, actor_discord_id: actor.id, actor_username: actor.username, note: note ?? '', created_at: POSTED })
     return { item: { ...item } }
   }
+  const s = {
+    held: 0,
+    // As the real store sums them: the files R2 still holds, by the rows' own sizes.
+    storedBytes: vi.fn(async () =>
+      [...items.values()].reduce((n, r) => n + (typeof r.r2_key === 'string' && r.r2_key !== '' && !r.file_purged_at ? Number(r.bytes) : 0), s.held),
+    ),
+  }
   return {
+    get held() {
+      return s.held
+    },
+    set held(n) {
+      s.held = n
+    },
+    storedBytes: s.storedBytes,
     items,
     events,
     add,
@@ -315,6 +332,15 @@ describe('GET /gallery/clips and /gallery/art', () => {
     expect(ctx.r2.presignGet).toHaveBeenCalledTimes(1)
   })
 
+  it('gives no link for a file the storage purge took out of R2, and signs nothing for it', async () => {
+    const ctx = setup()
+    ctx.store.add({ author_discord_id: MEMBER.id, status: 'removed', r2_key: 'art/1.png', file_purged_at: '2026-12-01T03:00:00.000Z' })
+    ctx.store.add({ author_discord_id: MEMBER.id, status: 'removed', r2_key: 'art/2.png' })
+    const { items } = await (await call(ctx, req('GET', '/gallery/mine', { who: 'member' }))).json()
+    expect(items.map((i) => i.url)).toEqual(['signed:art/2.png', null])
+    expect(ctx.r2.presignGet).toHaveBeenCalledTimes(1)
+  })
+
   it('never signs an empty or missing key, and gives null when there is nothing to link', async () => {
     const ctx = setup()
     ctx.store.add({ r2_key: '' })
@@ -406,6 +432,44 @@ describe('POST /gallery/art', () => {
     expect(opts.contentLength).toBe(PNG.length)
     expect(opts.signal).toBeInstanceOf(AbortSignal)
     expect(ctx.r2.presignGet).toHaveBeenCalledWith(`art/${id}.png`, { expiresSec: 900 })
+  })
+
+  it('takes a piece that brings the store exactly to the cap', async () => {
+    const ctx = setup()
+    ctx.store.held = STORAGE_CAP_BYTES - PNG.length
+    expect((await upload(ctx, {})).status).toBe(201)
+  })
+
+  it('refuses a piece that would take the store past the cap, before storing anything, with 507', async () => {
+    const ctx = setup()
+    ctx.store.held = STORAGE_CAP_BYTES - PNG.length + 1
+    const res = await upload(ctx, {})
+    expect(res.status).toBe(507)
+    expect(res.headers.get('Cache-Control')).toBe('no-store')
+    expect(await res.json()).toEqual({ error: 'The Reliquarium has no room for new art right now. Try again later.' })
+    expect(ctx.store.insertArt).not.toHaveBeenCalled()
+    expect(ctx.r2.put).not.toHaveBeenCalled()
+    expect(ctx.store.items.size).toBe(0)
+  })
+
+  it('holds art to the full cap, not the lower one for untagged clips', async () => {
+    const ctx = setup()
+    ctx.store.held = OTHER_CLIPS_CAP_BYTES
+    expect((await upload(ctx, {})).status).toBe(201)
+  })
+
+  it('checks the room only for a piece that is otherwise fine, so a bad upload costs no query', async () => {
+    const ctx = setup()
+    await upload(ctx, { file: new File([new Uint8Array([1, 2, 3])], 'x.png') })
+    await upload(ctx, { title: '' })
+    expect(ctx.store.storedBytes).not.toHaveBeenCalled()
+  })
+
+  it('lets a store failure on the room check through, as any other store failure', async () => {
+    const ctx = setup()
+    ctx.store.storedBytes.mockRejectedValueOnce(new Error('db down'))
+    await expect(upload(ctx, {})).rejects.toThrow('db down')
+    expect(ctx.store.insertArt).not.toHaveBeenCalled()
   })
 
   it('takes the note as optional', async () => {
@@ -630,6 +694,14 @@ describe('approve, reject, hide', () => {
     const ctx = setup()
     const id = ctx.store.add({ status: 'rejected' })
     expect((await call(ctx, req('POST', `/gallery/items/${id}/approve`, { who: 'approver' }))).status).toBe(200)
+  })
+
+  it('will not approve a rejected item whose file the storage purge took: 409, and it stays rejected', async () => {
+    const ctx = setup()
+    const id = ctx.store.add({ status: 'rejected', r2_key: 'art/1.png', file_purged_at: '2026-12-01T03:00:00.000Z' })
+    const res = await call(ctx, req('POST', `/gallery/items/${id}/approve`, { who: 'approver' }))
+    expect(res.status).toBe(409)
+    expect(ctx.store.items.get(id).status).toBe('rejected')
   })
 
   it('rejects with a trimmed reason', async () => {

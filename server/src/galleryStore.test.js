@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { createGalleryStore, POLL_ACTOR } from './galleryStore'
+import { createGalleryStore, POLL_ACTOR, PURGE_ACTOR } from './galleryStore'
+import { PURGEABLE } from './galleryPolicy'
 import { PAGE_SIZE } from './galleryValidate'
 
 // The SQL itself is proven against real Postgres by the e2e stack. Here a recording pool pins what the
@@ -37,6 +38,7 @@ const clip = {
   r2Key: 'clips/a.mp4',
   contentType: 'video/mp4',
   bytes: 2048,
+  status: 'approved',
 }
 
 describe('POLL_ACTOR', () => {
@@ -46,14 +48,14 @@ describe('POLL_ACTOR', () => {
 })
 
 describe('insertDiscordItem', () => {
-  it('inserts an approved clip and records the stored event in one transaction', async () => {
+  it('inserts a clip in the status it is given and records the stored event in one transaction', async () => {
     const { pool, log, sqls, release } = fakePool([['insert into gallery_items', [{ id: '42' }]]])
     const out = await store(pool).insertDiscordItem(clip, POLL_ACTOR)
     expect(out).toEqual({ id: '42' })
     expect(sqls()).toEqual(['begin', has('insert into gallery_items'), has('insert into gallery_events'), 'commit'])
     expect(log[1].sql).toContain("'clip'")
     expect(log[1].sql).toContain("'discord'")
-    expect(log[1].sql).toContain("'approved'")
+    expect(log[1].sql).toContain('values (\'clip\', \'discord\', $12,')
     expect(log[1].params).toEqual([
       clip.messageId,
       clip.attachmentId,
@@ -66,6 +68,7 @@ describe('insertDiscordItem', () => {
       'video/mp4',
       2048,
       clip.postedAt,
+      'approved',
     ])
     expect(log[2].params).toEqual(['42', 'stored', POLL_ACTOR.id, POLL_ACTOR.username, ''])
     expect(release).toHaveBeenCalledTimes(1)
@@ -95,8 +98,26 @@ describe('insertDiscordItem', () => {
       null,
       null,
       clip.postedAt,
+      'approved',
     ])
   })
+
+  it('stores a clip that waits for review as pending', async () => {
+    const { pool, log } = fakePool([['insert into gallery_items', [{ id: '44' }]]])
+    await store(pool).insertDiscordItem({ ...clip, status: 'pending' }, POLL_ACTOR)
+    expect(log[1].params.at(-1)).toBe('pending')
+  })
+
+  it.each([undefined, null, '', 'rejected', 'hidden', 'removed', 'Approved', 'approved '])(
+    'refuses a status of %j before any query: the poll only ever stores approved or pending',
+    async (status) => {
+      const { pool, log } = fakePool()
+      await expect(store(pool).insertDiscordItem({ ...clip, status }, POLL_ACTOR)).rejects.toThrow(
+        `insertDiscordItem: a polled clip goes in approved or pending, not ${String(status)}`,
+      )
+      expect(log).toEqual([])
+    },
+  )
 
   it.each([
     ['messageId', null],
@@ -108,7 +129,9 @@ describe('insertDiscordItem', () => {
     ['attachmentId', ''],
   ])('refuses a %s of %j before any query, since a null id would escape the unique index', async (field, value) => {
     const { pool, log } = fakePool()
-    await expect(store(pool).insertDiscordItem({ ...clip, [field]: value }, POLL_ACTOR)).rejects.toThrow(TypeError)
+    const refused = store(pool).insertDiscordItem({ ...clip, [field]: value }, POLL_ACTOR)
+    await expect(refused).rejects.toThrow(TypeError)
+    await expect(refused).rejects.toThrow(`${field} must be a non-empty string`)
     expect(log).toEqual([])
   })
 
@@ -142,7 +165,9 @@ describe('hasDiscordItem', () => {
     [clip.messageId, ''],
   ])('refuses (%j, %j) before any query', async (messageId, attachmentId) => {
     const { pool, log } = fakePool()
-    await expect(store(pool).hasDiscordItem(messageId, attachmentId)).rejects.toThrow(TypeError)
+    const refused = store(pool).hasDiscordItem(messageId, attachmentId)
+    await expect(refused).rejects.toThrow(TypeError)
+    await expect(refused).rejects.toThrow(`${messageId ? 'attachmentId' : 'messageId'} must be a non-empty string`)
     expect(log).toEqual([])
   })
 })
@@ -198,6 +223,29 @@ describe('transition', () => {
     expect(log[2].params).toEqual(['9', 'approved', REVIEWER.id, REVIEWER.username, ''])
   })
 
+  it('builds exactly this statement for a reviewer, with no owner check', async () => {
+    const { pool, log } = fakePool([['update gallery_items', [{ id: '9' }]]])
+    await store(pool).transition('9', move)
+    expect(log[1].sql).toBe(
+      "update gallery_items set status = $3, reviewed_by = $4, reviewed_by_username = $5, review_note = $6, updated_at = now() where id = $1 and status = any($2::text[]) and ($3 <> 'approved' or file_purged_at is null) returning *",
+    )
+  })
+
+  it('makes an item approved only while its file is kept: a purged file cannot go back on the site', async () => {
+    const { pool, log } = fakePool([['update gallery_items', [{ id: '9' }]]])
+    await store(pool).transition('9', move)
+    expect(log[1].sql).toContain('where id = $1 and status = any($2::text[]) and ($3 <> \'approved\' or file_purged_at is null)')
+  })
+
+  it("answers 'conflict' for approving an item whose file was purged, and writes no event", async () => {
+    const { pool, sqls } = fakePool([
+      ['update gallery_items', []],
+      ['select 1 from gallery_items', [{ '?column?': 1 }]],
+    ])
+    expect(await store(pool).transition('9', { ...move, from: ['rejected'] })).toBe('conflict')
+    expect(sqls()).not.toContainEqual(has('insert into gallery_events'))
+  })
+
   it('carries the reviewer note to the item and to the event', async () => {
     const { pool, log } = fakePool([['update gallery_items', [{ id: '9' }]]])
     await store(pool).transition('9', { ...move, from: ['pending', 'approved'], to: 'rejected', action: 'rejected', note: 'Off topic' })
@@ -242,7 +290,7 @@ describe('removeByOwner', () => {
     const { pool, log, sqls } = fakePool([['update gallery_items', [item]]])
     expect(await store(pool).removeByOwner('9', OWNER)).toEqual({ item })
     expect(sqls()).toEqual(['begin', has('update gallery_items'), has('insert into gallery_events'), 'commit'])
-    expect(log[1].sql).toContain('where id = $1 and status = any($2::text[]) and author_discord_id = $4')
+    expect(log[1].sql).toContain("where id = $1 and status = any($2::text[]) and ($3 <> 'approved' or file_purged_at is null) and author_discord_id = $4")
     expect(log[1].params).toEqual(['9', ['pending', 'approved', 'rejected'], 'removed', OWNER.id])
     expect(log[2].params).toEqual(['9', 'removed', OWNER.id, OWNER.username, ''])
   })
@@ -264,7 +312,9 @@ describe('removeByOwner', () => {
     ['no user at all', undefined],
   ])('refuses a user with %s before any query, so the owner check can never be dropped', async (_name, user) => {
     const { pool, log } = fakePool([['update gallery_items', [{ id: '9' }]]])
-    await expect(store(pool).removeByOwner('9', user)).rejects.toThrow(TypeError)
+    const refused = store(pool).removeByOwner('9', user)
+    await expect(refused).rejects.toThrow(TypeError)
+    await expect(refused).rejects.toThrow('user.id must be a non-empty string')
     expect(log).toEqual([])
   })
 
@@ -401,7 +451,7 @@ describe('sync', () => {
     const { pool, log } = fakePool()
     const sneaky = { last_error: null, 'channel_id = channel_id; drop table gallery_items --': 1 }
     await expect(store(pool).setSync(CHANNEL, sneaky)).rejects.toThrow(TypeError)
-    await expect(store(pool).setSync(CHANNEL, { channel_id: 'x' })).rejects.toThrow(TypeError)
+    await expect(store(pool).setSync(CHANNEL, { channel_id: 'x' })).rejects.toThrow('setSync: not a gallery_sync column: channel_id')
     expect(log).toEqual([])
   })
 
@@ -409,46 +459,49 @@ describe('sync', () => {
     'setSync refuses an undefined %s, which pg would send as null and so clear it',
     async (column) => {
       const { pool, log } = fakePool()
-      await expect(store(pool).setSync(CHANNEL, { last_ok_at: 'a', [column]: undefined })).rejects.toThrow(TypeError)
+      const refused = store(pool).setSync(CHANNEL, { last_ok_at: 'a', [column]: undefined })
+      await expect(refused).rejects.toThrow(TypeError)
+      await expect(refused).rejects.toThrow(`setSync: ${column} is undefined (use null to clear it)`)
       expect(log).toEqual([])
     },
   )
 
   it('setSync refuses an empty patch', async () => {
     const { pool, log } = fakePool()
-    await expect(store(pool).setSync(CHANNEL, {})).rejects.toThrow(TypeError)
+    await expect(store(pool).setSync(CHANNEL, {})).rejects.toThrow('setSync: nothing to set')
     expect(log).toEqual([])
   })
 })
 
 describe('the sweep reads', () => {
-  const live = "where kind = 'clip' and source = 'discord' and status = 'approved'"
+  // Pending clips are watched too: a link deleted in Discord must leave the review queue, not wait there.
+  const live = "where kind = 'clip' and source = 'discord' and status in ('approved', 'pending')"
 
-  it('approvedClipIds returns the newest 50 by default, newest first', async () => {
+  it('watchedClipIds returns the newest 50 by default, newest first', async () => {
     const rows = [{ id: '9', discord_message_id: '300000000000000030' }]
     const { pool, log } = fakePool([['from gallery_items', rows]])
-    expect(await store(pool).approvedClipIds()).toEqual(rows)
+    expect(await store(pool).watchedClipIds()).toEqual(rows)
     expect(log[0].sql).toContain(`select id, discord_message_id from gallery_items ${live} order by id desc limit $1`)
     expect(log[0].params).toEqual([50])
   })
 
-  it('approvedClipIds takes a different count', async () => {
+  it('watchedClipIds takes a different count', async () => {
     const { pool, log } = fakePool()
-    await store(pool).approvedClipIds({ newest: 7 })
+    await store(pool).watchedClipIds({ newest: 7 })
     expect(log[0].params).toEqual([7])
   })
 
-  it('approvedClipMessageIds starts at the oldest, 100 to a page', async () => {
+  it('watchedClipMessageIds starts at the oldest, 100 to a page', async () => {
     const rows = [{ id: '1', discord_message_id: '300000000000000031' }]
     const { pool, log } = fakePool([['from gallery_items', rows]])
-    expect(await store(pool).approvedClipMessageIds()).toEqual(rows)
+    expect(await store(pool).watchedClipMessageIds()).toEqual(rows)
     expect(log[0].sql).toContain(`select id, discord_message_id from gallery_items ${live} order by id asc limit $1`)
     expect(log[0].params).toEqual([100])
   })
 
-  it('approvedClipMessageIds pages on from the last id seen', async () => {
+  it('watchedClipMessageIds pages on from the last id seen', async () => {
     const { pool, log } = fakePool()
-    await store(pool).approvedClipMessageIds({ after: '100', limit: 25 })
+    await store(pool).watchedClipMessageIds({ after: '100', limit: 25 })
     expect(log[0].sql).toContain(`${live} and id > $1 order by id asc limit $2`)
     expect(log[0].params).toEqual(['100', 25])
   })
@@ -457,7 +510,7 @@ describe('the sweep reads', () => {
 describe('markDiscordDeleted', () => {
   const MESSAGE = '300000000000000040'
 
-  it('removes every approved row of the message and records one discord_deleted event each', async () => {
+  it('removes every approved or pending row of the message and records one discord_deleted event each', async () => {
     const { pool, log, sqls } = fakePool([['update gallery_items', [{ id: '5' }, { id: '6' }]]])
     expect(await store(pool).markDiscordDeleted(MESSAGE)).toBe(2)
     expect(sqls()).toEqual([
@@ -468,14 +521,14 @@ describe('markDiscordDeleted', () => {
       'commit',
     ])
     expect(log[1].sql).toContain(
-      "set status = 'removed', updated_at = now() where discord_message_id = $1 and status = 'approved' returning id",
+      "set status = 'removed', updated_at = now() where discord_message_id = $1 and status in ('approved', 'pending') returning id",
     )
     expect(log[1].params).toEqual([MESSAGE])
     expect(log[2].params).toEqual(['5', 'discord_deleted', POLL_ACTOR.id, POLL_ACTOR.username, ''])
     expect(log[3].params).toEqual(['6', 'discord_deleted', POLL_ACTOR.id, POLL_ACTOR.username, ''])
   })
 
-  it('records nothing and counts 0 when no approved row holds that message', async () => {
+  it('records nothing and counts 0 when no approved or pending row holds that message', async () => {
     const { pool, sqls } = fakePool([['update gallery_items', []]])
     expect(await store(pool).markDiscordDeleted(MESSAGE)).toBe(0)
     expect(sqls()).toEqual(['begin', has('update gallery_items'), 'commit'])
@@ -494,6 +547,7 @@ describe('markDiscordDeleted', () => {
 
 describe('every write rolls back and releases its client when a statement fails', () => {
   const writes = [
+    ['purgeFile', (s) => s.purgeFile('9', async () => {}), 'from gallery_items'],
     ['insertDiscordItem', (s) => s.insertDiscordItem(clip, POLL_ACTOR), 'insert into gallery_items'],
     [
       'insertArt',
@@ -516,6 +570,19 @@ describe('every write rolls back and releases its client when a statement fails'
   })
 })
 
+describe('a rollback that fails too', () => {
+  it('still rejects with the error that caused it, and still releases the client', async () => {
+    const cause = new Error('insert failed')
+    const { pool, sqls, release } = fakePool([
+      ['insert into gallery_items', cause],
+      ['rollback', new Error('connection lost')],
+    ])
+    await expect(store(pool).insertDiscordItem(clip, POLL_ACTOR)).rejects.toBe(cause)
+    expect(sqls()).toEqual(['begin', has('insert into gallery_items'), 'rollback'])
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('values never reach the SQL text', () => {
   it('sends every caller value as a parameter, never inside the statement', async () => {
     const mark = "x'; drop table gallery_items; --"
@@ -534,9 +601,11 @@ describe('values never reach the SQL text', () => {
     await s.events({ before: mark })
     await s.getSync(mark)
     await s.setSync(mark, { last_error: mark })
-    await s.approvedClipIds({ newest: mark })
-    await s.approvedClipMessageIds({ after: mark, limit: mark })
+    await s.watchedClipIds({ newest: mark })
+    await s.watchedClipMessageIds({ after: mark, limit: mark })
     await s.markDiscordDeleted(mark)
+    await s.purgeCandidates({ days: 30 })
+    await s.purgeFile(mark, async () => {})
     expect(log.length).toBeGreaterThan(20)
     for (const { sql } of log) expect(sql).not.toContain('drop table')
   })
@@ -553,5 +622,133 @@ describe('schema.sql gallery_items', () => {
     ['Discord ids exactly when the source is discord', "check ((source = 'discord') = (discord_message_id is not null))"],
   ])('checks %s', (_, check) => {
     expect(table).toContain(check)
+  })
+})
+
+describe('storedBytes', () => {
+  it('sums the sizes of the files R2 still holds: a row with no key, an empty key or a purged file holds none', async () => {
+    const { pool, log } = fakePool([['from gallery_items', [{ n: '4324169' }]]])
+    expect(await store(pool).storedBytes()).toBe(4_324_169)
+    expect(log[0].sql).toBe(
+      "select coalesce(sum(bytes), 0)::text as n from gallery_items where r2_key is not null and r2_key <> '' and file_purged_at is null",
+    )
+  })
+
+  it('is 0 with nothing stored', async () => {
+    const { pool } = fakePool([['from gallery_items', [{ n: '0' }]]])
+    expect(await store(pool).storedBytes()).toBe(0)
+  })
+
+  it('is exact past 2^31 and past 4 GiB, where a 32-bit sum would wrap', async () => {
+    const { pool } = fakePool([['from gallery_items', [{ n: '8999999999' }]]])
+    expect(await store(pool).storedBytes()).toBe(8_999_999_999)
+  })
+
+  it.each([[[{ n: 'x' }]], [[{ n: '-1' }]], [[{ n: null }]], [[]], [[{ n: '1e400' }]]])(
+    'refuses an answer that is not a count of bytes (%j) rather than let a cap check run on it',
+    async (rows) => {
+      const { pool } = fakePool([['from gallery_items', rows]])
+      await expect(store(pool).storedBytes()).rejects.toThrow('storedBytes: Postgres did not answer a byte count')
+    },
+  )
+})
+
+describe('purgeCandidates', () => {
+  it('lists the kept files of items that have sat purgeable for the given days, oldest first', async () => {
+    const rows = [{ id: '3', r2_key: 'art/3.png', bytes: '10' }]
+    const { pool, log } = fakePool([['from gallery_items', rows]])
+    expect(await store(pool).purgeCandidates({ days: 30 })).toEqual(rows)
+    expect(log[0].sql).toBe(
+      "select id, r2_key, bytes from gallery_items where status = any($1::text[]) and r2_key is not null and r2_key <> '' and file_purged_at is null and updated_at < now() - make_interval(days => $2) order by id",
+    )
+    expect(log[0].params).toEqual([[...PURGEABLE], 30])
+  })
+
+  it('takes a single day: the smallest whole number above 0', async () => {
+    const { pool, log } = fakePool()
+    await store(pool).purgeCandidates({ days: 1 })
+    expect(log[0].params).toEqual([[...PURGEABLE], 1])
+  })
+
+  it.each([0, -1, 1.5, NaN, Infinity, '30', null, undefined])('refuses %j days before any query', async (days) => {
+    const { pool, log } = fakePool()
+    await expect(store(pool).purgeCandidates({ days })).rejects.toThrow('purgeCandidates: days must be a whole number above 0')
+    expect(log).toEqual([])
+  })
+})
+
+describe('PURGE_ACTOR', () => {
+  it('is the fixed sentinel the trail names for the storage purge', () => {
+    expect(PURGE_ACTOR).toEqual({ id: 'storage-purge', username: 'Storage purge' })
+    expect(Object.isFrozen(PURGE_ACTOR)).toBe(true)
+  })
+})
+
+describe('purgeFile', () => {
+  const locked = [{ id: '7', r2_key: 'clips/1/2.mp4' }]
+
+  it('locks the row, checks it still qualifies, removes the file, marks it purged and records it, in one transaction', async () => {
+    const removed = []
+    const { pool, log, sqls, release } = fakePool([['from gallery_items', locked]])
+    expect(await store(pool).purgeFile('7', async (key) => removed.push(key))).toBe(true)
+    expect(removed).toEqual(['clips/1/2.mp4'])
+    expect(sqls()).toEqual(['begin', has('for update'), has('update gallery_items'), has('insert into gallery_events'), 'commit'])
+    expect(log[1].sql).toBe(
+      "select id, r2_key from gallery_items where id = $1 and status = any($2::text[]) and r2_key is not null and r2_key <> '' and file_purged_at is null and updated_at < now() - make_interval(days => $3) for update",
+    )
+    expect(log[1].params).toEqual(['7', [...PURGEABLE], 30])
+    expect(log[2].sql).toBe('update gallery_items set file_purged_at = now() where id = $1')
+    expect(log[2].params).toEqual(['7'])
+    expect(log[3].params).toEqual(['7', 'file_purged', PURGE_ACTOR.id, PURGE_ACTOR.username, ''])
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes nothing and answers false when the item no longer qualifies (approved meanwhile, say)', async () => {
+    const removed = []
+    const { pool, sqls } = fakePool([['from gallery_items', []]])
+    expect(await store(pool).purgeFile('7', async (key) => removed.push(key))).toBe(false)
+    expect(removed).toEqual([])
+    expect(sqls()).toEqual(['begin', has('for update'), 'commit'])
+  })
+
+  it('marks nothing when removing the file fails, so the next run tries again', async () => {
+    const boom = new Error('R2 is unreachable.')
+    const { pool, sqls } = fakePool([['from gallery_items', locked]])
+    await expect(store(pool).purgeFile('7', async () => { throw boom })).rejects.toBe(boom)
+    expect(sqls()).toEqual(['begin', has('for update'), 'rollback'])
+  })
+
+  it('removes the file before marking it: a mark that fails leaves a file R2 no longer has, never one it still bills', async () => {
+    const order = []
+    const pool = fakePool([['from gallery_items', locked]]).pool
+    const query = pool.connect
+    pool.connect = async () => {
+      const c = await query()
+      const q = c.query
+      return { ...c, query: async (sql, p) => (order.push(sql.split(' ')[0]), q(sql, p)) }
+    }
+    await store(pool).purgeFile('7', async () => order.push('REMOVE'))
+    expect(order).toEqual(['begin', 'select', 'REMOVE', 'update', 'insert', 'commit'])
+  })
+
+  it.each([null, undefined, '', 7])('refuses an id of %j before any query', async (id) => {
+    const { pool, log } = fakePool()
+    await expect(store(pool).purgeFile(id, async () => {})).rejects.toThrow(TypeError)
+    await expect(store(pool).purgeFile(id, async () => {})).rejects.toThrow('id must be a non-empty string')
+    expect(log).toEqual([])
+  })
+})
+
+describe('schema.sql for the storage purge', () => {
+  const sql = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8')
+
+  it('adds file_purged_at to gallery_items in its own alter, since the table exists in production', () => {
+    expect(sql).toContain('alter table gallery_items add column if not exists file_purged_at timestamptz;')
+  })
+
+  it('replaces the event check in one statement, so no moment exists without one, and lets file_purged in', () => {
+    expect(sql).toMatch(
+      /alter table gallery_events\s+drop constraint if exists gallery_events_action_check,\s+add constraint gallery_events_action_check check \(action in \('stored', 'submitted', 'approved', 'rejected', 'hidden', 'removed', 'discord_deleted', 'file_purged'\)\);/,
+    )
   })
 })

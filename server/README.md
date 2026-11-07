@@ -161,18 +161,30 @@ only way to a file. A status change the item does not allow answers 409, an unkn
 
 Limits: an upload is one JPEG, PNG, WebP or GIF of at most 10 MB, checked by its
 bytes, not its name or declared type; a title is 1 to 120 characters and a note at
-most 500; a rejection reason 1 to 500. A JSON body is at most 16 KB. Nothing is ever
-deleted: every change writes a `gallery_events` row in the same transaction, and a
-rejected, hidden or removed item keeps its file in R2.
+most 500; a rejection reason 1 to 500. A JSON body is at most 16 KB. No row is ever
+deleted: every change writes a `gallery_events` row in the same transaction.
+
+**Storage** (`galleryPolicy.js`). R2's free tier is 10 GB, so the store holds at most 9 GB,
+counted from the rows' own sizes. Past 7 GB only `#gameplay` clips are copied; past 9 GB
+nothing is, and an art upload answers 507. A clip that does not fit is skipped before it is
+downloaded and named on the Review tab's poll line. A link holds no file and always goes in.
+A file whose item has been rejected, hidden or removed for 30 days leaves R2 once the nightly
+backup holds it (`galleryPurge.js`, run by `backup/salamanders-r2-backup`): the row and its
+trail stay, `file_purged_at` is set, a `file_purged` event names the storage purge, and the
+item can no longer be approved. The backup keeps every file.
 
 **The clips channel.** Posting in it is the publish step: the poll (every 2 minutes)
-copies each video or image attachment into R2 and stores it approved, and records
-Medal / YouTube / Twitch links as embeds. Attachments over 100 MB are skipped. An
+copies each video or image attachment into R2, and records Medal / YouTube / Twitch links
+as embeds. A message tagged `#gameplay` (anywhere in its text, outside its links; the tag
+is taken out of the title) goes straight on the site, files and Medal links alike. Anything
+untagged, and every YouTube or Twitch link whatever its tag (nothing says the poster made
+the video), waits in the review queue, its file already copied so an approver can watch
+it. Attachments over 100 MB are skipped. An
 attachment that cannot be copied (a dead Discord link, a file R2 refuses, a copy that cannot
 finish in two minutes) is skipped too and named on the Review tab's poll line; the
 back-catalogue job can pick it up later. Deleting
-the message in Discord removes the clip from the site (the newest 50 are checked every
-pass, all of them hourly); an approver can also hide one. The first pass only notes the
+the message in Discord removes the clip from the site, or from the review queue (the newest
+50 are checked every pass, all of them hourly); an approver can also hide one. The first pass only notes the
 newest message: clips posted before launch are not imported.
 
 | Variable | Value |
@@ -199,11 +211,13 @@ Rollout:
    scoped to that bucket alone. Put the R2 values, `GALLERY_CHANNEL_ID` and (if wanted)
    `GALLERY_CURATOR_ROLE_ID` in `server/.env`.
 2. Apply `schema.sql` (idempotent, command in the reports section above), then start the
-   new API image.
+   new API image. The storage purge (2026-11-07) added `gallery_items.file_purged_at` and the
+   `file_purged` event: apply `schema.sql` **before** starting an image that has it, since
+   every approval reads that column.
 3. Grant the bot the permissions above. The first pass seeds the cursor; watch the
    Review tab's poll status for `lastOkAt` and an empty `lastError`.
 4. Merge the site; the Reliquarium nav entry appears for members only.
-5. Back the bucket up: a nightly `rclone sync` of it into the Vulkan share that is
-   already backed up.
+5. Back the bucket up and run the purge: `backup/salamanders-r2-backup` nightly (see
+   `backup/README.md`). It copies, never syncs: the backup keeps the files the purge takes out.
 
 The one-time import of the channel's back catalogue is a separate job.

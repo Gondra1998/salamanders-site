@@ -79,7 +79,8 @@ test.describe('Reliquarium API', () => {
 
   test('the poll started from the newest message, then copies a new clip into R2', async ({ request }) => {
     const title = `E2E clip ${RUN}`
-    clipMessageId = await postInChannel(request, title, ['clip.mp4'])
+    // Tagged, so it goes straight on the site; the tag is taken out of the title.
+    clipMessageId = await postInChannel(request, `#gameplay ${title}`, ['clip.mp4'])
     await expect.poll(async () => (await titled(request, '/gallery/clips', title)).length, { timeout: 10_000 }).toBe(1)
     ;[clip] = await titled(request, '/gallery/clips', title)
     expect(clip).toMatchObject({ kind: 'clip', source: 'discord', media: 'video', status: 'approved', contentType: 'video/mp4', bytes: MP4.length })
@@ -104,10 +105,33 @@ test.describe('Reliquarium API', () => {
   test('a Medal link in a message becomes an embed under its canonical address', async ({ request }) => {
     const slug = `e2eMedal${RUN}`
     const title = `E2E medal ${RUN} https://medal.tv/games/space-marine-2/clips/${slug}?invite=e2e`
-    await postInChannel(request, title)
+    await postInChannel(request, `#gameplay ${title}`)
     await expect.poll(async () => (await titled(request, '/gallery/clips', title)).length, { timeout: 10_000 }).toBe(1)
     const [embed] = await titled(request, '/gallery/clips', title)
     expect(embed).toMatchObject({ media: 'embed', url: `https://medal.tv/clips/${slug}`, contentType: null, bytes: null })
+  })
+
+  test('an untagged clip and any YouTube link are copied but wait for review, off the site', async ({ request }) => {
+    const untagged = `E2E untagged ${RUN}`
+    const linked = `E2E youtube ${RUN} https://youtu.be/e2eYouTub${RUN.slice(-2).padStart(2, '0')}`
+    const untaggedId = await postInChannel(request, untagged, ['clip.mp4'])
+    await postInChannel(request, `#gameplay ${linked}`)
+    const queue = async () => (await (await get(request, '/gallery/review', CURATOR)).json()).items
+    await expect.poll(async () => (await queue()).filter((i) => i.title === untagged || i.title === linked).length, { timeout: 10_000 }).toBe(2)
+    const waiting = (await queue()).filter((i) => i.title === untagged || i.title === linked)
+    expect(waiting.map((i) => [i.title, i.media, i.status]).sort()).toEqual([
+      [untagged, 'video', 'pending'],
+      [linked, 'embed', 'pending'],
+    ].sort())
+    expect(await titled(request, '/gallery/clips', untagged)).toEqual([])
+    expect(await titled(request, '/gallery/clips', linked)).toEqual([])
+    // The file was copied all the same, so an approver can watch it before deciding.
+    const file = await request.get(waiting.find((i) => i.title === untagged).url)
+    expect(file.status()).toBe(200)
+
+    // Deleted in Discord while it waits: it leaves the queue too.
+    await request.post(`${MOCK}/__test/channel/delete/${untaggedId}`)
+    await expect.poll(async () => (await queue()).filter((i) => i.title === untagged).length, { timeout: 10_000 }).toBe(0)
   })
 
   test('deleting the message in Discord takes its clip off the site, on the record', async ({ request }) => {

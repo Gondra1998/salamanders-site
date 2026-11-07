@@ -8,7 +8,8 @@
  *   clip pasted in two spellings is one row;
  * - anything else is skipped (attachments, with a reason) or ignored (links, text).
  *
- * The message text is the title of every row it yields.
+ * The message text is the title of every row it yields. A #gameplay tag in it (outside any link) marks every row
+ * as gameplay and is taken out of the title; galleryPolicy.js decides what that changes.
  */
 export const MAX_CLIP_BYTES = 104_857_600
 
@@ -26,6 +27,11 @@ const TYPES = new Map([
 ])
 
 const LINK = /https?:\/\/[^\s<>()]+/g
+// The same links, captured, so split() keeps them: the text between links lands at the even indexes.
+const LINK_PART = /(https?:\/\/[^\s<>()]+)/
+// #gameplay as its own word, in any case, with any Discord markdown pair wrapped round it (**, __, ~~, ||, *) and
+// the spaces after it, which go when the tag is taken out of the title.
+const GAMEPLAY_TAG = /(?<!\w)([*_~|]*)#gameplay\1(?![\w-])[ \t]*/gi
 // Punctuation and Discord markdown that touches the end of a pasted link without being part of it.
 const LINK_TAIL = /[.,;:!?'"*~|]+$/
 const WWW_OR_M = /^(?:www|m)\./
@@ -86,6 +92,26 @@ function titleOf(content) {
   return cut.replaceAll('\u0000', '').toWellFormed()
 }
 
+/**
+ * → { gameplay, text }: whether the text holds the #gameplay tag outside its links, and the text without it.
+ * A link is never searched or changed, so a page anchor such as example.test/page#gameplay is not a tag.
+ */
+function untag(content) {
+  let gameplay = false
+  const text = content
+    .split(LINK_PART)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(GAMEPLAY_TAG, () => {
+            gameplay = true
+            return ''
+          }),
+    )
+    .join('')
+  return { gameplay, text }
+}
+
 /** A size we can hold against MAX_CLIP_BYTES. */
 const isSize = (n) => Number.isFinite(n) && n >= 0
 
@@ -98,12 +124,14 @@ const isSize = (n) => Number.isFinite(n) && n >= 0
 export function parseMessage(message) {
   const content = message.content ?? ''
   const { author } = message
+  const { gameplay, text } = untag(content)
   const base = {
     messageId: message.id,
     authorId: author.id,
     authorUsername: String(author.username || author.id),
-    title: titleOf(content),
+    title: titleOf(text),
     postedAt: message.timestamp,
+    gameplay,
   }
   const rows = []
   const skipped = []
@@ -124,7 +152,7 @@ export function parseMessage(message) {
     const hit = embedOf(link.replace(LINK_TAIL, ''))
     if (hit && !seen.has(hit.canonical)) {
       seen.add(hit.canonical)
-      rows.push({ ...base, attachmentId: hit.canonical, media: 'embed', embedUrl: hit.canonical })
+      rows.push({ ...base, attachmentId: hit.canonical, media: 'embed', embedUrl: hit.canonical, host: hit.host })
     }
   }
 

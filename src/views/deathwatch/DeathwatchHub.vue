@@ -81,8 +81,6 @@ const recruitmentTo = resolveArea({ area: 'recruitment' }).canonical
   gap: 0.5rem;
   padding: 1.2rem 1.5rem;
   text-align: center;
-  /* A dark veil behind the heading, so its small lines hold 4.5:1 on the bright backdrop at any width. */
-  background: radial-gradient(ellipse at center, rgb(6 9 6 / 0.88) 35%, rgb(6 9 6 / 0.6) 60%, transparent 82%);
 }
 .dw-hub-crest {
   width: clamp(70px, 12.5dvh, 160px);
@@ -105,6 +103,8 @@ const recruitmentTo = resolveArea({ area: 'recruitment' }).canonical
   letter-spacing: 0.04em;
   color: var(--dw-ink);
   text-wrap: balance;
+  /* A soft dark halo that follows the letters, so the title stands off the backdrop without a box. */
+  text-shadow: 0 2px 4px rgb(0 0 0 / 0.7), 0 0 24px rgb(0 0 0 / 0.6);
 }
 .dw-hub-tagline {
   margin: 0;

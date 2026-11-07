@@ -4,6 +4,8 @@
 //   ts1…ts6  a Terms of Service section: first line its title, "## " a sub-section, any other line a clause. A
 //            section keeps the number of its key, so blanking one does not renumber the rest (Section 3 refers
 //            to Section 4 by number).
+//   ts_tl  the TL;DR above Section 1: first line its subtitle, "## " a group, "- " a point, any other line a note
+//          under the group's points
 //   rq_q  the Requirements' quote
 //   rq1…rq3  a requirements block: line 1 its title, line 2 its lead, "- " a requirement, "  - " a note under the
 //            last one (as many as it has), any other line a note below the list
@@ -45,6 +47,21 @@ export function termsOfService(tx) {
     sections,
     end: paras(t.ts_e),
   }
+}
+
+/** → { sub: segs, groups: [{ title, items: segs[], notes: segs[] }] }; no groups when the text is blank. */
+export function tldr(tx) {
+  const [sub = '', ...rest] = lines(texts(tx).ts_tl)
+  const groups = []
+  for (const line of rest.map((l) => l.trim()).filter(Boolean)) {
+    if (line.startsWith('##')) groups.push({ title: inline(line.replace(/^#+\s*/, '')), items: [], notes: [] })
+    else {
+      const g = groups.at(-1) ?? groups[groups.push({ title: [], items: [], notes: [] }) - 1]
+      if (line.startsWith('-')) g.items.push(inline(line.replace(/^-\s*/, '')))
+      else g.notes.push(inline(line))
+    }
+  }
+  return { sub: inline(sub.trim()), groups }
 }
 
 /** → { quote: segs, blocks: [{ title, lead, items: [{ segs, notes: segs[] }], notes: segs[] }] } */

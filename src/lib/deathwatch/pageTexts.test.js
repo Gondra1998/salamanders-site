@@ -9,7 +9,7 @@ describe('PAGE_TEXTS', () => {
     expect(Object.fromEntries(Object.entries(PAGE_TEXTS).map(([p, f]) => [p, f.map(([k]) => k)]))).toEqual({
       'hallofrelics/fortress-lore': ['lo_s', 'lo_e', 'lo1', 'lo2', 'lo3', 'lo4', 'lo5', 'lo6'],
       'hallofrelics/notable-members': ['nm_i', 'nm_ck', 'nm_c', 'nm_hi', 'nm_h', 'nm_vi', 'nm_vk', 'nm_v', 'nm_e'],
-      'recruitment/terms-of-service': ['ts_h', 'ts_i', 'ts1', 'ts2', 'ts3', 'ts4', 'ts5', 'ts6', 'ts_e'],
+      'recruitment/terms-of-service': ['ts_h', 'ts_i', 'ts_tl', 'ts1', 'ts2', 'ts3', 'ts4', 'ts5', 'ts6', 'ts_e'],
       'recruitment/requirements': ['rq_q', 'rq1', 'rq2', 'rq3'],
       'armouringhall/restricted-wargear': ['rw_h', 'rw_i', 'rw_c1', 'rw_c2', 'rw_f'],
     })

@@ -6,13 +6,26 @@
 import { useRoute } from 'vue-router'
 import { AREAS, resolveArea } from '../../../lib/deathwatch/areas'
 import { useDeathwatch } from '../../../stores/deathwatch'
-import crest from '../img/crest-armouringhall.png'
+import crestArmour from '../img/crest-armouringhall.png'
+import crestWatch from '../img/crest.webp'
 
-defineProps({ tab: { type: String, required: true } })
+// Recruitment heads itself the same way (since 2026-11); `area` picks the hall's or Recruitment's crest, line and tabs.
+const props = defineProps({ tab: { type: String, required: true }, area: { type: String, default: 'armouringhall' } })
 const route = useRoute()
 const store = useDeathwatch()
-const tabs = () => AREAS.armouringhall.tabs.filter((t) => !t.command || store.command)
-const to = (t) => ({ path: resolveArea({ area: 'armouringhall', tab: t.slug }).canonical, query: route.query.scene ? { scene: route.query.scene } : {} })
+const HEADS = {
+  armouringhall: { crest: crestArmour, line: 'Uniform & heraldry of the Watch.' },
+  recruitment: { crest: crestWatch, line: 'Watch Fortress Ebonhold' },
+}
+// Each tab's icon: a lock for Deathwatch Command's, a page and a checklist for Recruitment's, else a shield.
+const ICONS = {
+  'terms-of-service': 'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5',
+  requirements: 'M4 6.5 5.5 8 8 5.5M4 12.5 5.5 14 8 11.5M4 18.5 5.5 20 8 17.5M11 7h9M11 13h9M11 19h9',
+}
+const head = () => HEADS[props.area]
+const tabs = () => AREAS[props.area].tabs.filter((t) => !t.command || store.command)
+const icon = (t) => (t.command ? 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3' : (ICONS[t.slug] ?? 'M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6z'))
+const to = (t) => ({ path: resolveArea({ area: props.area, tab: t.slug }).canonical, query: route.query.scene ? { scene: route.query.scene } : {} })
 </script>
 
 <template>
@@ -21,14 +34,13 @@ const to = (t) => ({ path: resolveArea({ area: 'armouringhall', tab: t.slug }).c
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
       Back to the Fortress
     </RouterLink>
-    <img class="hh-crest" :src="crest" alt="" width="140" height="140" />
-    <p class="hh-title" role="heading" aria-level="1">Armouring Hall</p>
-    <p class="hh-line">Uniform &amp; heraldry of the Watch.</p>
-    <nav class="hh-tabs" aria-label="Armouring Hall">
+    <img class="hh-crest" :src="head().crest" alt="" width="140" height="140" />
+    <p class="hh-title" role="heading" aria-level="1">{{ AREAS[area].label }}</p>
+    <p class="hh-line">{{ head().line }}</p>
+    <nav class="hh-tabs" :aria-label="AREAS[area].label">
       <RouterLink v-for="t in tabs()" :key="t.slug" class="hh-tab" :to="to(t)" :aria-current="t.slug === tab ? 'page' : undefined">
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path v-if="t.command" d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3" />
-          <path v-else d="M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6z" />
+          <path :d="icon(t)" />
         </svg>
         {{ t.label }}
       </RouterLink>

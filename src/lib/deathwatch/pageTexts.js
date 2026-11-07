@@ -31,6 +31,7 @@ export const PAGE_TEXTS = {
   'recruitment/terms-of-service': [
     ['ts_h', 'Header (one point per line)'],
     ['ts_i', 'Introduction (a paragraph in *…* is shown as a quote)'],
+    ['ts_tl', 'TL;DR above Section 1 (first line = subtitle · `## ` starts a group · `- ` a point · any other line a note under the points · empty hides the button)'],
     ...[1, 2, 3, 4, 5, 6].map((n) => [`ts${n}`, `Section ${n} ${SECTION}`]),
     ['ts_e', 'Closing (a paragraph in *…* is shown as a quote)'],
   ],

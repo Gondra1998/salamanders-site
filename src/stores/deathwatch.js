@@ -11,6 +11,10 @@ import { loadFixture } from '../lib/deathwatch/fixture'
 // slow response can never bring back a state the user has already left (sign-out resets).
 let seq = 0
 
+// A server that never answers counts as out of reach after this long, so the gate can offer to try again instead
+// of waiting until the browser gives up (minutes).
+export const ME_TIMEOUT_MS = 10_000
+
 const statusOf = (err) => (err?.status === 401 ? 'signin' : err?.status === 403 ? 'denied' : 'unavailable')
 
 export const useDeathwatch = defineStore('deathwatch', {
@@ -32,8 +36,10 @@ export const useDeathwatch = defineStore('deathwatch', {
         this.$patch({ status: 'signin', commander: false, command: false })
         return
       }
+      let timer
       try {
-        const me = await getMe(token)
+        const late = new Promise((_, no) => (timer = setTimeout(no, ME_TIMEOUT_MS)))
+        const me = await Promise.race([getMe(token), late])
         if (mine !== seq) return
         // Only a plain `true` counts: anything else fails closed. A commander always has access, and sees what
         // Deathwatch Command sees.
@@ -43,6 +49,8 @@ export const useDeathwatch = defineStore('deathwatch', {
       } catch (err) {
         if (mine !== seq) return
         this.$patch({ status: statusOf(err), commander: false, command: false })
+      } finally {
+        clearTimeout(timer)
       }
     },
 

@@ -38,6 +38,8 @@ const AUTHORED_DURATION_FILES = [
   'components/roster/RosterBranch.vue',
   'components/roster/RosterMember.vue',
   'components/deathwatch/armour/ArmourView.vue',
+  // the slow fade from the Deathwatch boot screen onto the page
+  'components/deathwatch/DeathwatchBoot.vue',
 ]
 // The only animations allowed to loop forever: the Deathwatch drift and flicker, the Archive gate's unsealing
 // glow, and a spinner. A line that says `infinite` must name one of them (so dw-pulse and dw-gate-pulse, which

@@ -6,7 +6,7 @@ vi.mock('../lib/deathwatch/api', () => ({ getMe: vi.fn() }))
 vi.mock('../lib/deathwatch/fixture', () => ({ loadFixture: vi.fn() }))
 import { getMe } from '../lib/deathwatch/api'
 import { loadFixture } from '../lib/deathwatch/fixture'
-import { useDeathwatch } from './deathwatch'
+import { ME_TIMEOUT_MS, useDeathwatch } from './deathwatch'
 
 const apiError = (status) => Object.assign(new Error('nope'), { status })
 const deferred = () => {
@@ -267,5 +267,32 @@ describe('deathwatch store', () => {
     d.resolve({ _fixture: true, scene: 'commander', status: 'allowed', commander: true })
     await p
     expect(s).toMatchObject({ status: 'idle', commander: false })
+  })
+
+  it('leaves no timer behind once the server has answered', async () => {
+    vi.useFakeTimers()
+    try {
+      getMe.mockResolvedValue({ access: true })
+      await useDeathwatch().load('tok')
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('counts a server that does not answer within the time limit as out of reach', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = useDeathwatch()
+      getMe.mockReturnValue(deferred().promise) // never answers
+      const p = s.load('tok')
+      await vi.advanceTimersByTimeAsync(ME_TIMEOUT_MS - 1)
+      expect(s.status).toBe('checking')
+      await vi.advanceTimersByTimeAsync(1)
+      await p
+      expect(s).toMatchObject({ status: 'unavailable', commander: false, command: false })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

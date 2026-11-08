@@ -167,12 +167,27 @@ async function rsDo() {
 
 // Event archive.
 const ar = reactive({ name: '', asking: false, typed: '', msg: '' })
-watch(eventName, (n) => (ar.name ||= n), { immediate: true })
+// The archive is named after the tour, and follows it when the tour is renamed or a new one opened, unless a name
+// was typed here by hand.
+watch(
+  eventName,
+  (n, was) => {
+    if (!ar.name || ar.name === was) ar.name = n
+  },
+  { immediate: true },
+)
+// What "Archive & reset" has done when a step fails, and how to finish it.
+const STOPPED = {
+  copy: ' The live event is only cleared after the archive copy is saved.',
+  teams: ' The archive copy is saved, but some Kill Teams are still live: clear them under “Reset Kill Teams”.',
+  name: ' The event is archived and its Kill Teams are cleared; only the old tour name is left. Name the new tour under “Tour”.',
+}
 async function archive(reset) {
   const name = ar.name.trim() || eventName.value
   const id = `e${Date.now()}`
   const ids = teams.value.map((t) => t.id)
   Object.assign(ar, { asking: false, typed: '', msg: 'Saving…' })
+  let step = 'copy'
   try {
     await save('archive', id, archiveDoc(data.teams, S.value, name))
     if (!reset) {
@@ -180,17 +195,19 @@ async function archive(reset) {
       return
     }
     // The live event is cleared only once the copy is saved: a failure above leaves it as it was.
+    step = 'teams'
     let i = 0
     for (const k of ids) {
       ar.msg = `Archived ✓ Clearing the live event… ${++i}/${ids.length}`
       await save('teams', k, null)
     }
     // The tour is over: its name goes with it, so the next one starts unnamed ("Open new tour").
+    step = 'name'
     const { cur_n, ...tx } = data.cfg.tx ?? {}
     if (cur_n !== undefined) await save('cfg', 'tx', tx)
     ar.msg = `Archived as “${name}” and live event cleared ✓ Open it under “Archive”.`
   } catch (err) {
-    ar.msg = `Not completed: ${say(err)}${reset ? ' The live event is only cleared after the archive copy is saved.' : ''}`
+    ar.msg = `Not completed: ${say(err)}${reset ? STOPPED[step] : ''}`
   }
 }
 const missionCount = computed(() => teams.value.reduce((a, t) => a + (t.m ?? []).length, 0))
@@ -323,16 +340,17 @@ async function resetTeams() {
           <button type="button" class="dw-btn rm-fade danger" :disabled="ar.typed.trim().toUpperCase() !== 'RESET'" @click="archive(true)">Archive &amp; reset</button>
         </div>
       </template>
-      <p v-if="ar.msg" class="dw-msg" role="status">{{ ar.msg }}</p>
-
-      <ResetZone
-        title="Reset Kill Teams"
-        text="Deletes all Kill Teams with their rosters and missions without keeping a copy. Scoring rules stay. To keep the event, use “Archive & reset” above instead."
-        :ask="`This deletes ${teams.length} Kill Teams and ${missionCount} missions.`"
-        :run="resetTeams"
-        @backup="backup"
-      />
     </template>
+    <!-- Outside the section: once "Archive & reset" has cleared the Kill Teams the section is gone, but not what it did. -->
+    <p v-if="ar.msg" class="dw-msg" role="status">{{ ar.msg }}</p>
+    <ResetZone
+      v-if="teams.length"
+      title="Reset Kill Teams"
+      text="Deletes all Kill Teams with their rosters and missions without keeping a copy. Scoring rules stay. To keep the event, use “Archive & reset” above instead."
+      :ask="`This deletes ${teams.length} Kill Teams and ${missionCount} missions.`"
+      :run="resetTeams"
+      @backup="backup"
+    />
   </TrackerState>
 </template>
 

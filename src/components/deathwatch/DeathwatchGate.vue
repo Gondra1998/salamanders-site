@@ -16,12 +16,25 @@ watch(() => auth.member, () => store.load(auth.token), { immediate: true })
 
 // The cogitator's wake (DeathwatchBoot) plays over the gate once per visit to the site (the tab's session): once it
 // ends cleared, it is not shown again until the tab is closed. Refused, it plays again on the next try. Never with
-// reduced motion (or where that cannot be asked, as in tests).
+// reduced motion (or where that cannot be asked, as in tests). Where the browser refuses storage (site data blocked),
+// touching it throws: then the visit cannot be looked up, so the wake is skipped rather than played on every visit,
+// and a visit that cannot be noted is simply not noted.
 const BOOTED = 'dw-booted'
-const boot = ref(!!globalThis.matchMedia && !matchMedia('(prefers-reduced-motion: reduce)').matches && !sessionStorage.getItem(BOOTED))
+const seen = () => {
+  try {
+    return !!sessionStorage.getItem(BOOTED)
+  } catch {
+    return true
+  }
+}
+const boot = ref(!!globalThis.matchMedia && !matchMedia('(prefers-reduced-motion: reduce)').matches && !seen())
 const booted = (cleared) => {
   boot.value = false
-  if (cleared) sessionStorage.setItem(BOOTED, '1')
+  try {
+    if (cleared) sessionStorage.setItem(BOOTED, '1')
+  } catch {
+    // nothing to note it in
+  }
 }
 </script>
 

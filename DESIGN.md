@@ -271,7 +271,8 @@ pills (999px); the Deathwatch bottom sheet rounds only its top corners (14px). B
   shimmer bars (an opacity pulse, off under reduced motion), one file per view under `pages/<area>/<tab>.vue`.
 - **Hub cards:** the original's destination menu: a painted picture on top, the area's name in Cinzel, centred,
   with 12px corners (the one place this sub-theme rounds), and the card back to the Salamanders beneath.
-- **Gate card:** a dw-surface panel with a dw-line-2 border, a Cinzel title, an accent in dw-accent.
+- **Gate screen (`DeathwatchBoot.vue`):** every gate state in the cogitator's face, between the site's bar and footer:
+  the crest in an auspex ring, the area's name, the answer's headline; once per visit it first plays the wake (a vox log).
 - **REDACTED strip:** a black striped bar with spaced mono text, on `/companies`, the way into the area.
 
 ## Motion
@@ -319,7 +320,8 @@ These keep their own numbers and curves. Everything not listed here is functiona
 | `src/components/archive/ArchiveThread.vue` | `brand-cool`, 1.7s `cubic-bezier(0.2, 0.7, 0.3, 1)` | duration and curve |
 | `src/components/archive/ArchiveGate.vue` | `gate-glow`, the unsealing: 1.6s `ease-in-out`, infinite while the gate is unsealing | duration and curve |
 | `src/components/deathwatch/deathwatch.css` | `dw-drift` 40s and `dw-flicker` 5s, `ease-in-out`, `infinite alternate` and `infinite`, bounded by the Deathwatch backdrop: they run as long as it shows | as is |
-| `src/components/deathwatch/deathwatch.css`, `src/components/deathwatch/DeathwatchGate.vue` | `dw-pulse` 1.8s (the skeleton shimmer) and `dw-gate-pulse` 1.6s (the gate pulse), `ease-in-out`, 3 iterations then rest | as is |
+| `src/components/deathwatch/deathwatch.css` | `dw-pulse` 1.8s (the skeleton shimmer), `ease-in-out`, 3 iterations then rest | as is |
+| `src/components/deathwatch/DeathwatchBoot.vue` | the gate's screen: its way in (`dwb-in` 500ms) and out (`dwb-out`, `dwb-near` 400ms), and the waking cursor (`dwb-blink` 450ms, 4 times); the easing is `var(--ease-forge)` | the durations and the cursor's count |
 | `src/components/roster/RosterBranch.vue`, `src/components/roster/RosterMember.vue`, `src/components/deathwatch/armour/ArmourView.vue` | the attention flashes: the one that finds a member (`rs-flash` 1.4s and `rs-ping` 1.4s, twice) and the armour card's arrival from a deep link (`ah-flash` 1.3s) | duration and iteration count; the easing is `var(--ease-forge)` |
 
 ### Loops
@@ -327,7 +329,7 @@ These keep their own numbers and curves. Everything not listed here is functiona
 A loop is bounded by the life of what it shows, or by visibility. The lifetime-bounded loops are the spinner and the
 Archive gate's unsealing glow (`gate-glow`), which runs only while the "Unsealing the archive…" line shows.
 `infinite` is allowed only for the Deathwatch drift and flicker (`dw-drift`, `dw-flicker`), the spinner, and that
-glow. The skeleton shimmer (`dw-pulse`) and the gate's `dw-gate-pulse` run three iterations, then rest. The volcano
+glow. The skeleton shimmer (`dw-pulse`) runs three iterations, then rests; the gate screen's cursor blinks four times. The volcano
 stops drawing when the tab is hidden (it is a fixed backdrop, so it is never offscreen); the FireText title stops
 drawing when it is scrolled out of view.
 

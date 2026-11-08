@@ -292,4 +292,64 @@ describe("DeathwatchGate: the cogitator's wake", () => {
     motion(true)
     expect((await mountGate()).find('.dwb').exists()).toBe(false)
   })
+
+  describe('with the browser refusing storage', () => {
+    // As Firefox does with cookies and site data blocked: merely touching sessionStorage throws.
+    const own = Object.getOwnPropertyDescriptor(window, 'sessionStorage')
+    const blockStorage = () =>
+      Object.defineProperty(window, 'sessionStorage', {
+        configurable: true,
+        get() {
+          throw new DOMException('The operation is insecure.', 'SecurityError')
+        },
+      })
+    afterEach(() => {
+      Object.defineProperty(window, 'sessionStorage', own)
+      vi.restoreAllMocks()
+    })
+
+    it('still answers, in the still screen, when the visit cannot be looked up', async () => {
+      motion(false)
+      storeMember()
+      getMe.mockResolvedValue({ access: false, watchCommander: false })
+      blockStorage()
+      const w = await mountGate()
+      expect(w.findAll('.dwb')).toHaveLength(1)
+      expect(w.find('.dwb').classes()).toEqual(expect.arrayContaining(['still', 'shut']))
+      expect(w.find('.dwb-big').text()).toBe('The gate stays shut')
+    })
+
+    it('still opens onto the page when the visit cannot be noted', async () => {
+      motion(false)
+      vi.useFakeTimers()
+      storeMember()
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      })
+      getMe.mockResolvedValue({ access: true, watchCommander: false })
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:rest(.*)*', component: { template: '<div />' } }] })
+      router.push(PAGE)
+      await router.isReady()
+      const w = mount(DeathwatchGate, { slots: { default: () => h(Probe) }, global: { plugins: [pinia, router] } })
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(w.find('.dwb').exists()).toBe(false)
+      expect(w.find('.page').isVisible()).toBe(true)
+    })
+  })
+})
+
+describe('DeathwatchGate: what a screen reader is told', () => {
+  // Each answer in the still screen, which is what stays up: none of them may still claim to be verifying.
+  it.each([
+    ['signed out', () => {}, 'Identify yourself'],
+    ['refused', () => (storeMember(), getMe.mockResolvedValue({ access: false })), 'The gate stays shut'],
+    ['unreachable', () => (storeMember(), getMe.mockRejectedValue(apiError(503))), 'Vox-link lost'],
+  ])('%s: says only its answer', async (_, given, headline) => {
+    given()
+    const w = await mountGate()
+    expect(w.find('.dwb-big').text()).toBe(headline)
+    expect(w.html()).not.toMatch(/verifying/i)
+  })
 })

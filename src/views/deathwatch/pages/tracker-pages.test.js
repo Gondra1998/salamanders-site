@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The rebuilt Event Tracker and Manage views, mounted on the invented fixture data: each shows the original's
 // headings and its data, links between the views carry the dev ?scene=, and the Manage pages write through the store.
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -35,6 +35,9 @@ async function mountPage(key, query = {}) {
 }
 const h2 = (w) => w.findAll('h2').map((h) => h.text())
 const R = () => calc(useDeathwatchData().teams)
+// Manage's tour button (its label depends on whether an event is running), and an input by its label's text.
+const tourButton = (w) => w.findAll('button').find((b) => ['Save tour name', 'Open new tour'].includes(b.text()))
+const field = (w, label) => w.findAll('input').find((i) => i.element.parentElement.textContent.trim().startsWith(label))
 
 describe('Event Tracker', () => {
   it('Standings: podium, table, chart and companies, leader first', async () => {
@@ -50,9 +53,20 @@ describe('Event Tracker', () => {
   it('heads itself like the Armouring Hall: the event as its line, its seven tabs, the open one marked', async () => {
     const { w } = await mountPage('eventtracker/standings')
     expect(w.get('.hh-title').text()).toBe('Event Tracker')
-    expect(w.get('.hh-line').text()).toBe(useDeathwatchData().cfg.tx?.cur_n || 'Deathwatch Tour')
+    expect(w.get('.hh-line').text()).toBe('Deathwatch Tour — Ember Moon')
     expect(w.findAll('a.hh-tab')).toHaveLength(7)
     expect(w.get('a.hh-tab[aria-current="page"]').text()).toBe('Standings')
+  })
+
+  it('heads itself "Deathwatch Tour" while the tour has no name, and stands while the data loads', async () => {
+    const data = useDeathwatchData()
+    const { cur_n, ...tx } = data.cfg.tx
+    expect(cur_n).toBeTruthy()
+    data.cfg = { ...data.cfg, tx }
+    data.status = 'loading'
+    const { w } = await mountPage('eventtracker/players')
+    expect(w.get('.hh-line').text()).toBe('Deathwatch Tour')
+    expect(w.get('a.hh-tab[aria-current="page"]').text()).toBe('Players')
   })
 
   it('Standings: tied teams share a rank, on the podium and in the table', async () => {
@@ -260,6 +274,128 @@ describe('Manage', () => {
     expect(data.teams).toEqual({})
     expect(data.cfg.tx.cur_n).toBeUndefined() // the next tour starts unnamed
     expect(w.text()).toContain('No event is running')
+    // It says it is done, though the archive's own section has gone with the Kill Teams; the copy keeps the tour's name.
+    expect(w.text()).toContain('Archived as “Deathwatch Tour — Ember Moon” and live event cleared ✓')
+    expect(h2(w)).not.toContain('Reset Kill Teams') // nothing left to reset
+    expect(Object.values(data.archive).map((a) => a.name)).toContain('Deathwatch Tour — Ember Moon')
+
+    // The next tour: opened by name, and its archive is named after it, not after the last one.
+    expect(tourButton(w).text()).toBe('Open new tour')
+    await w.find('input[placeholder="Deathwatch Tour"]').setValue('Tour of the Second Dawn')
+    await tourButton(w).trigger('click')
+    await flushPromises()
+    await w.findAll('button').find((b) => b.text() === 'Add Kill Team').trigger('click')
+    await flushPromises()
+    expect(tourButton(w).text()).toBe('Save tour name')
+    expect(field(w, 'Event name').element.value).toBe('Tour of the Second Dawn')
+  })
+
+  it('Manage: the tour name is refused empty, and a snapshot is named after the renamed tour and keeps it', async () => {
+    const data = useDeathwatchData()
+    const { w } = await mountPage('manage/manage')
+    expect(tourButton(w).text()).toBe('Save tour name')
+    for (const empty of ['', '   ']) {
+      await w.find('input[placeholder="Deathwatch Tour"]').setValue(empty)
+      await tourButton(w).trigger('click')
+      await flushPromises()
+      expect(w.text()).toContain('Enter a tour name.')
+      expect(data.cfg.tx.cur_n).toBe('Deathwatch Tour — Ember Moon')
+    }
+    await w.find('input[placeholder="Deathwatch Tour"]').setValue('Tour of the Ashen Gate')
+    await tourButton(w).trigger('click')
+    await flushPromises()
+    await w.findAll('button').find((b) => b.text() === 'Save snapshot').trigger('click')
+    await flushPromises()
+    const names = Object.values(data.archive).map((a) => a.name)
+    expect(names).toEqual(expect.arrayContaining(['Deathwatch Tour — Ash Season', 'Tour of the Ashen Gate']))
+    expect(names).toHaveLength(2)
+    expect(data.cfg.tx.cur_n).toBe('Tour of the Ashen Gate') // a snapshot alone leaves the tour as it is
+  })
+
+  it('Manage: an archive name typed by hand stays when the tour is renamed', async () => {
+    const data = useDeathwatchData()
+    const { w } = await mountPage('manage/manage')
+    await field(w, 'Event name').setValue('Season of Embers, final')
+    await w.find('input[placeholder="Deathwatch Tour"]').setValue('Tour of the Ashen Gate')
+    await tourButton(w).trigger('click')
+    await flushPromises()
+    expect(field(w, 'Event name').element.value).toBe('Season of Embers, final')
+    await w.findAll('button').find((b) => b.text() === 'Save snapshot').trigger('click')
+    await flushPromises()
+    expect(Object.values(data.archive).map((a) => a.name)).toContain('Season of Embers, final')
+  })
+
+  describe('Manage: archive & reset failing part-way says what is done and how to finish', () => {
+    afterEach(() => vi.restoreAllMocks())
+    // The store's own write, except for the one document that fails.
+    const failOn = (data, fails) => {
+      const write = data.write
+      vi.spyOn(data, 'write').mockImplementation((token, col, id, doc) => (fails(col, id, doc) ? Promise.reject(new Error('Vox fault')) : write(token, col, id, doc)))
+    }
+    const archiveAndReset = async (w) => {
+      await w.findAll('button').find((b) => b.text() === 'Archive & reset').trigger('click')
+      await field(w, 'Type RESET').setValue('RESET')
+      await w.findAll('button').filter((b) => b.text() === 'Archive & reset').at(1).trigger('click')
+      await flushPromises()
+    }
+
+    it('a snapshot: only that it was not saved', async () => {
+      const data = useDeathwatchData()
+      failOn(data, (col) => col === 'archive')
+      const { w } = await mountPage('manage/manage')
+      await w.findAll('button').find((b) => b.text() === 'Save snapshot').trigger('click')
+      await flushPromises()
+      expect(w.findAll('p.dw-msg').map((p) => p.text())).toContain('Not completed: Vox fault')
+    })
+
+    it('an unnamed tour: there is no name to clear, so nothing more can fail', async () => {
+      const data = useDeathwatchData()
+      const { cur_n, ...tx } = data.cfg.tx
+      expect(cur_n).toBeTruthy()
+      data.cfg = { ...data.cfg, tx }
+      failOn(data, (col, id) => col === 'cfg' && id === 'tx')
+      const { w } = await mountPage('manage/manage')
+      await archiveAndReset(w)
+      expect(data.teams).toEqual({})
+      expect(w.text()).toContain('Archived as “Deathwatch Tour” and live event cleared ✓')
+    })
+
+    it('the copy: nothing is cleared', async () => {
+      const data = useDeathwatchData()
+      failOn(data, (col) => col === 'archive')
+      const { w } = await mountPage('manage/manage')
+      const teams = Object.keys(data.teams).length
+      await archiveAndReset(w)
+      expect(Object.keys(data.teams)).toHaveLength(teams)
+      expect(data.cfg.tx.cur_n).toBe('Deathwatch Tour — Ember Moon')
+      expect(w.text()).toContain('Not completed: Vox fault The live event is only cleared after the archive copy is saved.')
+    })
+
+    it('a Kill Team: the copy is saved, the rest is cleared under "Reset Kill Teams"', async () => {
+      const data = useDeathwatchData()
+      const last = Math.max(...Object.values(data.teams).map((t) => t.id))
+      failOn(data, (col, id) => col === 'teams' && id === last)
+      const { w } = await mountPage('manage/manage')
+      await archiveAndReset(w)
+      expect(Object.keys(data.archive)).toHaveLength(2)
+      expect(Object.keys(data.teams)).toEqual([String(last)])
+      expect(data.cfg.tx.cur_n).toBe('Deathwatch Tour — Ember Moon')
+      expect(w.text()).toContain('Not completed: Vox fault The archive copy is saved, but some Kill Teams are still live: clear them under “Reset Kill Teams”.')
+      expect(w.text()).not.toContain('only cleared after the archive copy is saved')
+    })
+
+    it('the tour name: archived and cleared, the new tour is named under "Tour"', async () => {
+      const data = useDeathwatchData()
+      failOn(data, (col, id) => col === 'cfg' && id === 'tx')
+      const { w } = await mountPage('manage/manage')
+      await archiveAndReset(w)
+      expect(Object.keys(data.archive)).toHaveLength(2)
+      expect(data.teams).toEqual({})
+      expect(w.text()).toContain(
+        'Not completed: Vox fault The event is archived and its Kill Teams are cleared; only the old tour name is left. Name the new tour under “Tour”.',
+      )
+      expect(w.text()).not.toContain('only cleared after the archive copy is saved')
+    })
   })
 
   it('Checks: every check with its count', async () => {

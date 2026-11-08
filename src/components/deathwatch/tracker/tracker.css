@@ -235,6 +235,8 @@
 }
 .dw .dw-field input,
 .dw .dw-field select {
+  /* below a field's own width (a number input's is wide) rather than past the column's edge */
+  min-width: 0;
   min-height: 44px;
   padding: 0.45rem 0.6rem;
   font: 400 1rem / 1.2 var(--dw-font-body);

@@ -85,7 +85,8 @@ watch(
 </script>
 
 <template>
-  <div class="dwb" :class="[shownPhase, { out: leaving, still }]" role="status" aria-label="Verifying clearance" :aria-busy="busy ? 'true' : undefined">
+  <!-- A live region with no name of its own: what it says is the answer as it stands, never a fixed label. -->
+  <div class="dwb" :class="[shownPhase, { out: leaving, still }]" role="status" :aria-busy="busy ? 'true' : undefined">
     <div class="dwb-core">
       <div class="dwb-seal">
         <svg class="dwb-ring" viewBox="0 0 200 200" aria-hidden="true">
@@ -404,7 +405,7 @@ watch(
 .dwb-log i.no {
   color: var(--dwb-no);
 }
-/* The way back out when refused: the screen covers the site's bar. */
+/* The way back to the companies, under every answer but the open gate (the site's bar stays up as well). */
 .dwb-back {
   justify-self: center;
   display: inline-flex;

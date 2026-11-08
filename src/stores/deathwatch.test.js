@@ -280,6 +280,31 @@ describe('deathwatch store', () => {
     }
   })
 
+  it('waits ten seconds for the server', () => {
+    expect(ME_TIMEOUT_MS).toBe(10_000)
+  })
+
+  it('drops an answer that comes after the time limit: "Try again" asks anew', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = useDeathwatch()
+      const slow = deferred()
+      getMe.mockReturnValueOnce(slow.promise)
+      const p = s.load('tok')
+      await vi.advanceTimersByTimeAsync(ME_TIMEOUT_MS)
+      await p
+      slow.resolve({ access: true, watchCommander: true, deathwatchCommand: true })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(s).toMatchObject({ status: 'unavailable', commander: false, command: false })
+
+      getMe.mockResolvedValueOnce({ access: true })
+      await s.load('tok')
+      expect(s).toMatchObject({ status: 'allowed', commander: false, command: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('counts a server that does not answer within the time limit as out of reach', async () => {
     vi.useFakeTimers()
     try {

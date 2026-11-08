@@ -3,7 +3,8 @@ import { getMe } from '../lib/deathwatch/api'
 import { loadFixture } from '../lib/deathwatch/fixture'
 
 // Whether the signed-in user may see the Deathwatch area, whether they are the Watch Commander, and whether they
-// hold the Deathwatch Command role (the Armouring Hall's Watch Command tab): the answer to GET /deathwatch/me,
+// hold the Deathwatch Command role (the Armouring Hall's Watch Command tab), and which standings they hold (the
+// parts of the area each opens): the answer to GET /deathwatch/me,
 // nothing more. It only decides what to show; the server enforces every read
 // and write again. Statuses: idle, checking, allowed, denied, signin, unavailable.
 
@@ -18,22 +19,22 @@ export const ME_TIMEOUT_MS = 10_000
 const statusOf = (err) => (err?.status === 401 ? 'signin' : err?.status === 403 ? 'denied' : 'unavailable')
 
 export const useDeathwatch = defineStore('deathwatch', {
-  state: () => ({ status: 'idle', commander: false, command: false }),
+  state: () => ({ status: 'idle', commander: false, command: false, roles: [] }),
   actions: {
     async load(token) {
       const mine = ++seq
       // Straight away, before anything is awaited: this store outlives the gate, so an earlier visit's clearance
       // (even a commander's) must not be what the first render of a return visit sees.
-      this.$patch({ status: 'checking', commander: false, command: false })
+      this.$patch({ status: 'checking', commander: false, command: false, roles: [] })
       const fixture = await loadFixture()
       if (mine !== seq) return
       if (fixture) {
         // A dev scene: show that state without asking the server.
-        this.$patch({ status: fixture.status, commander: fixture.commander, command: fixture.command })
+        this.$patch({ status: fixture.status, commander: fixture.commander, command: fixture.command, roles: fixture.roles })
         return
       }
       if (!token) {
-        this.$patch({ status: 'signin', commander: false, command: false })
+        this.$patch({ status: 'signin', commander: false, command: false, roles: [] })
         return
       }
       let timer
@@ -45,10 +46,12 @@ export const useDeathwatch = defineStore('deathwatch', {
         // Deathwatch Command sees.
         const allowed = me?.access === true
         const commander = allowed && me.watchCommander === true
-        this.$patch({ status: allowed ? 'allowed' : 'denied', commander, command: commander || (allowed && me.deathwatchCommand === true) })
+        // The standings the parts of the area open to (lib/deathwatch/areas.js): strings only, and none when refused.
+        const roles = allowed && Array.isArray(me.roles) ? me.roles.filter((r) => typeof r === 'string') : []
+        this.$patch({ status: allowed ? 'allowed' : 'denied', commander, command: commander || (allowed && me.deathwatchCommand === true), roles })
       } catch (err) {
         if (mine !== seq) return
-        this.$patch({ status: statusOf(err), commander: false, command: false })
+        this.$patch({ status: statusOf(err), commander: false, command: false, roles: [] })
       } finally {
         clearTimeout(timer)
       }
@@ -56,7 +59,7 @@ export const useDeathwatch = defineStore('deathwatch', {
 
     reset() {
       seq++
-      this.$patch({ status: 'idle', commander: false, command: false })
+      this.$patch({ status: 'idle', commander: false, command: false, roles: [] })
     },
   },
 })

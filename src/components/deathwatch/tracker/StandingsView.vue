@@ -57,15 +57,9 @@ const companies = computed(() =>
       </tbody>
     </table>
   </div>
-  <!-- Folded away, as in the design: the table above already says who leads; the chart is the long view. -->
-  <details class="prog">
-    <summary>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-      <h2 class="prog-h">Points progression</h2>
-      <span class="prog-sub">Weekly totals and ranking trends</span>
-    </summary>
-    <PointsChart :R="R" />
-  </details>
+  <h2 class="dw-plaque">Points progression</h2>
+  <p class="dw-sub">Weekly totals and ranking trends</p>
+  <PointsChart :R="R" />
   <h2 class="dw-plaque">Watch Companies</h2>
   <div class="dw-scroll">
     <table class="dw-table">
@@ -162,59 +156,5 @@ const companies = computed(() =>
 /* The leader's row in the table, lit in the leader's gold. */
 .dw-table tr.m1 td {
   background: color-mix(in oklab, var(--dw-gold) 9%, transparent);
-}
-/* Points progression, folded: one framed bar that opens on the chart. */
-.prog {
-  margin-top: 0.75rem;
-  border: 1px solid color-mix(in oklab, var(--dw-accent) 45%, var(--dw-line-2));
-  border-radius: 6px;
-  background: color-mix(in oklab, var(--dw-surface) 88%, transparent);
-}
-.prog summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem 1.1rem;
-  min-height: 52px;
-  padding: 0.4rem 1.1rem;
-  list-style: none;
-  cursor: pointer;
-}
-.prog summary::-webkit-details-marker {
-  display: none;
-}
-.prog summary:focus-visible {
-  outline: 2px solid var(--dw-accent);
-  outline-offset: 2px;
-}
-.prog summary svg {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: var(--dw-accent);
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform var(--dur-state) var(--ease-forge);
-}
-.prog[open] summary svg {
-  transform: rotate(180deg);
-}
-.prog-h {
-  margin: 0;
-  font: 500 clamp(1.3rem, 2.4vw, 1.7rem) / 1 var(--dw-font-hud);
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--dw-accent);
-  text-shadow: 0 0 10px color-mix(in oklab, var(--dw-accent) 55%, transparent);
-}
-.prog-sub {
-  padding-left: 1.1rem;
-  border-left: 1px solid var(--dw-line-2);
-  color: var(--dw-muted);
-}
-.prog > :not(summary) {
-  margin: 0 1rem 1rem;
 }
 </style>

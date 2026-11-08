@@ -11,6 +11,7 @@
  * intent, same as displayNames.js.
  */
 import { buildInfirmary, buildRoster } from './rosterCore.js'
+import { memberFacts } from './rosterMember.js'
 
 const PAGE = 1000
 const SNOWFLAKE = /^\d{17,20}$/
@@ -31,7 +32,7 @@ export function createRoster({
   }
   const configured = [apiBase, guildId, botToken].every((v) => typeof v === 'string' && v !== '')
 
-  let view = null // { roster, infirmary, at }
+  let view = null // { roster, infirmary, people, at }
   let nextRefreshAt = -Infinity
   let inflight = null
 
@@ -62,6 +63,8 @@ export function createRoster({
       view = {
         roster: buildRoster(members, { guildId }),
         infirmary: buildInfirmary(members, { guildId }),
+        // Every member but bots, for holding(): the Deathwatch's role lists.
+        people: members.map((m) => memberFacts(m, guildId)).filter((f) => f && !f.bot),
         at: now(),
       }
     }
@@ -94,5 +97,14 @@ export function createRoster({
     }
   }
 
-  return { current }
+  /** → [{ id, name, avatar }] of the members holding any of `roleIds`, by name; null if no roster has ever loaded. */
+  async function holding(roleIds) {
+    if (!(await current())) return null
+    return view.people
+      .filter((f) => roleIds.some((r) => f.roles.has(r)))
+      .map(({ id, name, avatar }) => ({ id, name, avatar }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  return { current, holding }
 }

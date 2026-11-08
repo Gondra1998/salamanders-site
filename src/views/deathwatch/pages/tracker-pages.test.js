@@ -34,6 +34,8 @@ async function mountPage(key, query = {}) {
   return { w, router }
 }
 const h2 = (w) => w.findAll('h2').map((h) => h.text())
+// Manage's side menu: opens the section with that label.
+const section = (w, label) => w.findAll('.mg-item').find((b) => b.text() === label).trigger('click')
 const R = () => calc(useDeathwatchData().teams)
 // Manage's tour button (its label depends on whether an event is running), and an input by its label's text.
 const tourButton = (w) => w.findAll('button').find((b) => ['Save tour name', 'Open new tour'].includes(b.text()))
@@ -45,7 +47,8 @@ describe('Event Tracker', () => {
     expect(h2(w)).toEqual(['Standings', 'Points progression', 'Watch Companies'])
     expect(w.findAll('.pod-card')).toHaveLength(3)
     expect(w.find('tbody tr').text()).toContain(R().ts[0].n)
-    expect(w.find('.pc-svg').exists()).toBe(true)
+    expect(w.find('details').exists()).toBe(false) // the progression is always shown, on the totals as a table
+    expect(w.find('.pc-svg').exists()).toBe(false)
     // A team link opens its profile and keeps the dev scene.
     expect(w.find('tbody a').attributes('href')).toMatch(/^\/deathwatch\/eventtracker\/kill-teams\?scene=commander&t=\d+$/)
   })
@@ -66,7 +69,7 @@ describe('Event Tracker', () => {
     data.status = 'loading'
     const { w } = await mountPage('eventtracker/players')
     expect(w.get('.hh-line').text()).toBe('Deathwatch Tour')
-    expect(w.get('a.hh-tab[aria-current="page"]').text()).toBe('Players')
+    expect(w.get('a.hh-tab[aria-current="page"]').text()).toBe('Operatives')
   })
 
   it('Standings: tied teams share a rank, on the podium and in the table', async () => {
@@ -85,10 +88,13 @@ describe('Event Tracker', () => {
     expect(w.findAll('tbody .rank').map((d) => d.text()).slice(0, 3)).toEqual(['1', '1', '3'])
   })
 
-  it('Standings: the chart turns into a table', async () => {
+  it('Standings: the progression opens on the totals as a table, and turns into the chart', async () => {
     const { w } = await mountPage('eventtracker/standings')
-    await w.findAll('.pc-modes button').at(3).trigger('click')
+    expect(w.find('.pc-modes [aria-pressed="true"]').text()).toBe('Total')
     expect(w.findAll('table')).toHaveLength(3)
+    await w.findAll('.pc-modes button').at(3).trigger('click')
+    expect(w.findAll('table')).toHaveLength(2)
+    expect(w.find('.pc-svg').exists()).toBe(true)
   })
 
   it('Standings: with no running event, points to the Archive', async () => {
@@ -99,7 +105,7 @@ describe('Event Tracker', () => {
 
   it('Kill Teams: the team in ?t, with its players, weeks and missions', async () => {
     const { w } = await mountPage('eventtracker/kill-teams', { t: '2' })
-    expect(h2(w)).toEqual(['Kill Team profile', 'Players', 'Points per week', 'Missions'])
+    expect(h2(w)).toEqual(['Kill Team profile', 'Operatives', 'Points per week', 'Missions'])
     expect(w.find('select').element.value).toBe('2')
     expect(w.findAll('table')).toHaveLength(3)
   })
@@ -117,7 +123,7 @@ describe('Event Tracker', () => {
     const name = R().pl[0].n
     const { w: p } = await mountPage('eventtracker/players', { p: name })
     expect(p.find('.ppn').text()).toBe(name)
-    expect(h2(p)).toEqual(['Player profile', 'Missions'])
+    expect(h2(p)).toEqual(['Personnel Docket', 'Missions'])
   })
 
   // A name or a class that matches a built-in property, and a played mission stored without its rows.
@@ -187,8 +193,12 @@ describe('Event Tracker', () => {
   it('Archive: the list, then an event with its own views', async () => {
     const { w } = await mountPage('eventtracker/archive')
     expect(w.findAll('.ev')).toHaveLength(1)
+    // The head names the archive, then the archived event open there: never the live tour.
+    expect(w.get('.hh-line').text()).toBe('Event archive')
     const { w: e } = await mountPage('eventtracker/archive', { e: 'e1', v: 'honour-roll' })
     expect(h2(e)[0]).toBe('Deathwatch Tour — Ash Season')
+    expect(e.get('.hh-line').text()).toBe(useDeathwatchData().archive.e1.name)
+    expect(e.get('.hh-line').text()).not.toBe(useDeathwatchData().cfg.tx?.cur_n)
     expect(e.find('nav.views [aria-current="page"]').text()).toBe('Honour Roll')
     expect(e.findAll('nav.views a').map((a) => a.attributes('href'))[1]).toBe('/deathwatch/eventtracker/archive?e=e1&v=kill-teams')
   })
@@ -211,7 +221,7 @@ describe('Manage', () => {
     const data = useDeathwatchData()
     const team = Object.values(data.teams)[0]
     const free = [1, 2, 3, 4].flatMap((wk) => [1, 2, 3, 4].map((o) => [wk, o])).find(([wk, o]) => !team.m.some((m) => m[0] === wk && m[1] === o))
-    const { w } = await mountPage('manage/enter-mission')
+    const { w } = await mountPage('administratum/enter-mission')
     const btn = w.findAll('.grid button').find((b) => b.attributes('title').startsWith(`W${free[0]} · O${free[1]}`))
     await btn.trigger('click')
     await w.find('input[list="dw-players"]').setValue('Brother Newcomer')
@@ -224,46 +234,72 @@ describe('Manage', () => {
   })
 
   it('Enter mission: refuses more than three carry slots', async () => {
-    const { w } = await mountPage('manage/enter-mission')
+    const { w } = await mountPage('administratum/enter-mission')
     const sel = w.findAll('select')
     await sel.at(4).setValue('1') // Gene-Seed
     // A Relic count over the cap is disabled in the picker.
     expect(sel.at(6).findAll('option').at(3).attributes('disabled')).toBeDefined()
   })
 
-  it('Manage: saves the weights, adds a Kill Team and renames a player', async () => {
+  it('Manage: one section at a time, picked in the side menu; it opens on the Kill Teams', async () => {
+    const { w } = await mountPage('administratum/manage')
+    expect(h2(w)).toEqual(['Kill Teams'])
+    const shown = []
+    for (const l of ['Tour', 'Scoring', 'Data & Archive']) {
+      await section(w, l)
+      shown.push(h2(w)[0])
+    }
+    expect(shown).toEqual(['Tour', 'Scoring', 'Data & Archive'])
+    expect(w.find('.mg-item[aria-current="true"]').text()).toBe('Data & Archive')
+  })
+
+  it('Manage: a Kill Team row opens its editor, which saves the team and can be cancelled', async () => {
     const data = useDeathwatchData()
-    const { w } = await mountPage('manage/manage')
-    expect(h2(w)).toEqual(['Scoring', 'Rename or merge player', 'Tour', 'Kill Teams', 'Restore from backup', 'Event archive', 'Reset Kill Teams'])
+    const { w } = await mountPage('administratum/manage')
+    expect(w.find('.mg-editor').exists()).toBe(false)
+    expect(w.findAll('.mg-list tbody tr')).toHaveLength(Object.keys(data.teams).length)
+    await w.find('.mg-row').trigger('click')
+    const name = w.find('.mg-editor input')
+    await name.setValue('Ember Wardens Reborn')
+    await w.findAll('.mg-editor button').find((b) => b.text() === 'Cancel').trigger('click')
+    expect(w.find('.mg-editor input').element.value).toBe(data.teams[1].n) // back to what is saved
+    await w.find('.mg-editor input').setValue('Ember Wardens Reborn')
+    await w.findAll('.mg-editor button').find((b) => b.text() === 'Save changes').trigger('click')
+    await flushPromises()
+    expect(data.teams[1].n).toBe('Ember Wardens Reborn')
+    await w.find('.mg-x').trigger('click')
+    expect(w.find('.mg-editor').exists()).toBe(false)
+  })
+
+  it('Manage: saves the tour name and the weights, and adds a Kill Team', async () => {
+    const data = useDeathwatchData()
+    const { w } = await mountPage('administratum/manage')
+    await section(w, 'Tour')
     const pageText = data.cfg.tx.ts_h
     await w.find('input[placeholder="Deathwatch Tour"]').setValue('  Tour of the Ashen Gate ')
     await w.findAll('button').find((b) => b.text() === 'Save tour name').trigger('click')
     await flushPromises()
     expect(data.cfg.tx.cur_n).toBe('Tour of the Ashen Gate')
     expect(data.cfg.tx.ts_h).toBe(pageText) // the other page texts are kept
+    await section(w, 'Scoring')
     await w.find('input[type="number"]').setValue('450')
     await w.findAll('button').find((b) => b.text() === 'Save scoring').trigger('click')
     await flushPromises()
     expect(data.cfg.s.base).toBe(450)
 
     const before = Object.keys(data.teams).length
-    await w.findAll('button').find((b) => b.text() === 'Add Kill Team').trigger('click')
+    await section(w, 'Kill Teams')
+    await w.findAll('button').find((b) => b.text() === '+ Add Kill Team').trigger('click')
     await flushPromises()
     expect(Object.keys(data.teams)).toHaveLength(before + 1)
+    expect(w.find('.mg-editor input').element.value).toMatch(/^New Kill Team/) // straight into its editor
 
-    const [a, b] = w.findAll('input[list="dw-names"]')
-    await a.setValue('Brother Ashkar')
-    await b.setValue('Brother Ashkarr')
-    await w.findAll('button').find((x) => x.text() === 'Check').trigger('click')
-    await w.findAll('button').find((x) => x.text() === 'Rename everywhere').trigger('click')
-    await flushPromises()
-    expect(data.teams[1].ro).toContain('Brother Ashkarr')
-    expect(data.archive.e1.teams[0].ro).toContain('Brother Ashkarr')
   })
 
   it('Manage: archive & reset keeps a copy, then clears the live event', async () => {
     const data = useDeathwatchData()
-    const { w } = await mountPage('manage/manage')
+    const { w } = await mountPage('administratum/manage')
+    await section(w, 'Data & Archive')
     await w.findAll('button').find((b) => b.text() === 'Archive & reset').trigger('click')
     const confirm = w.findAll('button').filter((b) => b.text() === 'Archive & reset').at(1)
     expect(confirm.attributes('disabled')).toBeDefined()
@@ -273,26 +309,30 @@ describe('Manage', () => {
     expect(Object.keys(data.archive)).toHaveLength(2)
     expect(data.teams).toEqual({})
     expect(data.cfg.tx.cur_n).toBeUndefined() // the next tour starts unnamed
-    expect(w.text()).toContain('No event is running')
-    // It says it is done, though the archive's own section has gone with the Kill Teams; the copy keeps the tour's name.
+    // It says it is done, though the archive's own card has gone with the Kill Teams; the copy keeps the tour's name.
     expect(w.text()).toContain('Archived as “Deathwatch Tour — Ember Moon” and live event cleared ✓')
-    expect(h2(w)).not.toContain('Reset Kill Teams') // nothing left to reset
+    expect(w.text()).not.toContain('Reset Kill Teams') // nothing left to reset
     expect(Object.values(data.archive).map((a) => a.name)).toContain('Deathwatch Tour — Ember Moon')
+    await section(w, 'Tour')
+    expect(w.text()).toContain('No event is running')
 
     // The next tour: opened by name, and its archive is named after it, not after the last one.
     expect(tourButton(w).text()).toBe('Open new tour')
     await w.find('input[placeholder="Deathwatch Tour"]').setValue('Tour of the Second Dawn')
     await tourButton(w).trigger('click')
     await flushPromises()
-    await w.findAll('button').find((b) => b.text() === 'Add Kill Team').trigger('click')
+    await section(w, 'Kill Teams')
+    await w.findAll('button').find((b) => b.text() === '+ Add Kill Team').trigger('click')
     await flushPromises()
+    await section(w, 'Tour')
     expect(tourButton(w).text()).toBe('Save tour name')
+    await section(w, 'Data & Archive')
     expect(field(w, 'Event name').element.value).toBe('Tour of the Second Dawn')
   })
 
   it('Manage: the tour name is refused empty, and a snapshot is named after the renamed tour and keeps it', async () => {
     const data = useDeathwatchData()
-    const { w } = await mountPage('manage/manage')
+    const { w } = await mountPage('administratum/manage', { s: 'tour' })
     expect(tourButton(w).text()).toBe('Save tour name')
     for (const empty of ['', '   ']) {
       await w.find('input[placeholder="Deathwatch Tour"]').setValue(empty)
@@ -304,6 +344,7 @@ describe('Manage', () => {
     await w.find('input[placeholder="Deathwatch Tour"]').setValue('Tour of the Ashen Gate')
     await tourButton(w).trigger('click')
     await flushPromises()
+    await section(w, 'Data & Archive')
     await w.findAll('button').find((b) => b.text() === 'Save snapshot').trigger('click')
     await flushPromises()
     const names = Object.values(data.archive).map((a) => a.name)
@@ -314,11 +355,13 @@ describe('Manage', () => {
 
   it('Manage: an archive name typed by hand stays when the tour is renamed', async () => {
     const data = useDeathwatchData()
-    const { w } = await mountPage('manage/manage')
+    const { w } = await mountPage('administratum/manage', { s: 'data' })
     await field(w, 'Event name').setValue('Season of Embers, final')
+    await section(w, 'Tour')
     await w.find('input[placeholder="Deathwatch Tour"]').setValue('Tour of the Ashen Gate')
     await tourButton(w).trigger('click')
     await flushPromises()
+    await section(w, 'Data & Archive')
     expect(field(w, 'Event name').element.value).toBe('Season of Embers, final')
     await w.findAll('button').find((b) => b.text() === 'Save snapshot').trigger('click')
     await flushPromises()
@@ -342,7 +385,7 @@ describe('Manage', () => {
     it('a snapshot: only that it was not saved', async () => {
       const data = useDeathwatchData()
       failOn(data, (col) => col === 'archive')
-      const { w } = await mountPage('manage/manage')
+      const { w } = await mountPage('administratum/manage', { s: 'data' })
       await w.findAll('button').find((b) => b.text() === 'Save snapshot').trigger('click')
       await flushPromises()
       expect(w.findAll('p.dw-msg').map((p) => p.text())).toContain('Not completed: Vox fault')
@@ -354,7 +397,7 @@ describe('Manage', () => {
       expect(cur_n).toBeTruthy()
       data.cfg = { ...data.cfg, tx }
       failOn(data, (col, id) => col === 'cfg' && id === 'tx')
-      const { w } = await mountPage('manage/manage')
+      const { w } = await mountPage('administratum/manage', { s: 'data' })
       await archiveAndReset(w)
       expect(data.teams).toEqual({})
       expect(w.text()).toContain('Archived as “Deathwatch Tour” and live event cleared ✓')
@@ -363,7 +406,7 @@ describe('Manage', () => {
     it('the copy: nothing is cleared', async () => {
       const data = useDeathwatchData()
       failOn(data, (col) => col === 'archive')
-      const { w } = await mountPage('manage/manage')
+      const { w } = await mountPage('administratum/manage', { s: 'data' })
       const teams = Object.keys(data.teams).length
       await archiveAndReset(w)
       expect(Object.keys(data.teams)).toHaveLength(teams)
@@ -375,7 +418,7 @@ describe('Manage', () => {
       const data = useDeathwatchData()
       const last = Math.max(...Object.values(data.teams).map((t) => t.id))
       failOn(data, (col, id) => col === 'teams' && id === last)
-      const { w } = await mountPage('manage/manage')
+      const { w } = await mountPage('administratum/manage', { s: 'data' })
       await archiveAndReset(w)
       expect(Object.keys(data.archive)).toHaveLength(2)
       expect(Object.keys(data.teams)).toEqual([String(last)])
@@ -387,7 +430,7 @@ describe('Manage', () => {
     it('the tour name: archived and cleared, the new tour is named under "Tour"', async () => {
       const data = useDeathwatchData()
       failOn(data, (col, id) => col === 'cfg' && id === 'tx')
-      const { w } = await mountPage('manage/manage')
+      const { w } = await mountPage('administratum/manage', { s: 'data' })
       await archiveAndReset(w)
       expect(Object.keys(data.archive)).toHaveLength(2)
       expect(data.teams).toEqual({})
@@ -399,7 +442,19 @@ describe('Manage', () => {
   })
 
   it('Checks: every check with its count', async () => {
-    const { w } = await mountPage('manage/checks')
-    expect(w.findAll('tbody tr')).toHaveLength(5)
+    const { w } = await mountPage('administratum/checks')
+    expect(w.findAll('tbody tr')).toHaveLength(9)
+  })
+
+  it('Checks: a finding links to where it is fixed, and that page opens on it', async () => {
+    const data = useDeathwatchData()
+    const t = data.teams[1]
+    data.teams = { ...data.teams, 1: { ...t, ro: t.ro.slice(0, 2) } } // an empty roster slot
+    const { w } = await mountPage('administratum/checks', { scene: 'commander' })
+    const link = w.findAll('a.dw-link').find((x) => x.text().startsWith(`${t.n} (2/3)`))
+    expect(link.attributes('href')).toBe('/deathwatch/administratum/manage?scene=commander&t=1')
+
+    const manage = (await mountPage('administratum/manage', { t: '1' })).w
+    expect(manage.find('.mg-editor input').element.value).toBe(t.n)
   })
 })

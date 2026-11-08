@@ -280,3 +280,21 @@ describe('createRoster', () => {
     expect(() => make(discord([]), over)).toThrow(`${key} must be a positive number`)
   })
 })
+
+describe('holding', () => {
+  const bot = (id) => ({ ...member(id, ['R1']), user: { id, username: 'bot', bot: true } })
+
+  it('lists the members holding any of the roles, by name, as id, name and avatar only; bots never', async () => {
+    const d = discord([member(A, ['R1'], 'Zed'), member(B, ['R2', 'R9'], 'Abe'), member(C, ['R3'], 'Cy'), bot('200000000000000004')])
+    const { roster } = make(d)
+    expect(await roster.holding(['R1', 'R2'])).toEqual([
+      { id: B, name: 'Abe', avatar: null },
+      { id: A, name: 'Zed', avatar: null },
+    ])
+    expect(await roster.holding([])).toEqual([])
+  })
+
+  it('is null while no roster has loaded', async () => {
+    expect(await make(discord({ status: 500, body: '' })).roster.holding(['R1'])).toBeNull()
+  })
+})

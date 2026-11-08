@@ -3,6 +3,7 @@
 // mission and its three players, and save. A saved mission loads back into the form, so classes and Gene-Seed
 // finders can be added later. The event points update as the form is filled, with the same formula as Standings.
 import { computed, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTracker } from '../../../../lib/deathwatch/useTracker'
 import { CLASSES, SLOTS, clone, findMission, missionPoints, nextOpenSlot, num, withMission } from '../../../../lib/deathwatch/tracker'
 import { download } from '../../../../lib/deathwatch/download'
@@ -25,14 +26,19 @@ const NUM = [
 const n = (x) => +x || 0
 
 const teams = computed(() => [...R.value.ts].sort((a, b) => a.id - b.id))
-const pick = reactive({ team: 0, w: 1, o: 1 })
+// A link from Checks names the mission: ?t= the team, ?w= the week, ?o= the objective. The team is taken once the
+// data holds it.
+const q = useRoute().query
+const slot = (x) => Math.min(4, Math.max(1, Math.trunc(+x) || 1))
+const want = +q.t || 0
+const pick = reactive({ team: 0, w: slot(q.w), o: slot(q.o) })
 const team = computed(() => data.teams[pick.team] ?? null)
 const saved = computed(() => findMission(team.value, pick.w, pick.o))
 const f = reactive({ played: 1, ig: '', gs: 0, ar: 0, rl: 0, rk: '', rows: [] })
 const msg = ref('')
 
 watch(teams, (ts) => {
-  if (!ts.some((t) => t.id === pick.team)) pick.team = ts[0]?.id ?? 0
+  if (!ts.some((t) => t.id === pick.team)) pick.team = ts.some((t) => t.id === want) ? want : (ts[0]?.id ?? 0)
 }, { immediate: true })
 
 // Loads the picked slot: the saved mission, or a new one with the roster filled in (objective 4 is optional, so it

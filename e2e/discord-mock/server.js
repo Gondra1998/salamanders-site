@@ -42,7 +42,7 @@ const USERS = {
   // The guild owner and a holder of an Administrator role: both open the Deathwatch area, neither is a Commander.
   'test-owner-token': { id: '200000000000000005', username: 'owner-tester' },
   'test-admin-token': { id: '200000000000000006', username: 'admin-tester' },
-  // The Deathwatch Command role: with a Deathwatch role (a member), and on its own (no way in).
+  // The Deathwatch Command role: with a Deathwatch role, and on its own (deployed all the same).
   'test-command-token': { id: '200000000000000007', username: 'command-tester' },
   'test-command-only-token': { id: '200000000000000008', username: 'command-only-tester' },
   // Not in the guild at all: the spec gives this id a grant and takes it away again.

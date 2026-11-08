@@ -19,7 +19,7 @@ describe('DeathwatchShell', () => {
     expect(at({ area: 'chronicles', tab: 'in-memoriam' })).toBe('chronicles')
     expect(at({ area: 'eventtracker' })).toBe('eventtracker')
     expect(at({ area: 'armouringhall', tab: 'standard', sub: 'helm' })).toBe('armouringhall')
-    expect(at({ area: 'manage' })).toBe('manage')
+    expect(at({ area: 'administratum' })).toBe('administratum')
   })
 
   it('is the hub for the front hall, an unknown area, a hostile one, or no router at all', () => {

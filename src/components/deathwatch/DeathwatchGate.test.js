@@ -131,7 +131,7 @@ describe('DeathwatchGate: allowed and denied', () => {
     getMe.mockResolvedValue({ access: false, watchCommander: false })
     const w = await mountGate()
     expect(w.text()).toContain(
-      'Your clearance is not on record. Access is held by the Deathwatch and by those the Watch Commander has cleared.',
+      'Your clearance is not on record. Access is held by the XVIIIth Legion, its Emissaries, the Deathwatch and those the Watch Commander has cleared.',
     )
     expect(slotMounted).not.toHaveBeenCalled()
     expect(w.find('.page').exists()).toBe(false)

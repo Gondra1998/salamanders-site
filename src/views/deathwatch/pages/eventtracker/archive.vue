@@ -18,7 +18,7 @@ import GameStatsView from '../../../../components/deathwatch/tracker/GameStatsVi
 const VIEWS = [
   ['standings', 'Standings'],
   ['kill-teams', 'Kill Teams'],
-  ['players', 'Players'],
+  ['players', 'Operatives'],
   ['honour-roll', 'Honour Roll'],
   ['game-stats', 'Game Stats'],
 ]

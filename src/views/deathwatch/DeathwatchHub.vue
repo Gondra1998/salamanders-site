@@ -4,9 +4,12 @@
 // Commander's alone (a convenience only: the server enforces it). The animated door that opened onto this menu
 // is not part of it here.
 import { computed } from 'vue'
-import { AREAS, resolveArea } from '../../lib/deathwatch/areas'
+import { RouterLink } from 'vue-router'
+import { AREAS, LOCK_TEXT, mayOpen, resolveArea } from '../../lib/deathwatch/areas'
+import { useGates } from '../../lib/deathwatch/useGates'
 import { iconFor } from '../../lib/deathwatch/icons'
 import { useDeathwatch } from '../../stores/deathwatch'
+import DeathwatchLock from '../../components/deathwatch/DeathwatchLock.vue'
 import crest from '../../components/deathwatch/img/crest-large.webp'
 import crestGold from '../../components/deathwatch/img/crest-gold.webp'
 import trackerArt from '../../components/deathwatch/img/card-tracker.webp'
@@ -15,15 +18,27 @@ import chroniclesArt from '../../components/deathwatch/img/card-chronicles.webp'
 import relicsArt from '../../components/deathwatch/img/card-relics.webp'
 
 const store = useDeathwatch()
+const gates = useGates()
+const who = computed(() => ({ commander: store.commander, held: store.roles }))
 const ART = { eventtracker: trackerArt, armouringhall: armouringArt, chronicles: chroniclesArt, hallofrelics: relicsArt }
 // The four areas everyone sees. Manage has no card: it is a button, below.
 const cards = computed(() =>
   Object.entries(AREAS)
     .filter(([area]) => Object.hasOwn(ART, area))
-    .map(([area, { label, blurb }]) => ({ area, label, blurb, art: ART[area], to: resolveArea({ area }).canonical })),
+    .map(([area, { label, blurb }]) => ({
+      area,
+      label,
+      blurb,
+      art: ART[area],
+      to: resolveArea({ area }).canonical,
+      locked: !mayOpen(gates.value[area], who.value),
+    })),
 )
-const manageTo = resolveArea({ area: 'manage' }).canonical
+const manageTo = resolveArea({ area: 'administratum' }).canonical
 const recruitmentTo = resolveArea({ area: 'recruitment' }).canonical
+// The hub itself is open to everyone the gate lets in, so nobody lands in a dead end; each card and the call to
+// enlist carry their own area's lock (areas.js).
+const enlistLocked = computed(() => !mayOpen(gates.value.recruitment, who.value))
 </script>
 
 <template>
@@ -37,29 +52,33 @@ const recruitmentTo = resolveArea({ area: 'recruitment' }).canonical
     </header>
     <ul class="dw-hub-cards">
       <li v-for="card in cards" :key="card.area">
-        <RouterLink class="dw-card" :to="card.to">
+        <!-- An area the viewer may not open: the card blurred, with no way in, and the lock over it. -->
+        <component :is="card.locked ? 'div' : RouterLink" class="dw-card" :class="{ 'is-locked': card.locked }" :to="card.locked ? undefined : card.to">
           <img class="dw-card-art" :src="card.art" alt="" width="320" height="180" loading="lazy" />
           <span class="dw-card-text">
             <span class="dw-card-title">{{ card.label }}</span>
             <span class="dw-card-blurb">{{ card.blurb }}</span>
           </span>
           <span class="dw-card-go" aria-hidden="true">›</span>
-        </RouterLink>
+          <DeathwatchLock v-if="card.locked" overlay :message="LOCK_TEXT[card.area]" />
+        </component>
       </li>
     </ul>
-    <!-- The call to enlist: an ornament, the call, and the way to Recruitment. -->
-    <div class="dw-call">
+    <!-- The call to enlist: an ornament, the call, and the way to Recruitment; locked as a card is. -->
+    <div class="dw-call" :class="{ 'is-locked': enlistLocked }">
       <span class="dw-call-orn" aria-hidden="true"><img :src="crestGold" alt="" width="240" height="240" /></span>
       <p class="dw-call-t">The Watch needs <b>you</b></p>
       <div class="dw-call-row">
-        <RouterLink class="dw-call-btn" :to="recruitmentTo">Enlist now</RouterLink>
+        <span v-if="enlistLocked" class="dw-call-btn">Enlist now</span>
+        <RouterLink v-else class="dw-call-btn" :to="recruitmentTo">Enlist now</RouterLink>
       </div>
+      <DeathwatchLock v-if="enlistLocked" overlay />
     </div>
     <RouterLink v-if="store.commander" class="dw-manage dw-btn rm-fade" :to="manageTo">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
-        <component :is="shape[0]" v-for="(shape, i) in iconFor('manage')" :key="i" v-bind="shape[1]" />
+        <component :is="shape[0]" v-for="(shape, i) in iconFor('administratum')" :key="i" v-bind="shape[1]" />
       </svg>
-      Manage
+      Administratum
     </RouterLink>
   </section>
 </template>
@@ -119,6 +138,19 @@ const recruitmentTo = resolveArea({ area: 'recruitment' }).canonical
   text-transform: uppercase;
   color: var(--dw-ink);
 }
+/* A locked card (or call to enlist): still the area's picture and name, blurred and dimmed under the lock, and no arrow. */
+.dw-card.is-locked .dw-card-art,
+.dw-card.is-locked .dw-card-text,
+.dw-call.is-locked > :not(.dw-lock) {
+  filter: blur(4px) saturate(0.5);
+  opacity: 0.45;
+}
+.dw-card.is-locked .dw-card-go {
+  visibility: hidden;
+}
+.dw-card.is-locked:active {
+  transform: none;
+}
 /* Two wide cards to a row from 760px, one below: each the area's art on the left, its name and line on the right,
    and an arrow. Thin chamfered frames, as the area's panels. */
 .dw-hub-cards {
@@ -143,7 +175,7 @@ const recruitmentTo = resolveArea({ area: 'recruitment' }).canonical
   height: 100%;
   text-align: left;
   text-decoration: none;
-  background: linear-gradient(90deg, rgb(8 14 9 / 0.92), rgb(12 22 14 / 0.88));
+  background: linear-gradient(90deg, rgb(8 14 9 / 0.8), rgb(12 22 14 / 0.8));
   clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px);
   transition: transform var(--dur-press) var(--ease-forge);
 }
@@ -202,6 +234,7 @@ const recruitmentTo = resolveArea({ area: 'recruitment' }).canonical
   gap: 0.7rem;
   width: 100%;
   margin-top: 1rem;
+  position: relative;
 }
 .dw-call-orn,
 .dw-call-row {

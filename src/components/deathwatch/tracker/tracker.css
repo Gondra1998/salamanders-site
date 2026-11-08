@@ -4,6 +4,7 @@
 
 /* A table scrolls sideways inside its own wrapper: one with many columns never widens the page. */
 .dw .dw-scroll {
+  position: relative; /* holds the cells' screen-reader texts (.dw-sr-only), which else widen the page */
   overflow-x: auto;
   overscroll-behavior-x: contain;
   border: 1px solid var(--dw-line-2);
@@ -176,12 +177,13 @@
 }
 .dw .dw-tag {
   margin-left: 0.4rem;
-  padding: 0 0.35rem;
+  padding: 0 0.5rem;
   font: 600 0.7rem / 1.4 var(--dw-font-cond);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   vertical-align: middle;
   border: 1px solid currentColor;
+  border-radius: 999px; /* round, like the player pills they sit in */
 }
 .dw .dw-tag.guest {
   color: var(--dw-gold);
@@ -235,8 +237,10 @@
 }
 .dw .dw-field input,
 .dw .dw-field select {
-  /* below a field's own width (a number input's is wide) rather than past the column's edge */
+  /* never wider than the column: a name list (datalist) adds a picker arrow to the input's own width */
   min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   min-height: 44px;
   padding: 0.45rem 0.6rem;
   font: 400 1rem / 1.2 var(--dw-font-body);

@@ -15,9 +15,10 @@ const PORTED = [
   'eventtracker/game-stats',
   'eventtracker/scoring',
   'eventtracker/archive',
-  'manage/enter-mission',
-  'manage/manage',
-  'manage/checks',
+  'administratum/enter-mission',
+  'administratum/manage',
+  'administratum/checks',
+  'administratum/access',
   'armouringhall/standard',
   'armouringhall/specialist',
   'armouringhall/watch-command',
@@ -48,8 +49,8 @@ const PAGES = {
   },
   'chronicles/in-memoriam': { h2: ['In Memoriam'] },
   'chronicles/operational-records': { h2: ['Operational Records', 'Current Kill-Team Standings'], tables: [['#', 'Kill Team', 'Points']] },
-  'manage/records': { h2: ['New operational record', 'Records created here'], h3: ['Kill Teams', 'Top Operatives'] },
-  'manage/page-texts': { h2: ['Page Texts'] },
+  'administratum/records': { h2: ['New operational record', 'Records created here'], h3: ['Kill Teams', 'Top Operatives'] },
+  'administratum/page-texts': { h2: ['Page Texts'] },
 }
 
 const mountPage = (key) => mount(MODULES[`./${key}.vue`].default)

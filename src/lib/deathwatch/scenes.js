@@ -1,9 +1,18 @@
 /**
  * Named states of the Deathwatch gate for design work, with no server. Dev only; see fixture.js.
- *   allowed      signed in, and cleared
- *   commander    signed in, cleared, and the Watch Commander
- *   command      signed in, cleared, and holding the Deathwatch Command role (not the Watch Commander)
- *   denied       signed in, but not cleared
+ *   allowed      signed in, as a member of the Watch: Legion and Deathwatch Deployment (the default)
+ *   commander    signed in, and the Watch Commander: everything open, Manage included
+ * One scene per standing, as members hold them: Legion is the base every member has, so each other scene holds
+ * Legion as well; an Emissary is a guest and holds only that. Each line of the access list (areas.js) can be seen. The
+ * hub opens to every one of them, with the cards of the areas it does not open locked:
+ *   legion       an everyday member: the Hall of Relics and Recruitment (Enlist Now)
+ *   emissary     a guest: the same as legion
+ *   deployment   and the Event Tracker, the Armouring Hall (not its Watch Command tab) and the Chronicles
+ *   command      as deployment, and, as Deathwatch Command (not the Watch Commander), the Watch Command tab too
+ *   accolade     and, with an award role (here Xenosbane Sigil; Vigilia Mortis in Aeternum opens the same by
+ *                default), the Chronicles
+ * The gate's other states:
+ *   denied       signed in, but holding none of them
  *   signin       signed out
  *   checking     the server has not answered yet (it never does)
  *   unavailable  the server could not be reached
@@ -12,18 +21,41 @@
  *   active-event  a running event and one archived tour (every other scene shows this data as well)
  * The status names are the store's (the spec's "signed-out" state is `signin`, as the roster calls it).
  */
-export const SCENES = ['allowed', 'commander', 'command', 'denied', 'signin', 'checking', 'unavailable', 'empty', 'active-event']
+export const SCENES = [
+  'allowed',
+  'commander',
+  'legion',
+  'emissary',
+  'deployment',
+  'command',
+  'accolade',
+  'denied',
+  'signin',
+  'checking',
+  'unavailable',
+  'empty',
+  'active-event',
+]
 
+const NONE = { commander: false, command: false, roles: [] }
+const COMMANDER = { status: 'allowed', commander: true, command: true, roles: [] }
+// Legion is the base every member holds; an Emissary (a guest) holds only their own.
+const holding = (...roles) => ({ status: 'allowed', ...NONE, command: roles.includes('command'), roles })
 const SHAPES = {
-  allowed: { status: 'allowed', commander: false, command: false },
-  commander: { status: 'allowed', commander: true, command: true },
-  command: { status: 'allowed', commander: false, command: true },
-  denied: { status: 'denied', commander: false, command: false },
-  signin: { status: 'signin', commander: false, command: false },
-  checking: { status: 'checking', commander: false, command: false },
-  unavailable: { status: 'unavailable', commander: false, command: false },
-  empty: { status: 'allowed', commander: true, command: true },
-  'active-event': { status: 'allowed', commander: true, command: true },
+  allowed: { status: 'allowed', ...NONE, roles: ['legion', 'deployment'] },
+  commander: COMMANDER,
+  legion: holding('legion'),
+  emissary: holding('emissary'),
+  deployment: holding('legion', 'deployment'),
+  // The server counts Deathwatch Command as deployed too (deathwatchAccess.js).
+  command: holding('legion', 'deployment', 'command'),
+  accolade: holding('legion', 'xenosbane'),
+  denied: { status: 'denied', ...NONE },
+  signin: { status: 'signin', ...NONE },
+  checking: { status: 'checking', ...NONE },
+  unavailable: { status: 'unavailable', ...NONE },
+  empty: COMMANDER,
+  'active-event': COMMANDER,
 }
 
 /** The named scene in the shape the store reads. An unknown name gives 'allowed'. */

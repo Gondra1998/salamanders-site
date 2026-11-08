@@ -102,6 +102,7 @@ Any Discord failure answers 503: the area fails closed.
 |---|---|---|
 | `GET /deathwatch/me` | any signed-in user | `{ access, watchCommander, deathwatchCommand }`; never 403 |
 | `GET /deathwatch/data` | access | `{ teams, cfg, archive }`; `ETag`, 304 on `If-None-Match`; 403 without access |
+| `GET /deathwatch/deployment` | Event Tracker readers | `{ members: [{ id, name, avatar }] }`: who holds `DEATHWATCH_ROLE_ID`, from the roster's member cache (no extra Discord calls); 503 until that has loaded |
 | `POST /deathwatch/doc` | Watch Commander | `{ col, id, op: 'set' \| 'delete', doc }`; JSON content type required |
 | `GET /deathwatch/grants` | Watch Commander | active grants |
 | `POST /deathwatch/grants` | Watch Commander | `{ discordId }`; 201 new, 200 if already active, 409 at 200 active |
@@ -116,9 +117,20 @@ transaction as the change.
 
 | Variable | Value |
 |---|---|
-| `DEATHWATCH_ROLE_ID` | the Deathwatch role id, or several separated by commas with no spaces (a holder of any one gets in) — no default, required |
-| `WATCH_COMMANDER_ROLE_ID` | the Watch Commander role id — no default, required |
-| `DEATHWATCH_COMMAND_ROLE_ID` | the Deathwatch Command role id (one id, not the Watch Commander's) — optional. Its holders who also have access get `deathwatchCommand: true` from `/deathwatch/me`; it opens no route. Unset or not a single id, nobody holds it and nothing else changes |
+| `DEATHWATCH_ROLE_ID` | the Deathwatch Deployment role id, or several separated by commas with no spaces (a holder of any one is `deployment`, as is Deathwatch Command, a grant, the guild owner or an Administrator) — no default, required |
+| `WATCH_COMMANDER_ROLE_ID` | the Watch Commander role id: opens everything — no default, required |
+| `DEATHWATCH_COMMAND_ROLE_ID` | the Deathwatch Command role id (one id, not the Watch Commander's) — optional. Its holders are `command` and `deployment` (and `deathwatchCommand: true`). Unset or not a single id, nobody holds it and nothing else changes |
+| `EMISSARY_ROLE_ID` | the Emissary role id (one id) — optional; its holders are `emissary`. The Legion role (`rosterLadder.js`) gives `legion` |
+| `XENOSBANE_SIGIL_ROLE_ID` | the Xenosbane Sigil award role id — optional; its holders are `xenosbane` |
+| `VIGILIA_MORTIS_ROLE_ID` | the Vigilia Mortis in Aeternum award role id — optional; its holders are `vigilia` |
+| `KILL_MARINE_ROLE_ID` | the Deathwatch Kill-Marine award role id — optional; its holders are `killmarine` |
+
+`GET /deathwatch/me` answers `roles`: the standings the caller holds (`legion`, `emissary`, `deployment`,
+`command`, `xenosbane`, `vigilia`, `killmarine`). Any standing, or the Watch Commander role, lets them into the
+area; which parts open to which standings the Watch Commander sets in Manage → Access (the cfg document `g`,
+area → standings), else the defaults in the site's `src/lib/deathwatch/areas.js`. `GET /deathwatch/data` sends
+the Event Tracker's documents (`teams`, `archive`) only to the Watch Commander and the standings `g.eventtracker`
+lists (by default `deployment`); everyone else gets them empty.
 
 Until **both** are set every `/deathwatch/*` route answers 503 "not configured". The role
 ids are supplied at deploy time and never committed. To deploy: set both in `server/.env`,

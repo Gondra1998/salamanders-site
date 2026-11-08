@@ -150,7 +150,7 @@ describe('DeathwatchArea', () => {
       const hall = (await mountAt('/deathwatch/armouringhall/specialist')).w
       expect(head(hall).find('[aria-current="page"]').text()).toBe('Specialist')
       expect(hall.find('.dw-area-sheet [role="alert"]').exists()).toBe(true)
-      const tracker = (await mountAt('/deathwatch/eventtracker/players')).w
+      const tracker = (await mountAt('/deathwatch/chronicles/player-profiles')).w
       expect(tracker.find('.dw-area-sheet [role="alert"]').exists()).toBe(true)
       expect(head(tracker).exists()).toBe(false)
     })
@@ -160,7 +160,7 @@ describe('DeathwatchArea', () => {
       vi.useFakeTimers()
       try {
         const hall = (await mountAt('/deathwatch/armouringhall/standard')).w
-        const tracker = (await mountAt('/deathwatch/eventtracker/players')).w
+        const tracker = (await mountAt('/deathwatch/chronicles/player-profiles')).w
         await vi.advanceTimersByTimeAsync(250) // past the loading view's delay
         expect(hall.find('.dw-area-sheet [role="status"]').text()).toBe('Loading…')
         expect(head(hall).exists()).toBe(true)
@@ -250,7 +250,7 @@ describe('DeathwatchArea', () => {
     const bar = w.find('button.dw-areabar')
     expect(bar.text()).toContain('Event Tracker')
     expect(bar.text()).toContain('Players')
-    expect(w.findAll('nav')).toHaveLength(2) // the sidebar and the sheet's copy: the stylesheet shows one of them
+    expect(w.findAll('aside nav, dialog nav')).toHaveLength(2) // the sidebar and the sheet's copy (the view's HallHead has its own)
     expect(w.find('dialog nav [aria-current="page"]').text()).toBe('Players')
     expect(HTMLDialogElement.prototype.showModal).not.toHaveBeenCalled()
     expect(bar.attributes('aria-expanded')).toBe('false')

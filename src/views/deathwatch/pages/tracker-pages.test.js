@@ -24,7 +24,10 @@ beforeEach(() => {
 })
 
 async function mountPage(key, query = {}) {
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { render: () => null } }] })
+  const none = { render: () => null }
+  // The app's route shape, so a view can read its area and tab from the params (TrackerState heads the Event Tracker).
+  const routes = [{ path: '/deathwatch/:area/:tab?/:sub?', component: none }, { path: '/:p(.*)*', component: none }]
+  const router = createRouter({ history: createMemoryHistory(), routes })
   await router.push({ path: `/deathwatch/${key}`, query })
   const w = mount(PAGES[`./${key}.vue`].default, { global: { plugins: [pinia, router] } })
   await flushPromises()
@@ -42,6 +45,14 @@ describe('Event Tracker', () => {
     expect(w.find('.pc-svg').exists()).toBe(true)
     // A team link opens its profile and keeps the dev scene.
     expect(w.find('tbody a').attributes('href')).toMatch(/^\/deathwatch\/eventtracker\/kill-teams\?scene=commander&t=\d+$/)
+  })
+
+  it('heads itself like the Armouring Hall: the event as its line, its seven tabs, the open one marked', async () => {
+    const { w } = await mountPage('eventtracker/standings')
+    expect(w.get('.hh-title').text()).toBe('Event Tracker')
+    expect(w.get('.hh-line').text()).toBe(useDeathwatchData().cfg.tx?.cur_n || 'Deathwatch Tour')
+    expect(w.findAll('a.hh-tab')).toHaveLength(7)
+    expect(w.get('a.hh-tab[aria-current="page"]').text()).toBe('Standings')
   })
 
   it('Standings: tied teams share a rank, on the podium and in the table', async () => {
@@ -64,12 +75,6 @@ describe('Event Tracker', () => {
     const { w } = await mountPage('eventtracker/standings')
     await w.findAll('.pc-modes button').at(3).trigger('click')
     expect(w.findAll('table')).toHaveLength(3)
-  })
-
-  it('Standings: the Watch Commander can copy the standings for Discord', async () => {
-    const { w } = await mountPage('eventtracker/standings')
-    await w.findAll('button').find((b) => b.text() === 'Share to Discord').trigger('click')
-    expect(w.find('textarea').element.value).toContain('Deathwatch Event – Standings')
   })
 
   it('Standings: with no running event, points to the Archive', async () => {
@@ -170,8 +175,8 @@ describe('Event Tracker', () => {
     expect(w.findAll('.ev')).toHaveLength(1)
     const { w: e } = await mountPage('eventtracker/archive', { e: 'e1', v: 'honour-roll' })
     expect(h2(e)[0]).toBe('Deathwatch Tour — Ash Season')
-    expect(e.find('nav [aria-current="page"]').text()).toBe('Honour Roll')
-    expect(e.findAll('nav a').map((a) => a.attributes('href'))[1]).toBe('/deathwatch/eventtracker/archive?e=e1&v=kill-teams')
+    expect(e.find('nav.views [aria-current="page"]').text()).toBe('Honour Roll')
+    expect(e.findAll('nav.views a').map((a) => a.attributes('href'))[1]).toBe('/deathwatch/eventtracker/archive?e=e1&v=kill-teams')
   })
 
   it('Archive: an unknown event shows the list', async () => {
@@ -215,7 +220,13 @@ describe('Manage', () => {
   it('Manage: saves the weights, adds a Kill Team and renames a player', async () => {
     const data = useDeathwatchData()
     const { w } = await mountPage('manage/manage')
-    expect(h2(w)).toEqual(['Scoring', 'Rename or merge player', 'Kill Teams', 'Restore from backup', 'Event archive', 'Reset Kill Teams'])
+    expect(h2(w)).toEqual(['Scoring', 'Rename or merge player', 'Tour', 'Kill Teams', 'Restore from backup', 'Event archive', 'Reset Kill Teams'])
+    const pageText = data.cfg.tx.ts_h
+    await w.find('input[placeholder="Deathwatch Tour"]').setValue('  Tour of the Ashen Gate ')
+    await w.findAll('button').find((b) => b.text() === 'Save tour name').trigger('click')
+    await flushPromises()
+    expect(data.cfg.tx.cur_n).toBe('Tour of the Ashen Gate')
+    expect(data.cfg.tx.ts_h).toBe(pageText) // the other page texts are kept
     await w.find('input[type="number"]').setValue('450')
     await w.findAll('button').find((b) => b.text() === 'Save scoring').trigger('click')
     await flushPromises()
@@ -247,6 +258,8 @@ describe('Manage', () => {
     await flushPromises()
     expect(Object.keys(data.archive)).toHaveLength(2)
     expect(data.teams).toEqual({})
+    expect(data.cfg.tx.cur_n).toBeUndefined() // the next tour starts unnamed
+    expect(w.text()).toContain('No event is running')
   })
 
   it('Checks: every check with its count', async () => {

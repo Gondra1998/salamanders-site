@@ -58,6 +58,20 @@ async function rnDo() {
   }
 }
 
+// The tour: its name is the line under the Event Tracker's head (cfg.tx.cur_n, beside the page texts).
+const tour = reactive({ name: '', msg: '' })
+watch(() => data.cfg.tx?.cur_n, (n) => (tour.name = n ?? ''), { immediate: true })
+async function saveTour() {
+  const name = tour.name.trim()
+  if (!name) return (tour.msg = 'Enter a tour name.')
+  try {
+    await save('cfg', 'tx', { ...data.cfg.tx, cur_n: name })
+    tour.msg = 'Saved ✓'
+  } catch (err) {
+    tour.msg = `Not saved: ${say(err)}`
+  }
+}
+
 // Kill Teams. A form per team, refilled whenever the saved team changes.
 const STATUS = [['', 'Active'], ['0', 'KIA (week ?)'], ['1', 'KIA · W1'], ['2', 'KIA · W2'], ['3', 'KIA · W3'], ['4', 'KIA · W4']]
 const teams = computed(() => Object.values(data.teams).sort((a, b) => a.id - b.id))
@@ -171,6 +185,9 @@ async function archive(reset) {
       ar.msg = `Archived ✓ Clearing the live event… ${++i}/${ids.length}`
       await save('teams', k, null)
     }
+    // The tour is over: its name goes with it, so the next one starts unnamed ("Open new tour").
+    const { cur_n, ...tx } = data.cfg.tx ?? {}
+    if (cur_n !== undefined) await save('cfg', 'tx', tx)
     ar.msg = `Archived as “${name}” and live event cleared ✓ Open it under “Archive”.`
   } catch (err) {
     ar.msg = `Not completed: ${say(err)}${reset ? ' The live event is only cleared after the archive copy is saved.' : ''}`
@@ -222,6 +239,16 @@ async function resetTeams() {
       </template>
       <p v-if="rn.msg" class="dw-msg" :class="{ ok: rn.msg.startsWith('Done'), bad: rn.msg.startsWith('Not') || rn.msg.startsWith('No') || rn.msg.startsWith('Can') }" role="status">{{ rn.msg }}</p>
     </template>
+
+    <h2 class="dw-plaque">Tour</h2>
+    <p v-if="!teams.length" class="dw-empty">No event is running. Name the new tour, then add its Kill Teams below.</p>
+    <div class="dw-form">
+      <label class="dw-field">Tour name<input v-model="tour.name" autocomplete="off" placeholder="Deathwatch Tour" /></label>
+    </div>
+    <div class="dw-actions">
+      <button type="button" class="dw-btn rm-fade" @click="saveTour">{{ teams.length ? 'Save tour name' : 'Open new tour' }}</button>
+      <span class="dw-msg" role="status">{{ tour.msg }}</span>
+    </div>
 
     <h2 class="dw-plaque">Kill Teams</h2>
     <fieldset v-for="t in teams" :key="t.id" class="dw-fieldset">

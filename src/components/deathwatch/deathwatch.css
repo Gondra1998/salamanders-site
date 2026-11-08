@@ -89,6 +89,30 @@ body:has(.dw-sheet[open]) {
     dw-drift 40s ease-in-out infinite alternate,
     dw-flicker 5s ease-in-out infinite;
 }
+/* While the gate's screen is up (DeathwatchBoot) the area's painting is put out: the gate shows nothing of the area.
+   It comes back with the page, once the screen is gone (the site's bar shows it through, so not a moment sooner). */
+.dw:has(.dwb) .dw-backdrop::after {
+  content: none;
+}
+/* Under the gate's screen the site's footer, translucent elsewhere, takes the screen's own dark (DeathwatchBoot's outer
+   tone), so nothing of the site's backdrop shows behind it either. */
+body:has(.dwb) .site-footer {
+  background: rgb(2 4 2 / 0.88);
+}
+/* Nor does the area fade in as a route does (App's main > *) while the gate's screen is up: the screen brings its
+   own way in (DeathwatchBoot), and its answer must stand in for it without a flash. */
+main > .dw:has(.dwb) {
+  animation: none;
+}
+/* The page, shown once the wake is done (DeathwatchGate): a short fade in, as a route comes in. */
+.dw-gate-page {
+  animation: dw-gate-in var(--dur-view) var(--ease-forge) both;
+}
+@keyframes dw-gate-in {
+  from {
+    opacity: 0;
+  }
+}
 .dw[data-area='hub'] {
   --dw-wm: 0.5;
 }

@@ -259,11 +259,31 @@ describe("DeathwatchGate: the cogitator's wake", () => {
     expect(w.find('.page').exists()).toBe(false)
   })
 
-  it('steps aside at once when signed out', async () => {
+  it('asks who you are when signed out, and stays until you sign in', async () => {
     motion(false)
+    vi.useFakeTimers()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:rest(.*)*', component: { template: '<div />' } }] })
+    router.push(PAGE)
+    await router.isReady()
+    const w = mount(DeathwatchGate, { slots: { default: () => h(Probe) }, global: { plugins: [pinia, router] } })
+    await vi.advanceTimersByTimeAsync(1000 + 4 * 500 + 700 + 5000)
+    expect(w.findAll('.dwb')).toHaveLength(1) // the wake, with nothing under it
+    expect(w.find('.dwb').classes()).toContain('signin')
+    expect(w.find('.dwb-big').text()).toBe('Identify yourself')
+    await w.find('.dwb-btn').trigger('click')
+    expect(beginSignIn).toHaveBeenCalledWith({ returnTo: PAGE })
+  })
+
+  it('without the wake, shows why not in its face, in the page', async () => {
+    storeMember()
+    getMe.mockResolvedValue({ access: false, watchCommander: false })
+    motion(true)
     const w = await mountGate()
-    expect(w.find('.dwb').exists()).toBe(false)
-    expect(w.text()).toContain('Sign in with Discord')
+    expect(w.findAll('.dwb')).toHaveLength(1)
+    expect(w.find('.dwb').classes()).toEqual(expect.arrayContaining(['still', 'shut']))
+    expect(w.find('h1').text()).toBe('Watch Fortress Ebonhold')
   })
 
   it('never plays with reduced motion', async () => {

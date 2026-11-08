@@ -1,18 +1,24 @@
 <script setup>
-// The fortress's vigil-net waking as someone comes in, over the whole screen, in the area's cogitator green: the
+// The fortress's vigil-net waking as someone comes in, between the site's bar and footer, in the area's cogitator green: the
 // crest sits in an auspex ring that fills as the vox log runs its rites, while the gate asks the server who they
 // are (the store); the last line is that answer. Cleared, the ring burns whole, "The gate is open" welcomes them,
-// and the screen fades onto the page that is already behind it; not cleared, it steps aside at once so the gate can
-// say why, unless they were refused: then the ring burns red and "The gate stays shut" stays up, with a way back
-// to the companies. Only a lead-in: the gate (and the server) decide access, never this.
+// and the screen fades onto the page that is already behind it. Otherwise it stays up and says why: refused (the
+// ring burns red, with a way back to the companies), signed out (sign in with Discord) or the fortress unreached
+// (try again). `still`: the same screen without the wake, showing the answer as it stands; the gate shows it
+// whenever the wake is not playing. Only a face: the gate (and the server) decide access, never this.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuth } from '../../stores/auth'
 import { useDeathwatch } from '../../stores/deathwatch'
 import crest from './img/crest.webp'
 
+const props = defineProps({ still: { type: Boolean, default: false } })
 const emit = defineEmits(['done'])
 const auth = useAuth()
 const store = useDeathwatch()
+const route = useRoute()
+const signIn = () => auth.signIn({ returnTo: route.fullPath })
+const retry = () => store.load(auth.token)
 
 const RITES = [
   ['Machine spirit', 'roused'],
@@ -28,7 +34,7 @@ const HOLD_MS = 700 // the answer stays a moment
 const OPEN_MS = 1900 // "The gate is open"
 const FADE_MS = 400 // dwb-out below: a short fade onto the page
 
-// wake → log → open, each crossfading into the next; the ring stays throughout.
+// wake → log → the answer (open, shut, signin or lost), each crossfading into the next; the ring stays throughout.
 const phase = ref('wake')
 const shown = ref(0)
 const leaving = ref(false)
@@ -37,9 +43,14 @@ const cleared = computed(() => store.status === 'allowed')
 const refused = computed(() => store.status === 'denied')
 const done = computed(() => shown.value === RITES.length)
 const operator = computed(() => auth.member?.username || '—')
+const answer = computed(() => (cleared.value ? 'open' : refused.value ? 'shut' : store.status === 'signin' ? 'signin' : 'lost'))
+// Still: no wake and no log, only where the answer stands (wait while the server is asked).
+const shownPhase = computed(() => (props.still ? (busy.value ? 'wait' : answer.value) : phase.value))
 // The ring: a fifth for each rite, the last for the answer.
 const RING = 2 * Math.PI * 92
-const ring = computed(() => RING * (1 - (shown.value + (done.value && !busy.value ? 1 : 0)) / (RITES.length + 1)))
+const ring = computed(() =>
+  props.still ? (busy.value ? RING / (RITES.length + 1) : 0) : RING * (1 - (shown.value + (done.value && !busy.value ? 1 : 0)) / (RITES.length + 1)),
+)
 
 const timers = []
 const later = (fn, ms) => timers.push(setTimeout(fn, ms))
@@ -49,23 +60,24 @@ function leave() {
   later(() => emit('done', cleared.value), FADE_MS)
 }
 onMounted(() => {
+  if (props.still) return
   later(() => (phase.value = 'log'), WAKE_MS)
   RITES.forEach((_, i) => later(() => (shown.value = i + 1), WAKE_MS + RITE_MS * (i + 1)))
 })
 onBeforeUnmount(() => timers.forEach(clearTimeout))
 
-// Signed out or unreachable: out of the way at once, so the gate can say why (and offer sign-in or a retry). Cleared
-// or refused: once the rites are run, hold on the answer, then open the gate and fade, or shut it and stay.
-// `done` says whether it ended cleared.
+// Once the rites are run, hold on the answer, then open the gate and fade onto the page. Not cleared, hand over at
+// once to the gate's still screen in the same place, which says why. `done` says whether it ended cleared.
 watch(
   [done, busy],
   ([ran, waiting]) => {
+    if (props.still) return
     if (waiting) return
-    if (!cleared.value && !refused.value) emit('done', false)
-    else if (ran)
+    if (ran)
       later(() => {
-        phase.value = cleared.value ? 'open' : 'shut'
-        if (cleared.value) later(leave, OPEN_MS)
+        if (!cleared.value) return emit('done', false)
+        phase.value = 'open'
+        later(leave, OPEN_MS)
       }, HOLD_MS)
   },
   { immediate: true },
@@ -73,8 +85,7 @@ watch(
 </script>
 
 <template>
-  <div class="dwb" :class="[phase, { out: leaving }]" role="status" aria-label="Verifying clearance">
-    <button type="button" class="dwb-skip" @click="leave">Skip</button>
+  <div class="dwb" :class="[shownPhase, { out: leaving, still }]" role="status" aria-label="Verifying clearance" :aria-busy="busy ? 'true' : undefined">
     <div class="dwb-core">
       <div class="dwb-seal">
         <svg class="dwb-ring" viewBox="0 0 200 200" aria-hidden="true">
@@ -85,19 +96,35 @@ watch(
         </svg>
         <img :src="crest" alt="" width="120" height="120" />
       </div>
-      <p class="dwb-net">Ebonhold vigil-net // Deathwatch command</p>
+      <h1 class="dwb-net">Watch Fortress Ebonhold</h1>
 
       <Transition name="dwb-ph" mode="out-in">
-        <div v-if="phase === 'wake'" key="wake" class="dwb-say">
+        <div v-if="shownPhase === 'wake'" key="wake" class="dwb-say">
           <p class="dwb-big">Waking the machine spirit<span class="dwb-cursor" aria-hidden="true">_</span></p>
         </div>
-        <div v-else-if="phase === 'open'" key="open" class="dwb-say">
+        <div v-else-if="shownPhase === 'wait'" key="wait" class="dwb-say">
+          <p class="dwb-big">Verifying clearance…</p>
+          <p class="dwb-small">Weighing your sigil</p>
+        </div>
+        <div v-else-if="shownPhase === 'open'" key="open" class="dwb-say">
           <p class="dwb-big">The gate is open</p>
           <p class="dwb-small">Welcome to the Vigil</p>
         </div>
-        <div v-else-if="phase === 'shut'" key="shut" class="dwb-say">
+        <div v-else-if="shownPhase === 'shut'" key="shut" class="dwb-say">
           <p class="dwb-big">The gate stays shut</p>
-          <p class="dwb-small">Your clearance is not on record</p>
+          <p class="dwb-text">Your clearance is not on record. Access is held by the Deathwatch and by those the Watch Commander has cleared.</p>
+          <RouterLink class="dwb-back" to="/companies">Return to the companies</RouterLink>
+        </div>
+        <div v-else-if="shownPhase === 'signin'" key="signin" class="dwb-say">
+          <p class="dwb-big">Identify yourself</p>
+          <p class="dwb-text">Clearance required. Sign in with Discord to be verified.</p>
+          <button class="btn-ember dwb-btn" type="button" @click="signIn">Sign in with Discord</button>
+          <RouterLink class="dwb-back" to="/companies">Return to the companies</RouterLink>
+        </div>
+        <div v-else-if="shownPhase === 'lost'" key="lost" class="dwb-say">
+          <p class="dwb-big">Vox-link lost</p>
+          <p class="dwb-text" role="alert">The fortress could not be reached. Try again in a moment.</p>
+          <button class="btn-ember dwb-btn" type="button" @click="retry">Try again</button>
           <RouterLink class="dwb-back" to="/companies">Return to the companies</RouterLink>
         </div>
         <div v-else key="log" class="dwb-log">
@@ -120,20 +147,36 @@ watch(
 </template>
 
 <style scoped>
-/* Over the whole screen, the site's bar included: dark glass, scanlines, a green glow behind the seal. */
+/* The screen below the site's bar (about 4 rem high) down to its footer: dark glass, scanlines, a green glow behind
+   the seal. It runs on under the footer's top margin (4 rem, SiteFooter), so no strip of the page shows there.
+   shortcut: the bar's height and the footer's margin are copied, not read; if either changes, change them here. */
 .dwb {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
+  position: relative;
+  min-height: calc(100dvh - 4rem);
+  margin-bottom: -4rem;
+  padding: 1rem 1rem 5rem;
   display: grid;
   place-items: center;
-  padding: 1rem;
   --dwb-no: #e0705a; /* refused */
   color: var(--dw-ink);
   background:
     var(--dw-scan),
     radial-gradient(circle at 50% 34%, rgb(40 80 30 / 0.35), transparent 32%),
-    radial-gradient(ellipse at 50% 45%, rgb(12 22 11), rgb(2 4 2) 72%);
+    radial-gradient(ellipse at 50% 45%, rgb(12 22 11 / 0.88), rgb(2 4 2 / 0.88) 72%);
+  /* A touch see-through (0.88): the site's volcano and ash still faintly behind, as everywhere on the site. On the
+     window, not on this box (which runs under the footer), so the glow stays behind the seal however tall the
+     page is. */
+  background-attachment: fixed;
+  /* Coming in, the screen fades up out of the page that was there (no route fade: deathwatch.css). */
+  animation: dwb-in 500ms var(--ease-forge) both;
+}
+/* Its answer, standing in for the wake in the same place, is there at once. */
+.dwb.still {
+  animation: none;
+}
+/* Still: the same screen, without the wake. */
+.dwb.still .dwb-core {
+  animation: none;
 }
 /* Leaving: a short fade onto the page behind it while the seal drifts towards the viewer. */
 .dwb.out {
@@ -158,25 +201,7 @@ watch(
     transform: scale(1.05);
   }
 }
-.dwb-skip {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  min-height: 44px;
-  padding: 0 0.9rem;
-  font: 600 0.75rem / 1 var(--dw-font-cond);
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--dw-muted);
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-.dwb-skip:focus-visible {
-  outline: 2px solid var(--dw-accent);
-  outline-offset: 2px;
-}
-/* The seal and its words come up out of the dark the way in left (DeathwatchBanner), rather than appearing at once. */
+/* The seal and its words come up out of the dark, rather than appearing at once. */
 .dwb-core {
   animation: dwb-in 500ms var(--ease-forge) both;
   display: grid;
@@ -203,6 +228,7 @@ watch(
     filter var(--dur-sheet) var(--ease-forge);
 }
 .dwb.log .dwb-seal img,
+.dwb.wait .dwb-seal img,
 .dwb.open .dwb-seal img {
   opacity: 1;
   filter: grayscale(0) drop-shadow(0 0 16px color-mix(in oklab, var(--dw-accent) 45%, transparent));
@@ -252,6 +278,11 @@ watch(
 .dwb.shut .dwb-ring-glow {
   stroke: color-mix(in oklab, var(--dwb-no) 22%, transparent);
 }
+/* Asked to sign in, or the fortress out of reach: amber, a question still open. */
+.dwb.signin .dwb-ring-fill,
+.dwb.lost .dwb-ring-fill {
+  stroke: var(--dw-gold);
+}
 .dwb-net {
   margin: 0;
   font: 500 0.72rem / 1.4 ui-monospace, monospace;
@@ -292,6 +323,30 @@ watch(
 .dwb.shut .dwb-big {
   color: var(--dwb-no);
   text-shadow: 0 0 16px color-mix(in oklab, var(--dwb-no) 50%, transparent);
+}
+.dwb.signin .dwb-big,
+.dwb.lost .dwb-big {
+  color: var(--dw-gold);
+  text-shadow: 0 0 16px color-mix(in oklab, var(--dw-gold) 50%, transparent);
+}
+/* Why, in plain words, under the headline. */
+.dwb-text {
+  max-width: 26rem;
+  justify-self: center;
+  line-height: 1.6;
+  color: var(--dw-silver);
+}
+.dwb-btn {
+  justify-self: center;
+  min-height: 44px;
+  margin-top: 0.6rem;
+  padding: 0.7rem 1.4rem;
+  justify-content: center;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.dwb-btn + .dwb-back {
+  margin-top: 0.2rem;
 }
 .dwb-small {
   font: 500 0.75rem / 1.4 ui-monospace, monospace;
@@ -389,9 +444,6 @@ watch(
   overflow-wrap: anywhere;
 }
 @media (hover: hover) and (pointer: fine) {
-  .dwb-skip:hover {
-    color: var(--dw-accent);
-  }
   .dwb-back:hover {
     color: var(--dw-accent);
     border-color: var(--dw-accent);

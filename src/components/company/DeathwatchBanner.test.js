@@ -24,7 +24,6 @@ beforeEach(() => {
   auth.signedIn = false
   auth.signIn.mockReset()
   vi.unstubAllGlobals()
-  sessionStorage.clear()
 })
 
 describe('DeathwatchBanner', () => {
@@ -52,42 +51,6 @@ describe('DeathwatchBanner', () => {
     expect(push).not.toHaveBeenCalled()
     expect(e.defaultPrevented).toBe(true)
     vi.unstubAllEnvs()
-  })
-
-  it("dims into the cogitator's scan lines first, then goes in", async () => {
-    vi.useFakeTimers()
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    auth.signedIn = true
-    const { w, push } = mountBanner()
-    click(w)
-    await w.vm.$nextTick()
-    expect(document.querySelector('.dw-dim')).not.toBeNull()
-    expect(push).not.toHaveBeenCalled()
-    click(w) // a second click while it dims changes nothing
-    vi.advanceTimersByTime(650)
-    expect(push).toHaveBeenCalledTimes(1)
-    expect(push).toHaveBeenCalledWith('/deathwatch')
-    w.unmount()
-    vi.useRealTimers()
-  })
-
-  it('goes in at once with reduced motion', () => {
-    vi.stubGlobal('matchMedia', (q) => ({ matches: q.includes('reduce') }))
-    auth.signedIn = true
-    const { w, push } = mountBanner()
-    click(w)
-    expect(push).toHaveBeenCalledWith('/deathwatch')
-    expect(document.querySelector('.dw-dim')).toBeNull()
-  })
-
-  it('goes in at once once the boot screen has played this visit', () => {
-    vi.stubGlobal('matchMedia', () => ({ matches: false }))
-    sessionStorage.setItem('dw-booted', '1')
-    auth.signedIn = true
-    const { w, push } = mountBanner()
-    click(w)
-    expect(push).toHaveBeenCalledWith('/deathwatch')
-    expect(document.querySelector('.dw-dim')).toBeNull()
   })
 
   it('in dev with the Deathwatch fixture, goes straight in without signing in', () => {

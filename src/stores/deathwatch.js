@@ -12,7 +12,7 @@ import { loadFixture } from '../lib/deathwatch/fixture'
 let seq = 0
 
 // A server that never answers counts as out of reach after this long, so the gate can offer to try again instead
-// of waiting until the browser gives up (minutes).
+// of waiting until the browser gives up (minutes). An answer that comes later is dropped: "Try again" asks anew.
 export const ME_TIMEOUT_MS = 10_000
 
 const statusOf = (err) => (err?.status === 401 ? 'signin' : err?.status === 403 ? 'denied' : 'unavailable')

@@ -8,6 +8,9 @@ import { canDeleteBuild } from '../lib/permissions'
 import { splitByMembership, paginate } from '../lib/buildGroups'
 import BuildCard from '../components/BuildCard.vue'
 import BuildsPager from '../components/BuildsPager.vue'
+import PageHeader from '../components/PageHeader.vue'
+import SectionTitle from '../components/SectionTitle.vue'
+import StatePanel from '../components/StatePanel.vue'
 
 const planner = usePlanner()
 const auth = useAuth()
@@ -135,34 +138,31 @@ async function remove(b) {
 
 <template>
   <section class="builds">
-    <header class="b-head">
-      <p class="eyebrow">Field-tested</p>
-      <h1 class="b-title">Recommended Builds</h1>
-      <p class="b-intro">
+    <PageHeader eyebrow="Field-tested" title="Recommended Builds">
+      <p class="page-lede">
         Builds the Chapter has posted. Make one in the
         <RouterLink to="/planner" class="ilink">Perk Builder</RouterLink> and save it from
         the Your Build panel — sign in with Discord first so it's tied to your name.
       </p>
-    </header>
+    </PageHeader>
 
-    <p v-if="loading" class="b-none">Loading builds…</p>
-    <div v-else-if="loadError" class="b-none b-error" role="alert">
-      <p>{{ loadError }}</p>
+    <StatePanel v-if="loading" kind="loading" body="Loading builds…" />
+    <StatePanel v-else-if="loadError" kind="error" class="b-error" :body="loadError">
       <button type="button" class="btn-drake btn-sm" @click="load">Retry</button>
-    </div>
+    </StatePanel>
 
     <!-- Search + filter -->
     <div v-if="!loading && !loadError && builds.length" class="b-tools">
       <input
         v-model="query"
-        class="b-search"
+        class="b-search field-forge"
         type="search"
         placeholder="Search builds, perks, weapons, notes…"
         aria-label="Search builds"
       />
       <div class="b-filters" role="group" aria-label="Filter by class">
         <button
-          class="b-chip rm-fade"
+          class="b-chip tab-forge rm-fade"
           :class="{ on: !classFilter }"
           @click="classFilter = ''"
         >
@@ -172,7 +172,7 @@ async function remove(b) {
         <button
           v-for="c in usedClasses"
           :key="c"
-          class="b-chip rm-fade"
+          class="b-chip tab-forge rm-fade"
           :class="{ on: classFilter === c }"
           @click="classFilter = classFilter === c ? '' : c"
         >
@@ -184,13 +184,15 @@ async function remove(b) {
       </div>
     </div>
 
-    <p v-if="!loading && builds.length && !filtered.length" class="b-none">
-      No builds match that search.
-    </p>
+    <StatePanel
+      v-if="!loading && builds.length && !filtered.length"
+      kind="empty"
+      body="No builds match that search."
+    />
 
     <!-- Verified members' builds, first and badged -->
     <section v-if="groups.member.length" class="b-section">
-      <h2 class="b-section-title">Verified Members</h2>
+      <SectionTitle :count="groups.member.length">Verified Members</SectionTitle>
       <div class="b-grid">
         <BuildCard
           v-for="r in memberPaged.items"
@@ -208,7 +210,7 @@ async function remove(b) {
 
     <!-- Everyone else -->
     <section v-if="groups.other.length" class="b-section">
-      <h2 class="b-section-title">Community Builds</h2>
+      <SectionTitle :count="groups.other.length">Community Builds</SectionTitle>
       <div class="b-grid">
         <BuildCard
           v-for="r in otherPaged.items"
@@ -224,15 +226,15 @@ async function remove(b) {
     </section>
 
     <!-- Empty state -->
-    <div v-if="!loading && !loadError && !builds.length" class="b-empty panel-forge">
-      <div class="b-empty-mark" aria-hidden="true"><span /><span /><span /></div>
-      <h2 class="b-empty-title">No builds posted yet</h2>
-      <p class="b-empty-body">
-        Build a loadout in the Perk Builder, then hit Save to library in the Your Build
-        panel. Sign in with Discord to post — everyone sees it here.
-      </p>
-      <RouterLink to="/planner" class="btn-ember b-empty-cta">Open the Perk Builder</RouterLink>
-    </div>
+    <StatePanel
+      v-if="!loading && !loadError && !builds.length"
+      kind="empty"
+      class="b-empty"
+      title="No builds posted yet"
+      body="Build a loadout in the Perk Builder, then hit Save to library in the Your Build panel. Sign in with Discord to post — everyone sees it here."
+    >
+      <RouterLink to="/planner" class="btn-ember btn-md">Open the Perk Builder</RouterLink>
+    </StatePanel>
 
     <transition name="toast">
       <div v-if="toast" class="toast">{{ toast }}</div>
@@ -246,25 +248,16 @@ async function remove(b) {
   margin: 0 auto;
   padding: 4rem 1.5rem 2rem;
 }
-.b-title {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  font-weight: 700;
-  font-size: clamp(2.2rem, 7vw, 3.6rem);
-  color: var(--color-bone);
-  margin: 0.4rem 0 0.6rem;
-}
-.b-intro {
-  color: var(--color-smoke);
-  max-width: 58ch;
-  line-height: 1.6;
-}
 .ilink {
   color: var(--color-drake);
-  border-bottom: 1px solid rgba(89, 214, 108, 0.4);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-drake) 40%, transparent);
+}
+/* A state panel sits a beat below the header; the header carries no margin of its own. */
+.builds > .state-panel {
+  margin-top: 1.5rem;
 }
 
-/* search + filter */
+/* search + filter: the field and the chips are the shared controls; the page sets widths and gaps */
 .b-tools {
   margin: 2rem 0 1.4rem;
   display: flex;
@@ -274,69 +267,16 @@ async function remove(b) {
 .b-search {
   width: 100%;
   max-width: 28rem;
-  padding: 0.65rem 0.9rem;
-  background: rgba(14, 28, 22, 0.6);
-  border: 1px solid var(--color-ash);
-  border-radius: 3px;
-  color: var(--color-bone);
-  font-size: 0.92rem;
-}
-.b-search::placeholder {
-  color: var(--color-faint);
 }
 .b-filters {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
 }
-.b-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 0.76rem;
-  color: var(--color-smoke);
-  background: rgba(14, 28, 22, 0.5);
-  border: 1px solid var(--color-ash);
-  border-radius: 2px;
-  padding: 0.35rem 0.7rem;
-  cursor: pointer;
-  transition:
-    transform var(--dur-press) var(--ease-forge),
-    color var(--dur-state) var(--ease-forge),
-    background-color var(--dur-state) var(--ease-forge),
-    border-color var(--dur-state) var(--ease-forge);
-}
-@media (hover: hover) and (pointer: fine) {
-  .b-chip:hover {
-    color: var(--color-bone);
-    border-color: var(--color-ash-2);
-  }
-}
-.b-chip:active {
-  transform: scale(0.97);
-}
-.b-chip.on {
-  color: #1a0d06;
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
-  border-color: rgba(255, 176, 102, 0.6);
-}
 .b-chip-n {
   font-family: var(--font-mono);
-  font-size: max(0.66rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   opacity: 0.75;
-}
-.b-none {
-  color: var(--color-smoke);
-  padding: 1.5rem 0;
-}
-.b-error {
-  color: var(--color-ember);
-}
-.b-error p {
-  margin: 0 0 0.8rem;
 }
 
 /* sections + grid */
@@ -346,65 +286,10 @@ async function remove(b) {
 .b-section:first-of-type {
   margin-top: 0.5rem;
 }
-.b-section-title {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-  font-size: 1rem;
-  color: var(--color-smoke);
-  border-bottom: 1px solid var(--color-ash);
-  padding-bottom: 0.5rem;
-  margin-bottom: 1rem;
-}
 .b-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
   gap: 1rem;
-}
-
-/* empty */
-.b-empty {
-  margin-top: 0.5rem;
-  border-radius: 8px;
-  padding: 3rem 1.5rem;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.b-empty-mark {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1.4rem;
-}
-.b-empty-mark span {
-  width: 9px;
-  height: 9px;
-  transform: rotate(45deg);
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
-  box-shadow: 0 0 12px rgba(255, 106, 43, 0.6);
-  opacity: 0.5;
-}
-.b-empty-mark span:nth-child(2) {
-  opacity: 1;
-}
-.b-empty-title {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  font-weight: 700;
-  font-size: 1.5rem;
-  color: var(--color-bone);
-}
-.b-empty-body {
-  color: var(--color-smoke);
-  max-width: 44ch;
-  line-height: 1.6;
-  margin: 0.6rem 0 1.6rem;
-}
-.b-empty-cta {
-  padding: 0.85rem 1.5rem;
-  border-radius: 2px;
 }
 
 .toast {
@@ -413,12 +298,12 @@ async function remove(b) {
   left: 50%;
   transform: translateX(-50%);
   z-index: 80;
-  background: rgba(5, 10, 8, 0.92);
+  background: color-mix(in srgb, var(--color-obsidian) 92%, transparent);
   border: 1px solid var(--color-drake);
   color: var(--color-bone);
   padding: 0.6rem 1.1rem;
-  border-radius: 3px;
-  font-size: 0.85rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
 }
 .toast-enter-active {
   transition:

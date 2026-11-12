@@ -80,7 +80,7 @@ const slots = [
 .b-card {
   display: flex;
   flex-direction: column;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 1.3rem;
 }
 .b-card-top {
@@ -93,7 +93,7 @@ const slots = [
   font-family: var(--font-display);
   text-transform: uppercase;
   font-weight: 700;
-  font-size: 1.2rem;
+  font-size: var(--text-lg);
   color: var(--color-bone);
   line-height: 1.1;
 }
@@ -110,25 +110,25 @@ const slots = [
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.6rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-drake);
-  border: 1px solid rgba(89, 214, 108, 0.35);
-  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-drake) 35%, transparent);
+  border-radius: var(--radius-sm);
   padding: 2px 6px;
 }
 .b-stale {
   color: var(--color-ember);
-  border-color: rgba(255, 106, 43, 0.45);
+  border-color: color-mix(in srgb, var(--color-ember) 45%, transparent);
   white-space: nowrap;
 }
 .b-meta {
   color: var(--color-smoke);
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   margin: 0.35rem 0 0.6rem;
 }
 .b-author {
   color: var(--color-faint);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   font-style: italic;
   margin: -0.3rem 0 0.6rem;
   display: flex;
@@ -140,15 +140,15 @@ const slots = [
   font-style: normal;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: max(0.6rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-drake);
-  border: 1px solid rgba(89, 214, 108, 0.4);
-  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-drake) 40%, transparent);
+  border-radius: var(--radius-sm);
   padding: 1px 5px;
 }
 .b-notes {
-  color: #c3d0c6;
-  font-size: 0.85rem;
+  color: var(--color-pewter);
+  font-size: var(--text-sm);
   line-height: 1.5;
   margin-bottom: 0.8rem;
 }
@@ -161,25 +161,25 @@ const slots = [
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  border-bottom: 1px solid rgba(38, 55, 47, 0.5);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ash) 50%, transparent);
   padding-bottom: 0.3rem;
 }
 .b-load dt {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.62rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .b-load dd {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   color: var(--color-bone);
   text-align: right;
 }
 .b-weapon {
   color: var(--color-drake);
-  border-bottom: 1px solid rgba(89, 214, 108, 0.35);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-drake) 35%, transparent);
 }
 @media (hover: hover) and (pointer: fine) {
   .b-weapon:hover {
@@ -195,15 +195,15 @@ const slots = [
   align-content: flex-start;
 }
 .b-perk {
-  font-size: 0.72rem;
-  color: #c3d0c6;
-  background: rgba(255, 106, 43, 0.07);
-  border: 1px solid rgba(255, 106, 43, 0.22);
-  border-radius: 2px;
+  font-size: var(--text-xs);
+  color: var(--color-pewter);
+  background: color-mix(in srgb, var(--color-ember) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-ember) 22%, transparent);
+  border-radius: var(--radius-sm);
   padding: 0.2rem 0.5rem;
 }
 .b-perk-none {
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   color: var(--color-faint);
   font-style: italic;
 }

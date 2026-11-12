@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import WeaponSlot from './WeaponSlot.vue'
@@ -109,5 +112,15 @@ describe('WeaponSlot', () => {
 
     expect(await keyed('primary', 'Primary')).toBe('Bolt Rifle')
     expect(await keyed('secondary', 'Secondary')).toBe('Bolt Rifle (Secondary)')
+  })
+})
+
+describe('WeaponSlot styling', () => {
+  // jsdom replaces the global URL class, which fs rejects, so go through a plain path string.
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'WeaponSlot.vue'), 'utf8')
+
+  it('keeps raw colours and pixel corners out of the stylesheet', () => {
+    expect(source).not.toMatch(/#[0-9a-f]{3,8}[^0-9a-f]|rgba?[(]/i)
+    expect(source).not.toMatch(/border-radius:[ ]*[0-9]+px/)
   })
 })

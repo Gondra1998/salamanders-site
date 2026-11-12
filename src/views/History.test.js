@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import History from './History.vue'
@@ -169,6 +172,110 @@ describe('History.vue', () => {
     expect(wrapper.find('.hist-change').exists()).toBe(false)
     expect(wrapper.find('.hist-snap').exists()).toBe(true)
   })
+
+  it('opens with the shared page header', async () => {
+    const wrapper = await mountWith([])
+    const head = wrapper.find('header.page-head')
+    expect(head.find('.eyebrow').text()).toBe('The Forge')
+    expect(head.find('h1').text()).toBe('Version History')
+    expect(head.find('.page-lede').text()).toBe('Every perk correction, deleted build and privilege change. Nothing here is ever removed.')
+  })
+
+  it('sets the filters as the shared tab and lights the chosen one with .on', async () => {
+    const wrapper = await mountWith([])
+    const tabs = wrapper.findAll('.hist-filter')
+    expect(tabs.map((t) => t.text())).toEqual(['All', 'Perks', 'Builds', 'Privileges'])
+    for (const t of tabs) expect(t.classes()).toEqual(expect.arrayContaining(['tab-forge', 'rm-fade']))
+    expect(tabs[0].classes()).toContain('on')
+    await tabs[2].trigger('click')
+    expect(wrapper.findAll('.hist-filter')[2].classes()).toContain('on')
+    expect(wrapper.findAll('.hist-filter')[0].classes()).not.toContain('on')
+  })
+
+  it('sets the search box as the shared field', async () => {
+    const wrapper = await mountWith([])
+    expect(wrapper.find('input.hist-search').classes()).toContain('field-forge')
+  })
+
+  it('leads every entry with a stud, so the category colour is not a side border', async () => {
+    const wrapper = await mountWith([
+      correction(1, { op: 'add', perkName: 'A', description: 'd', before: null }),
+      { ...correction(2, { title: 'T', author: { username: 'a' } }), subject: 'build' },
+      { ...correction(3, { username: 'u', reason: 'r' }), subject: 'privilege', action: 'revoked' },
+    ])
+    const items = wrapper.findAll('.hist-item')
+    expect(items.map((i) => i.attributes('data-subject'))).toEqual(['perk_correction', 'build', 'privilege'])
+    for (const item of items) {
+      const first = item.find('.hist-line').element.firstElementChild
+      expect(first.classList.contains('stud')).toBe(true)
+      expect(first.classList.contains('hist-stud')).toBe(true)
+      expect(first.getAttribute('aria-hidden')).toBe('true')
+    }
+  })
+
+  it('says so in a state panel when there is nothing yet', async () => {
+    const wrapper = await mountWith([])
+    const panel = wrapper.find('.state-panel.is-empty.hist-empty')
+    expect(panel.exists()).toBe(true)
+    expect(panel.text()).toContain('Nothing yet.')
+  })
+
+  it('does not say "Nothing yet." while the first load is still in flight', async () => {
+    const { getHistory } = await import('../lib/perksApi')
+    getHistory.mockReset()
+    let resolve
+    getHistory.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    const wrapper = mount(History)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.loading).toBe(true)
+    expect(wrapper.find('.hist-empty').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Nothing yet.')
+
+    resolve({ events: [], revocations: [], next: null })
+    await new Promise((r) => setTimeout(r, 0))
+    await wrapper.vm.$nextTick()
+    const panel = wrapper.find('.state-panel.is-empty.hist-empty')
+    expect(panel.exists()).toBe(true)
+    expect(panel.text()).toContain('Nothing yet.')
+  })
+
+  it('shows a refusal in an alert state panel', async () => {
+    const { getHistory } = await import('../lib/perksApi')
+    getHistory.mockReset()
+    getHistory.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+    const wrapper = mount(History)
+    await new Promise((r) => setTimeout(r, 0))
+    await wrapper.vm.$nextTick()
+    const panel = wrapper.find('.state-panel.is-error.hist-error')
+    expect(panel.exists()).toBe(true)
+    expect(panel.attributes('role')).toBe('alert')
+    expect(panel.text()).toContain('Version History is restricted to the forge and Legion leadership.')
+    expect(wrapper.find('.hist-empty').exists()).toBe(false)
+  })
+})
+
+// The page-layer rules, read off the source: category colour in a stud (never a side border), tokens for
+// colour, size and radius, and no press squeeze on the list row.
+describe('History.vue styles', () => {
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'History.vue'), 'utf8')
+  const style = source.slice(source.indexOf('<style'))
+
+  it('has no side border, raw colour, literal radius or literal font size', () => {
+    expect(style).not.toMatch(/border-left/)
+    expect(style).not.toMatch(/#[0-9a-fA-F]{3,8}/)
+    expect(style).not.toMatch(/rgba?\(/)
+    expect(style).not.toMatch(/border-radius:\s*\d+px/)
+    expect(style).not.toMatch(/font-size:\s*[\d.]+rem/)
+  })
+
+  it('leaves the shared tab and buttons to style.css', () => {
+    expect(style).not.toMatch(/\.hist-filter/)
+    expect(style).not.toMatch(/\.hist button/)
+  })
+
+  it('gives the list row no press squeeze', () => {
+    expect(style).not.toMatch(/\.hist-line[^{]*:active/)
+  })
 })
 
 describe('History.vue when signed out', () => {
@@ -185,5 +292,14 @@ describe('History.vue when signed out', () => {
     await wrapper.find('.hist-empty button').trigger('click')
     expect(signIn).toHaveBeenCalledOnce()
     expect(wrapper.find('.hist-tools').exists()).toBe(false)
+  })
+
+  it('sets the sign-in prompt as a gate state panel', async () => {
+    const { useAuth } = await import('../stores/auth')
+    useAuth.mockReturnValueOnce({ token: null, signedIn: false, member: null, signIn: vi.fn() })
+    const wrapper = mount(History)
+    const panel = wrapper.find('.state-panel.is-gate.hist-empty')
+    expect(panel.exists()).toBe(true)
+    expect(panel.find('button').classes()).toEqual(expect.arrayContaining(['btn-ember', 'btn-md']))
   })
 })

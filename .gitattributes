@@ -1,0 +1,5 @@
+# Written by scripts/render-marks.mjs and compared byte for byte with its output by render-marks.test.mjs:
+# LF on every checkout, or a Windows clone (core.autocrlf) gets CRLF copies and the test fails there.
+public/favicon.svg text eol=lf
+public/og.svg text eol=lf
+public/site.webmanifest text eol=lf

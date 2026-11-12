@@ -145,14 +145,14 @@ function freshPlanner() {
   text-transform: uppercase;
   font-weight: 700;
   letter-spacing: 0.14em;
-  font-size: 1.05rem;
+  font-size: var(--text-base);
   color: var(--color-bone);
 }
 .brand-diamond {
   width: 12px;
   height: 12px;
   transform: rotate(45deg);
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
+  background: linear-gradient(180deg, var(--color-ember-light), var(--color-ember));
   box-shadow: 0 0 10px rgba(255, 106, 43, 0.6);
   flex: none;
 }
@@ -175,7 +175,7 @@ function freshPlanner() {
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   color: var(--color-smoke);
   padding: 0.5rem 0.7rem;
   border-radius: 2px;
@@ -205,7 +205,7 @@ function freshPlanner() {
 .nav-cta {
   padding: 0.5rem 1.1rem;
   border-radius: 2px;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .auth {
@@ -215,7 +215,7 @@ function freshPlanner() {
 }
 .auth-name {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
   max-width: 8rem;
   overflow: hidden;
@@ -226,7 +226,7 @@ function freshPlanner() {
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   font-weight: 700;
   color: var(--color-smoke);
   background: transparent;

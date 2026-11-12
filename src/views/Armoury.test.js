@@ -8,6 +8,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import Armoury from './Armoury.vue'
 import trees from '../data/weapon-trees.json'
+import { resolveWeapon } from '../lib/weapons'
+
+// Every call goes to the real resolver unless a test queues a different answer, so the loading and
+// failed states can be reached without touching the network.
+vi.mock('../lib/weapons', async (importOriginal) => {
+  const real = await importOriginal()
+  return { ...real, resolveWeapon: vi.fn(real.resolveWeapon) }
+})
 
 const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)', component: { render: () => null } }] })
 
@@ -28,6 +36,65 @@ async function open(tab, weaponText) {
 }
 
 const versionIndex = (weapon, name) => trees.weapons[weapon].versions.findIndex((v) => v.name === name)
+
+describe('Armoury page frame', () => {
+  it('opens with the shared page header', async () => {
+    const w = await open()
+    expect(w.find('header.page-head .eyebrow').text()).toBe('Wargear')
+    expect(w.find('header.page-head h1').text()).toBe('Weapon Armoury')
+    expect(w.find('header.page-head .page-lede').text()).toBe(
+      'Every weapon of the Chapter. Pick one to plan its perk tree. Trees ship with the site and are re-synced weekly.',
+    )
+  })
+
+  it('uses the shared tab and search field and keeps the tab roles', async () => {
+    const w = await open()
+    const tabs = w.findAll('.cat-tab')
+    expect(tabs.map((t) => t.classes('tab-forge'))).toEqual([true, true, true])
+    expect(tabs.map((t) => t.attributes('role'))).toEqual(['tab', 'tab', 'tab'])
+    expect(tabs.map((t) => t.attributes('aria-selected'))).toEqual(['true', 'false', 'false'])
+    expect(tabs[0].classes('on')).toBe(true)
+    expect(tabs[0].find('.cat-count').exists()).toBe(true)
+    expect(w.find('.w-search').classes()).toContain('field-forge')
+  })
+})
+
+describe('Armoury detail states', () => {
+  it('invites a pick with the prompt panel, without the hammer glyph', async () => {
+    const w = await open()
+    const prompt = w.find('.w-detail > .w-prompt')
+    expect(prompt.classes()).toEqual(expect.arrayContaining(['state-panel', 'surface', 'is-prompt']))
+    expect(prompt.text()).toBe('Select a weapon to plan its perk tree.')
+    expect(w.html()).not.toContain('⚒')
+  })
+
+  it('says it is syncing while the wiki answers', async () => {
+    resolveWeapon.mockImplementationOnce(() => new Promise(() => {}))
+    const w = await open('Melee', 'Chainsword')
+    const loading = w.find('.w-detail > .state-panel')
+    expect(loading.classes()).toContain('is-loading')
+    expect(loading.attributes('role')).toBe('status')
+    expect(loading.text()).toBe('Syncing Chainsword from the wiki…')
+  })
+
+  it('names the weapon in an error panel with both actions, and Retry loads it again', async () => {
+    resolveWeapon.mockResolvedValueOnce(null)
+    const w = await open('Melee', 'Chainsword')
+    const error = w.find('.w-detail > .w-error')
+    expect(error.classes()).toEqual(expect.arrayContaining(['state-panel', 'is-error']))
+    expect(error.attributes('role')).toBe('alert')
+    expect(error.find('h2').text()).toBe('Chainsword')
+    expect(error.text()).toContain('No perk tree for this weapon yet — the wiki page has no perk table.')
+    const actions = error.findAll('.state-actions > *').map((a) => a.text())
+    expect(actions).toEqual(['Retry', 'Open wiki ↗'])
+    expect(error.find('a').attributes('href')).toContain('Chainsword')
+
+    await error.find('button').trigger('click')
+    await flushPromises()
+    expect(w.find('.w-error').exists()).toBe(false)
+    expect(w.find('.w-hero-name').text()).toBe('Chainsword')
+  })
+})
 
 describe('Armoury melee list', () => {
   it('lists both Thunder Hammers by their in-game names', async () => {
@@ -119,6 +186,30 @@ describe('Armoury weapon with no perk tree', () => {
     const w = await open('Melee', 'Chainsword')
     expect(w.find('.w-pending').exists()).toBe(false)
     expect(w.findComponent({ name: 'WeaponTree' }).exists()).toBe(true)
+  })
+})
+
+describe('Armoury styling', () => {
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'Armoury.vue'), 'utf8')
+
+  it('steps the outer frame aside when the detail holds a state panel', () => {
+    const rule = (selector) => {
+      const start = source.indexOf(selector)
+      return start < 0 ? '' : source.slice(start, source.indexOf('}', start))
+    }
+    const outer = rule('.w-detail:has(> .state-panel) {')
+    expect(outer).toContain('border: 0;')
+    expect(outer).toContain('background: none;')
+    expect(outer).toContain('padding: 0;')
+    expect(outer).toContain('min-height: 0;')
+    const inner = rule('.w-detail > .state-panel {')
+    expect(inner).toContain('min-height: 14rem;')
+    expect(inner).toContain('justify-content: center;')
+  })
+
+  it('keeps raw colours and the retired state styles out of the stylesheet', () => {
+    expect(source).not.toMatch(/#[0-9a-f]{3,8}[^0-9a-f]|rgba?[(]/i)
+    expect(source).not.toMatch(/[.]w-prompt|[.]w-loading|[.]w-error|[.]spinner|[.]a-title|[.]a-intro/)
   })
 })
 

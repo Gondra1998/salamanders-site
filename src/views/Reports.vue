@@ -3,6 +3,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useAuth } from '../stores/auth'
 import * as api from '../lib/reportsApi'
 import { prefillUrl } from '../lib/reportPrefill'
+import PageHeader from '../components/PageHeader.vue'
+import StatePanel from '../components/StatePanel.vue'
 
 const auth = useAuth()
 const access = ref(null) // {reporter, reviewer, admin} once known
@@ -51,26 +53,20 @@ const fmt = (d) => new Date(d).toLocaleDateString()
 
 <template>
   <section class="reports">
-    <header>
-      <p class="eyebrow">Reclusiam</p>
-      <h1 class="r-title">File a Report</h1>
-      <p class="r-intro">
-        Report conduct that breaks the Chapter's code. A Reclusiarch reviews every report and either deals
-        with it or escalates it to High Command. You'll see its status below. Your name goes with the report.
-      </p>
-    </header>
+    <PageHeader
+      eyebrow="Reclusiam"
+      title="File a Report"
+      lede="Report conduct that breaks the Chapter's code. A Reclusiarch reviews every report and either deals with it or escalates it to High Command. You'll see its status below. Your name goes with the report."
+    />
 
-    <div v-if="!auth.signedIn || !auth.token" class="panel-forge r-gate">
-      <p>Sign in with Discord to file a report.</p>
-      <button class="btn-ember" @click="auth.signIn()">Sign in with Discord</button>
-    </div>
+    <StatePanel v-if="!auth.signedIn || !auth.token" kind="gate" class="r-gate" body="Sign in with Discord to file a report.">
+      <button type="button" class="btn-ember btn-md" @click="auth.signIn()">Sign in with Discord</button>
+    </StatePanel>
 
-    <p v-else-if="error" class="r-error" role="alert">{{ error }}</p>
-    <p v-else-if="!access" class="r-muted">Checking your roles…</p>
+    <StatePanel v-else-if="error" kind="error" class="r-error" :body="error" />
+    <StatePanel v-else-if="!access" kind="loading" class="r-loading" body="Checking your roles…" />
 
-    <div v-else-if="!access.reporter" class="panel-forge r-gate">
-      <p>Reports are open to XVIIIth Legion members.</p>
-    </div>
+    <StatePanel v-else-if="!access.reporter" kind="gate" class="r-gate" body="Reports are open to XVIIIth Legion members." />
 
     <template v-if="access?.reporter">
       <RouterLink v-if="access.reviewer || access.admin" to="/reports/review" class="ilink r-review-link">
@@ -81,13 +77,13 @@ const fmt = (d) => new Date(d).toLocaleDateString()
 
       <form class="panel-forge r-form" @submit.prevent="submit">
         <label>Member being reported <span class="req">*</span>
-          <input v-model="form.reportedMember" maxlength="200" required />
+          <input v-model="form.reportedMember" class="field-forge" maxlength="200" required />
         </label>
         <label>When did it happen?
-          <input v-model="form.incidentDate" type="date" />
+          <input v-model="form.incidentDate" class="field-forge" type="date" />
         </label>
         <label>Where did it happen? <span class="req">*</span>
-          <select v-model="form.medium" required>
+          <select v-model="form.medium" class="field-forge" required>
             <option value="" disabled>Choose…</option>
             <option value="text">Discord text channel</option>
             <option value="voice">Discord voice channel</option>
@@ -96,13 +92,13 @@ const fmt = (d) => new Date(d).toLocaleDateString()
           </select>
         </label>
         <label v-if="form.medium === 'other'">Where? <span class="req">*</span>
-          <input v-model="form.mediumOther" maxlength="200" required />
+          <input v-model="form.mediumOther" class="field-forge" maxlength="200" required />
         </label>
         <label>Anyone else present?
-          <input v-model="form.witnesses" maxlength="1000" placeholder="Names, if it was a private interaction" />
+          <input v-model="form.witnesses" class="field-forge" maxlength="1000" placeholder="Names, if it was a private interaction" />
         </label>
         <label>What happened? <span class="req">*</span>
-          <textarea v-model="form.description" rows="7" maxlength="4000" required />
+          <textarea v-model="form.description" class="field-forge" rows="7" maxlength="4000" required />
         </label>
 
         <label class="r-check">
@@ -110,14 +106,14 @@ const fmt = (d) => new Date(d).toLocaleDateString()
           This involves a Reclusiarch
         </label>
 
-        <div v-if="involvesReclusiarch" class="r-bypass">
+        <div v-if="involvesReclusiarch" class="r-bypass surface">
           <p>
             Reports involving a Reclusiarch go straight to High Command's official form. Nothing is saved here.
             The form opens pre-filled with what you've written; check it and submit it there.
           </p>
-          <a class="btn-ember" :href="officialLink" target="_blank" rel="noopener">Open the official form</a>
+          <a class="btn-ember btn-md" :href="officialLink" target="_blank" rel="noopener">Open the official form</a>
         </div>
-        <button v-else class="btn-ember" type="submit" :disabled="sending">
+        <button v-else class="btn-ember btn-md" type="submit" :disabled="sending">
           {{ sending ? 'Filing…' : 'File report' }}
         </button>
       </form>
@@ -142,20 +138,18 @@ const fmt = (d) => new Date(d).toLocaleDateString()
   margin: 0 auto;
   padding: 4rem 1.5rem 2rem;
 }
-.r-title {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  font-weight: 700;
-  font-size: clamp(2rem, 6vw, 3.2rem);
-  color: var(--color-bone);
-  margin: 0.4rem 0 0.6rem;
-}
-.r-intro,
 .r-muted {
   color: var(--color-smoke);
   line-height: 1.6;
 }
+
+/* A gate, the roles check and an error are StatePanels (the shared panel); the page only spaces them. */
 .r-gate,
+.r-loading,
+.r-error {
+  margin-top: 1.6rem;
+}
+
 .r-form {
   margin-top: 1.6rem;
   padding: 1.4rem;
@@ -170,39 +164,34 @@ const fmt = (d) => new Date(d).toLocaleDateString()
   gap: 0.35rem;
   width: 100%;
   color: var(--color-bone);
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
+/* The look is .field-forge (style.css); the form only sets the width. */
 .r-form input:not([type='checkbox']),
 .r-form select,
 .r-form textarea {
   width: 100%;
-  padding: 0.6rem 0.8rem;
-  background: rgba(14, 28, 22, 0.6);
-  border: 1px solid var(--color-ash);
-  border-radius: 3px;
-  color: var(--color-bone);
-  font: inherit;
 }
 .r-form label.r-check {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
+  min-height: var(--tap);
 }
 .req {
-  color: var(--color-ember, #e0643a);
+  color: var(--color-ember);
 }
+/* The one-line detour for a report about a Reclusiarch: a card on the form, edged in the warm colour. */
 .r-bypass {
-  border-left: 3px solid var(--color-ember, #e0643a);
-  padding-left: 1rem;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--color-ember) 45%, transparent);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.2rem;
   color: var(--color-smoke);
   line-height: 1.6;
 }
 .r-bypass p {
   margin: 0 0 0.8rem;
-}
-.r-error {
-  margin-top: 1.4rem;
-  color: #ff8f7a;
 }
 .r-sent {
   margin-top: 1.4rem;
@@ -210,7 +199,7 @@ const fmt = (d) => new Date(d).toLocaleDateString()
 }
 .ilink {
   color: var(--color-drake);
-  border-bottom: 1px solid rgba(89, 214, 108, 0.4);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-drake) 40%, transparent);
 }
 .r-review-link {
   display: inline-block;
@@ -220,7 +209,7 @@ const fmt = (d) => new Date(d).toLocaleDateString()
   font-family: var(--font-display);
   text-transform: uppercase;
   color: var(--color-bone);
-  font-size: 1.1rem;
+  font-size: var(--text-base);
   margin: 2.4rem 0 0.8rem;
 }
 .r-mine ul {
@@ -246,13 +235,13 @@ const fmt = (d) => new Date(d).toLocaleDateString()
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
 }
 .r-status[data-status='resolved'] {
   color: var(--color-drake);
 }
 .r-status[data-status='escalated'] {
-  color: var(--color-ember, #e0643a);
+  color: var(--color-ember);
 }
 </style>

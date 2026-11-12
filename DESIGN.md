@@ -10,12 +10,15 @@ colors:
   ash: "#26372f"
   ash-2: "#3a5246"
   bone: "#e8efe9"
+  pewter: "#c3d0c6"
   smoke: "#96a59c"
   faint: "#7a8a81"
   drake: "#59d66c"
   drake-deep: "#173c23"
   ember: "#ff6a2b"
   magma: "#e0431d"
+  ember-light: "#ffb066"
+  ember-ink: "#1a0d06"
   gold: "#dfb85b"
   averland: "#fdb825"
   whitehot: "#f2d27a"
@@ -52,6 +55,39 @@ typography:
     fontSize: "0.72rem"
     fontWeight: 400
     letterSpacing: "0.32em"
+  small:
+    fontFamily: "system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "0.82rem"
+    fontWeight: 400
+  meta:
+    fontFamily: "system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "0.9rem"
+    fontWeight: 400
+  card-title:
+    fontFamily: "'Oswald Variable', Bahnschrift, 'DIN Condensed', Oswald, 'Arial Narrow', system-ui, sans-serif"
+    fontSize: "1.25rem"
+    fontWeight: 700
+    letterSpacing: "0.02em"
+  subhead:
+    fontFamily: "'Oswald Variable', Bahnschrift, 'DIN Condensed', Oswald, 'Arial Narrow', system-ui, sans-serif"
+    fontSize: "1.5rem"
+    fontWeight: 700
+    letterSpacing: "0.02em"
+  section:
+    fontFamily: "'Oswald Variable', Bahnschrift, 'DIN Condensed', Oswald, 'Arial Narrow', system-ui, sans-serif"
+    fontSize: "clamp(1.8rem, 5vw, 2.8rem)"
+    fontWeight: 700
+  wordmark:
+    fontFamily: "'Oswald Variable', Bahnschrift, 'DIN Condensed', Oswald, 'Arial Narrow', system-ui, sans-serif"
+    fontSize: "clamp(2.5rem, 12.5vw, 9.5rem)"
+    fontWeight: 700
+    lineHeight: 0.95
+    letterSpacing: "0.02em"
+  tagline:
+    fontFamily: "system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "clamp(1rem, 2.4vw, 1.3rem)"
+    fontWeight: 400
+    lineHeight: 1.5
   dw-title:
     fontFamily: "'Cinzel Variable', Cinzel, Georgia, serif"
     fontSize: "clamp(2rem, 8vw, 3.4rem)"
@@ -69,7 +105,7 @@ spacing:
 components:
   button-ember:
     backgroundColor: "{colors.ember}"
-    textColor: "#1a0d06"
+    textColor: "{colors.ember-ink}"
     typography: "{typography.display}"
     rounded: "{rounded.sm}"
     padding: "0.7rem 1.4rem"
@@ -148,17 +184,21 @@ A near-black green ground with grey-green armour, one living green, and a furnac
 ### Secondary
 - **Ember** (#ff6a2b) and **Magma** (#e0431d): the molten core. Ember is the primary call to action (a vertical
   ember-to-magma gradient with a glow); magma is its shadow and the lava. Never used for body text or large fills.
+- **Ember Light** (#ffb066) and **Ember Ink** (#1a0d06): the gradient's hot top, which also lights the selected tab
+  and warms the button's border, and the near-black ink that every label on ember is set in.
 
 ### Tertiary
 - **Gold** (#dfb85b), **Averland** (#fdb825) and **Whitehot** (#f2d27a): honours and record. Averland is the
-  Legion Archive's brass plaque; whitehot is the hot end of the rank heat ramp; gold is rules and edges.
+  Legion Archive's brass plaque; whitehot is the hot end of the rank heat ramp and the heart of the ForgeMark's heated
+  bar; gold is rules and edges.
 - **Cobalt** (#6cc4ef) and **Violet** (#bb82e0): the weapon tree's two branches. **Vacant** (#ff9a7a): a post nobody holds.
 
 ### Neutral
 - **Obsidian** (#050a08): the page ground. **Pitch** (#07110d): the end of the ground gradient.
 - **Basalt** (#0b1511), **Basalt 2** (#0e1c16, the panel colour) and **Basalt 3** (#111b18): layered surfaces.
 - **Ash** (#26372f) and **Ash 2** (#3a5246): borders and dividers.
-- **Bone** (#e8efe9): text. **Smoke** (#96a59c): secondary text. **Faint** (#7a8a81): the quietest text that still
+- **Bone** (#e8efe9): text. **Pewter** (#c3d0c6): reading text on a panel, between bone and smoke: ledes, card
+  body, the long prose. **Smoke** (#96a59c): secondary text. **Faint** (#7a8a81): the quietest text that still
   reaches 4.5:1, for placeholders, empty states and hints.
 
 ### Deathwatch (`dw-*`)
@@ -193,6 +233,25 @@ labels, like stamped plates on armour. Fonts are self-hosted: no third-party fon
 - **Label** (400, 0.72rem, 0.32em, uppercase mono): eyebrows above titles and small data labels.
 - **Deathwatch title** (700, `clamp(2rem, 8vw, 3.4rem)`, 1.05, Cinzel): area titles and card titles in the Deathwatch area only.
 
+### Type ramp
+Eight stops, written once in `src/style.css` under Tailwind's own `--text-*` names so the utilities follow. A
+component names the stop, never the number.
+
+- **`--text-xs`** (0.72rem): label and mono, the eyebrow and small data labels.
+- **`--text-sm`** (0.82rem): meta, and the text of small controls (`.btn-sm`, `.tab-forge`).
+- **`--text-md`** (0.9rem): card body, and ledes inside a card.
+- **`--text-base`** (1rem): reading text.
+- **`--text-lg`** (1.25rem): card titles, in display caps.
+- **`--text-xl`** (1.5rem): subheads, such as the class hero, a company's title on /companies and the title of an
+  empty or error state.
+- **`--text-2xl`** (`clamp(1.8rem, 5vw, 2.8rem)`): the display h2 that opens a section.
+- **`--text-display`** (`clamp(2.2rem, 7vw, 3.6rem)`): the page title.
+
+Two sizes are authored, not stops, and stay on the one page that sets them: the hero **wordmark**
+(`clamp(2.5rem, 12.5vw, 9.5rem)`, capped so eleven glyphs and their tracking fit the hero at every width) and the
+**tagline** under it (`clamp(1rem, 2.4vw, 1.3rem)`, in the body face). The frontmatter lists them as roles; no
+token carries them.
+
 ### Named Rules
 **The Forged Caps Rule.** Display type is uppercase and condensed. A title in sentence case is a bug.
 
@@ -223,27 +282,46 @@ There are no drop shadows on content.
 
 ## Shapes
 
-Hard-edged. Corners are 2px on controls and 3px on panels and fields; 6-8px appears only on larger blocks; chips are
-pills (999px); the Deathwatch bottom sheet rounds only its top corners (14px). Borders are one pixel, in ash.
+Hard-edged. Corners are tokens: `--radius-sm` (2px) on controls, `--radius-md` (3px) on panels, fields and cards,
+`--radius-lg` (8px) only on larger blocks (the weapon tree's scroll, the weapon detail), `--radius-pill` (999px) on
+chips. The Deathwatch bottom sheet rounds only its top corners (14px). Borders are one pixel, in ash.
+
+### Named Rules
+**The Stud Rule.** Category or emphasis colour sits in a 6px square turned 45° before the label (the stud already used by CompanyArticle's list bullets), or in the label's own colour. Never in a side border above 1px. Applies to StaleNotice, CompanyArticle `.block-h`, RosterBranch `.rs-title`, WeaponTree branches, History items, Planner `.perk-author`, `.pp-why`, `.pr-card`, Reports `.r-bypass`. Leaves alone: the Archive blockquote (fidelity), 1px dividers.
+
+The shared class is `.stud` in `src/style.css`: it takes the colour of the text beside it.
+
+**The one exception:** the error state's stud (StatePanel) is 8px, not 6px. It is the only warm mark on an error panel
+and stands alone above the title, so it needs the extra size to read.
 
 ## Components
 
 ### Buttons
 - **Shape:** nearly square (2px).
-- **Primary (ember):** a vertical ember-to-magma gradient with a dark label (#1a0d06) in uppercase display type, a
-  one-pixel warm border, and a glow. Padding about 0.7rem 1.4rem, and at least 44px tall on a phone.
+- **Primary (ember):** a vertical ember-to-magma gradient (Ember Light at the top) with a dark label (Ember Ink,
+  #1a0d06) in uppercase display type, a one-pixel warm border, and a glow. Padding about 0.7rem 1.4rem, and at
+  least 44px tall on a phone.
 - **Secondary (drake):** a faint drake tint with a drake outline and drake uppercase label.
 - **Quiet (ghost, `.btn-ghost`):** the second action beside an ember or drake one: transparent fill, a one-pixel ash
   border, a smoke label that turns bone on hover, in the same uppercase display type.
+- **Full size (`.btn-md`):** the shape every page's primary action uses, with any of the three above: 0.7rem 1.4rem
+  padding, 2px corners, and a minimum height of `--tap`.
 - **Small (`.btn-sm`):** the shared small size for buttons set in a row or a card, used with any of the three above
-  (0.5rem 0.85rem padding, 2px corners, 0.78rem type). Its minimum height is `--tap`: its own size on desktop, 44px
+  (0.5rem 0.85rem padding, 2px corners, `--text-sm` type). Its minimum height is `--tap`: its own size on desktop, 44px
   on a phone.
+- **Disabled:** an ember, drake or ghost button that cannot be pressed drops to 55% opacity with a `not-allowed`
+  cursor, and its hover rules are `:hover:not(:disabled)`, so it never lifts or brightens under a pointer.
 - **Tap targets:** every tap target is at least `--tap` (44px) on touch screens and phones.
 - **Press:** `scale(0.97)` on every pressable thing, at `--dur-press` (120ms). **Hover:** only inside
   `@media (hover: hover) and (pointer: fine)`. See Motion.
 
-### Chips
-- **Style:** pill (999px), one-pixel ash border, smoke text on a dark backing (`rgba(5, 10, 8, 0.6)`) so it
+### Tabs and chips
+- **Tab (`.tab-forge`):** the one segmented control: the Planner's class tabs, the Armoury's categories, the Builds
+  class chips. Uppercase display type at `--text-sm`, smoke on a half-clear basalt, a one-pixel ash border, 2px
+  corners, at least `--tap` tall. It squeezes when pressed and its text turns bone on hover (pointer devices only).
+  **On** (`.tab-forge.on`) is the ember gradient, Ember Light to Ember, with Ember Ink text and a warm border. A page
+  does not draw its own tab.
+- **Chip:** pill (999px), one-pixel ash border, smoke text on a dark backing (`rgba(5, 10, 8, 0.6)`) so it
   stays readable where it crosses the lava; the border turns drake on hover.
 
 ### Panels
@@ -253,6 +331,29 @@ pills (999px); the Deathwatch bottom sheet rounds only its top corners (14px). B
 ### Inputs / Fields
 - **Style:** `rgba(14, 28, 22, 0.6)` fill, one-pixel ash border, 3px corners, bone text. On a touch screen every
   field is 16px so the page never zooms. **Focus:** a 2px drake outline, offset 2px.
+- **Search field (`.field-forge`):** the one text field for Builds, the Armoury, Companies and History: the fill and
+  border above, 0.6rem 0.9rem padding, its parent's type (`font: inherit`), faint placeholder, at least `--tap` tall.
+  A page sets its width, never its look.
+
+### Page frame
+Every page on the main site is built from the same few parts, so no view draws its own header, section title or
+empty state.
+- **PageHeader:** the page's one h1 in display caps at `--text-display`. An eyebrow appears only where it states a
+  fact (a department, who may enter), never as decoration. The lede is `.page-lede`, pewter at 52 characters, and the
+  default slot after it holds the page's controls. `.page-lede` is global, so a view can put a link in that slot.
+- **SectionTitle:** the h2 strip for a section inside a page (`as` makes it an h3): display caps at `--text-base`,
+  0.08em tracking, smoke, with a one-pixel ash rule under the whole row. The optional count is mono at `--text-xs` in
+  pewter, and is read aloud after a hidden comma ("Verified Members, 2"). The `aside` slot holds a control on the
+  right, above the rule.
+- **StatePanel:** one panel for the five things a page can have nothing else to show (`kind`: empty, error, gate,
+  loading, prompt): a `.surface` with 3px corners, centred, a title in display caps at `--text-xl`, a body in smoke at
+  44 characters, actions in the default slot. Its mark depends on the kind: empty and prompt show a muted ForgeMark,
+  loading the spinner, error an 8px ember stud (the Stud Rule's one exception); a gate shows no mark and reads from the
+  left, since it may carry a form. An error is `role="alert"`, a loading panel `role="status"`.
+- **ForgeMark:** the divider and the empty-state mark: a heated bar, hidden from assistive tech and never animated. One
+  pixel tall, 160px wide (96px at `sm`), cold at both ends and hot in the middle: transparent to Ash 2 to Ember to
+  Whitehot, and back, with a soft fixed glow at the hot spot only. Cold armour, molten core. `muted` cools it for
+  empty states: no glow, and a dimmer ember heart in place of the white-hot one.
 
 ### Navigation
 - **Style:** sticky, translucent obsidian glass with a 10px blur and an ash bottom border; the brand is spaced
@@ -353,8 +454,8 @@ two ways:
 - Put `class="rm-fade"` on an element whose animation or transition is opacity or colour only.
 - Add a selector to the allowlist rules in `src/style.css`.
 
-The allowlist gives `.rm-fade`, `.btn-ember`, `.btn-drake`, `.btn-ghost` and `.btn-sm` a `--dur-state` transition
-on `opacity`, `color`, `background-color`, `border-color`, `box-shadow` and `outline-color` only. A second rule,
+The allowlist gives `.rm-fade`, `.tab-forge`, `.btn-ember`, `.btn-drake`, `.btn-ghost` and `.btn-sm` a `--dur-state`
+transition on `opacity`, `color`, `background-color`, `border-color`, `box-shadow` and `outline-color` only. A second rule,
 `.rm-fade, main > *`, gives `.rm-fade` and the route fade's `main > *` a `--dur-state` animation duration. No
 transform, translate or scale is ever on the allowlist. A component may still switch a transform-bearing animation
 off with `animation: none` or `transition: none`; the blanket does not touch the name.

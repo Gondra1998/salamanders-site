@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
@@ -37,11 +40,12 @@ function aBuild(title, member) {
 const signedOutList = () => [aBuild('Alpha'), aBuild('Beta'), aBuild('Gamma')]
 const signedInList = () => [aBuild('Alpha', true), aBuild('Beta', false), aBuild('Gamma', true)]
 
-const headings = (w) => w.findAll('.b-section-title').map((h) => h.text())
+// The heading text itself: SectionTitle puts the count in a second span beside it.
+const headings = (w) => w.findAll('.section-title-text').map((h) => h.text())
 const titlesIn = (w, heading) =>
   w
     .findAll('.b-section')
-    .find((s) => s.find('.b-section-title').text() === heading)
+    .find((s) => s.find('.section-title-text').text() === heading)
     .findAll('.b-name')
     .map((n) => n.text())
 
@@ -278,5 +282,116 @@ describe('Builds while the list reloads after a sign-out', () => {
     expect(w.findAll('.b-name')).toHaveLength(0)
     expect(w.find('.b-member-badge').exists()).toBe(false)
     expect(w.text()).not.toContain('Verified Members')
+  })
+})
+
+describe('Builds page frame', () => {
+  it('opens with the shared page header and a lede that links to the Perk Builder', async () => {
+    buildsApi.listBuilds.mockResolvedValue(signedOutList())
+    const w = await open()
+    const head = w.find('header.page-head')
+    expect(head.find('.eyebrow').text()).toBe('Field-tested')
+    expect(head.find('h1').text()).toBe('Recommended Builds')
+    const lede = head.find('p.page-lede')
+    expect(lede.text()).toContain('Builds the Chapter has posted.')
+    expect(lede.find('a').attributes('href')).toBe('/planner')
+    expect(lede.find('a').text()).toBe('Perk Builder')
+  })
+
+  it('counts the builds in each section heading', async () => {
+    signInAs()
+    buildsApi.listBuilds.mockResolvedValue(signedInList())
+    const w = await open()
+    expect(w.findAll('.section-title-count').map((c) => c.text())).toEqual(['2', '1'])
+  })
+
+  it('draws the search field and the class chips from the shared controls', async () => {
+    buildsApi.listBuilds.mockResolvedValue(signedOutList())
+    const w = await open()
+    expect(w.find('input.b-search').classes()).toContain('field-forge')
+    const chips = w.findAll('.b-chip')
+    expect(chips.map((c) => c.text())).toEqual(['All 3', 'Tactical 3'])
+    for (const chip of chips) expect(chip.classes()).toEqual(expect.arrayContaining(['tab-forge', 'rm-fade']))
+    expect(chips.map((c) => c.classes('on'))).toEqual([true, false])
+
+    await chips[1].trigger('click')
+    expect(w.findAll('.b-chip').map((c) => c.classes('on'))).toEqual([false, true])
+    await chips[1].trigger('click')
+    expect(w.findAll('.b-chip').map((c) => c.classes('on'))).toEqual([true, false])
+  })
+})
+
+describe('Builds states are the shared state panel', () => {
+  it('loading: a status panel with the spinner and the loading copy', async () => {
+    buildsApi.listBuilds.mockReturnValue(new Promise(() => {}))
+    const w = await open()
+    const panel = w.find('.state-panel.is-loading')
+    expect(panel.exists()).toBe(true)
+    expect(panel.attributes('role')).toBe('status')
+    expect(panel.text()).toBe('Loading builds…')
+  })
+
+  it('load error: an alert panel that keeps b-error, with Retry in its action row', async () => {
+    buildsApi.listBuilds.mockRejectedValue(new TypeError('Failed to fetch'))
+    const w = await open()
+    const panel = w.find('.state-panel.is-error')
+    expect(panel.classes()).toContain('b-error')
+    expect(panel.attributes('role')).toBe('alert')
+    expect(panel.find('.state-body').text()).toBe('The builds server did not answer. Check your connection, then retry.')
+    expect(panel.find('.state-actions button').text()).toBe('Retry')
+  })
+
+  it('no match: an empty panel with the no-match copy, and no sections', async () => {
+    buildsApi.listBuilds.mockResolvedValue(signedOutList())
+    const w = await open()
+    await w.find('input.b-search').setValue('zzzz nothing')
+    const panel = w.find('.state-panel.is-empty')
+    expect(panel.exists()).toBe(true)
+    expect(panel.text()).toBe('No builds match that search.')
+    expect(panel.classes()).not.toContain('b-empty')
+    expect(w.findAll('.b-section')).toHaveLength(0)
+  })
+
+  it('no builds yet: an empty panel that keeps b-empty, with the title, the body and the ember link', async () => {
+    buildsApi.listBuilds.mockResolvedValue([])
+    const w = await open()
+    const panel = w.find('.state-panel.is-empty')
+    expect(panel.classes()).toContain('b-empty')
+    expect(panel.find('h2').text()).toBe('No builds posted yet')
+    expect(panel.find('.state-body').text()).toBe(
+      'Build a loadout in the Perk Builder, then hit Save to library in the Your Build panel. Sign in with Discord to post — everyone sees it here.',
+    )
+    const cta = panel.find('.state-actions a')
+    expect(cta.text()).toBe('Open the Perk Builder')
+    expect(cta.attributes('href')).toBe('/planner')
+    expect(cta.classes()).toContain('btn-ember')
+    // The page's one primary action keeps the full ember size, not the small row size.
+    expect(cta.classes()).not.toContain('btn-sm')
+  })
+
+  it('a loaded list shows no state panel', async () => {
+    buildsApi.listBuilds.mockResolvedValue(signedOutList())
+    const w = await open()
+    expect(w.find('.state-panel').exists()).toBe(false)
+  })
+})
+
+// The page speaks the tokens: no raw hex, rgba, pixel radius or rem font size where a token exists.
+describe('Builds styles use the tokens', () => {
+  const styleOf = (file) =>
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), file), 'utf8').match(/<style[^>]*>([\s\S]*)<\/style>/)[1]
+  const offToken = (css) =>
+    [...css.matchAll(/#[0-9a-f]{3,8}\b|rgba?\(|border-radius:[^;]*\dpx|font-size:[^;]*\d(\.\d+)?rem/gi)].map((m) => m[0])
+
+  it.each(['./Builds.vue', '../components/BuildsPager.vue'])('%s', (file) => {
+    expect(offToken(styleOf(file))).toEqual([])
+  })
+
+  it('leaves the rules the shared controls now carry out of the page', () => {
+    const css = styleOf('./Builds.vue')
+    for (const gone of ['.b-head', '.b-title', '.b-intro', '.b-none', '.b-section-title', '.b-empty-', '.b-error']) {
+      expect(css, gone).not.toContain(gone)
+    }
+    expect(css).not.toMatch(/\.b-chip\s*\{/)
   })
 })

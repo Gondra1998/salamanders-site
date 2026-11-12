@@ -60,7 +60,7 @@ function initials(name) {
 
     <div class="company-body">
       <section v-for="(s, i) in sections" :key="i" class="block surface">
-        <h3 class="block-h">{{ s.h }}</h3>
+        <h3 class="block-h"><span class="stud" aria-hidden="true" />{{ s.h }}</h3>
 
         <template v-if="s.p">
           <p v-for="(para, j) in s.p" :key="j" class="block-p">{{ para }}</p>
@@ -119,24 +119,28 @@ function initials(name) {
   height: 3.2rem;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.3rem;
+  font-size: var(--text-lg);
   color: var(--color-gold);
-  background: linear-gradient(180deg, rgba(223, 184, 91, 0.14), rgba(223, 184, 91, 0.03));
-  border: 1px solid rgba(223, 184, 91, 0.35);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-gold) 14%, transparent),
+    color-mix(in srgb, var(--color-gold) 3%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--color-gold) 35%, transparent);
   clip-path: polygon(15% 0, 85% 0, 100% 50%, 85% 100%, 15% 100%, 0 50%);
 }
 .company-title {
   font-family: var(--font-display);
   text-transform: uppercase;
   font-weight: 700;
-  font-size: clamp(1.4rem, 4vw, 2rem);
+  font-size: var(--text-xl);
   letter-spacing: 0.01em;
   color: var(--color-bone);
   line-height: 1.05;
 }
 .company-sub {
   color: var(--color-drake);
-  font-size: 0.92rem;
+  font-size: var(--text-md);
   margin-top: 0.3rem;
 }
 /* the way back up to the chip row: quiet, but a full-size touch target */
@@ -149,7 +153,7 @@ function initials(name) {
   border: 0;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--color-smoke);
@@ -179,7 +183,7 @@ function initials(name) {
 @media (max-width: 760px) {
   .block {
     padding: 1rem 1.1rem;
-    border-radius: 3px;
+    border-radius: var(--radius-md);
   }
 }
 @media (min-width: 761px) {
@@ -194,17 +198,24 @@ function initials(name) {
   }
 }
 .block-h {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.16em;
-  font-size: 0.74rem;
+  font-size: var(--text-xs);
   color: var(--color-gold);
   margin-bottom: 0.6rem;
-  padding-left: 0.9rem;
-  border-left: 2px solid var(--color-ember);
+}
+/* The Stud Rule: the ember sits in a stud before the label, not in a side border. A heading that wraps keeps
+   the stud on its first line. */
+.block-h .stud {
+  color: var(--color-ember);
+  margin-top: calc((1lh - 6px) / 2);
 }
 .block-p {
-  color: #c3d0c6;
+  color: var(--color-pewter);
   line-height: 1.65;
   margin-bottom: 0.7rem;
   max-width: 62ch;
@@ -219,7 +230,7 @@ function initials(name) {
   position: relative;
   padding-left: 1.3rem;
   margin-bottom: 0.5rem;
-  color: #c3d0c6;
+  color: var(--color-pewter);
   line-height: 1.55;
 }
 .block-list li::before {
@@ -260,7 +271,7 @@ function initials(name) {
   flex-direction: column;
   gap: 0.6rem;
   padding: 1.15rem 1.25rem;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 .member-head {
   display: flex;
@@ -277,19 +288,19 @@ function initials(name) {
   border-radius: 50%;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 0.9rem;
-  color: #1a0d06;
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
+  font-size: var(--text-md);
+  color: var(--color-ember-ink);
+  background: linear-gradient(180deg, var(--color-ember-light), var(--color-ember));
 }
 .member-name {
   font-weight: 600;
   color: var(--color-bone);
-  font-size: 0.95rem;
+  font-size: var(--text-md);
   line-height: 1.3;
 }
 .member-blurb {
   color: var(--color-smoke);
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   line-height: 1.6;
   max-width: 65ch;
 }
@@ -298,7 +309,7 @@ function initials(name) {
   .sigil {
     width: 2.6rem;
     height: 2.6rem;
-    font-size: 1.1rem;
+    font-size: var(--text-base);
   }
 }
 </style>

@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import BuildCard from './BuildCard.vue'
@@ -67,5 +70,20 @@ describe('BuildCard pre-15.0 chip', () => {
 
   it('does not flag another class holding the same names', () => {
     expect(chip({ className: 'Vanguard', perks: at7('Signal Jammer') }).exists()).toBe(false)
+  })
+})
+
+// The card speaks the tokens: no raw hex, rgba, pixel radius or rem font size where a token exists.
+describe('BuildCard styles use the tokens', () => {
+  const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'BuildCard.vue'), 'utf8').match(/<style[^>]*>([\s\S]*)<\/style>/)[1]
+
+  it('has no raw colour, pixel radius or rem font size', () => {
+    const off = [...css.matchAll(/#[0-9a-f]{3,8}\b|rgba?\(|border-radius:[^;]*\dpx|font-size:[^;]*\d(\.\d+)?rem/gi)].map((m) => m[0])
+    expect(off).toEqual([])
+  })
+
+  it('rounds to the medium corner and reads in pewter', () => {
+    expect(css).toMatch(/\.b-card\s*\{[^}]*border-radius:\s*var\(--radius-md\)/)
+    expect(css.match(/var\(--color-pewter\)/g)).toHaveLength(2)
   })
 })

@@ -101,8 +101,8 @@ const wikiUrl = computed(() => WIKI + encodeURIComponent(weapon.value))
 <style scoped>
 .slot {
   border: 1px solid var(--color-ash);
-  border-radius: 6px;
-  background: rgba(7, 17, 13, 0.45);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-pitch) 45%, transparent);
 }
 .slot + .slot {
   margin-top: 0.5rem;
@@ -123,18 +123,18 @@ const wikiUrl = computed(() => WIKI + encodeURIComponent(weapon.value))
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  font-size: max(0.58rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .slot-select {
   flex: 1 1 12rem;
   min-width: 0;
-  background: rgba(5, 10, 8, 0.7);
+  background: color-mix(in srgb, var(--color-obsidian) 70%, transparent);
   border: 1px solid var(--color-ash);
   color: var(--color-bone);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.45rem 0.5rem;
-  font-size: 0.88rem;
+  font-size: var(--text-md);
   min-height: var(--tap);
 }
 .slot-select:disabled {
@@ -146,20 +146,21 @@ const wikiUrl = computed(() => WIKI + encodeURIComponent(weapon.value))
 .slot-pts {
   flex: none;
   font-family: var(--font-mono);
-  font-size: max(0.62rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--color-smoke);
   border: 1px solid var(--color-ash);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 2px 6px;
 }
 .slot-pts.spent {
   color: var(--color-ember);
-  border-color: rgba(255, 106, 43, 0.45);
+  border-color: color-mix(in srgb, var(--color-ember) 45%, transparent);
 }
 .slot-toggle {
   flex: none;
+  min-height: var(--tap);
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -167,18 +168,18 @@ const wikiUrl = computed(() => WIKI + encodeURIComponent(weapon.value))
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-drake);
-  background: rgba(89, 214, 108, 0.06);
-  border: 1px solid rgba(89, 214, 108, 0.4);
-  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-drake) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-drake) 40%, transparent);
+  border-radius: var(--radius-sm);
   padding: 0.4rem 0.7rem;
   cursor: pointer;
   transition: transform var(--dur-press) var(--ease-forge);
 }
 @media (hover: hover) and (pointer: fine) {
   .slot-toggle:hover {
-    background: rgba(89, 214, 108, 0.12);
+    background: color-mix(in srgb, var(--color-drake) 12%, transparent);
   }
 }
 .slot-toggle:active {
@@ -201,7 +202,7 @@ const wikiUrl = computed(() => WIKI + encodeURIComponent(weapon.value))
   align-items: center;
   gap: 0.6rem;
   color: var(--color-smoke);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   padding: 1rem 0;
 }
 .slot-msg-error {
@@ -213,9 +214,9 @@ const wikiUrl = computed(() => WIKI + encodeURIComponent(weapon.value))
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   color: var(--color-drake);
-  border-bottom: 1px solid rgba(89, 214, 108, 0.4);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-drake) 40%, transparent);
 }
 .spinner {
   width: 15px;

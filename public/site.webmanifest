@@ -1,0 +1,22 @@
+{
+  "name": "Salamanders",
+  "short_name": "Salamanders",
+  "description": "Into the fires of battle, unto the anvil of war.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#050a08",
+  "background_color": "#050a08",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

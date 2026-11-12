@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import WeaponTree from './WeaponTree.vue'
@@ -323,5 +326,48 @@ describe('WeaponTree stateKey', () => {
       await w.findAll('.wnode')[1].trigger('mouseenter')
       expect(w.find('.wdetail-desc').text()).toBe('fixed')
     }
+  })
+})
+
+describe('WeaponTree perk detail', () => {
+  // jsdom replaces the global URL class, which fs rejects, so go through a plain path string.
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'WeaponTree.vue'), 'utf8')
+
+  it('puts the quality in a stud before its label', async () => {
+    const w = mount(WeaponTree, { props: { weapon: 'Test', data } })
+    await node(w, 'A').trigger('click')
+    expect(w.get('.wdetail').attributes('data-q')).toBe('standard')
+    const first = w.get('.wdetail-top').element.firstElementChild
+    expect(first.classList.contains('stud')).toBe(true)
+    expect(first.classList.contains('wdetail-stud')).toBe(true)
+    expect(first.getAttribute('aria-hidden')).toBe('true')
+    expect(first.nextElementSibling.textContent).toBe('Standard')
+  })
+
+  it('gives the add-a-perk panel the same stud', async () => {
+    const w = editorTree()
+    await w.get('.wtier-add').trigger('click')
+    const first = w.get('.wdetail-top').element.firstElementChild
+    expect(first.classList.contains('wdetail-stud')).toBe(true)
+    expect(first.nextElementSibling.textContent).toBe('Standard')
+  })
+
+  // The first rule that starts with the selector, up to its closing brace.
+  const rule = (selector) => {
+    const start = source.indexOf(selector)
+    return start < 0 ? '' : source.slice(start, source.indexOf('}', start))
+  }
+
+  it('carries the quality colour in the stud and leaves the label pewter', () => {
+    const studs = { standard: 'smoke', 'master-crafted': 'drake', artificer: 'cobalt', relic: 'violet', heroic: 'gold' }
+    for (const [quality, colour] of Object.entries(studs)) {
+      expect(rule(`.wdetail[data-q='${quality}'] .wdetail-stud {`), quality).toContain(`color: var(--color-${colour});`)
+    }
+    expect(rule('.wdetail-q {')).toContain('color: var(--color-pewter);')
+  })
+
+  it('keeps side borders and raw colours out of the stylesheet', () => {
+    expect(source).not.toMatch(/border-left/)
+    expect(source).not.toMatch(/#[0-9a-f]{3,8}[^0-9a-f]|rgba?[(]/i)
   })
 })

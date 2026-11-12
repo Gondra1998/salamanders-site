@@ -29,7 +29,9 @@ export function createCompanyNotablesStore(pool) {
       } catch (err) {
         await client.query('rollback').catch(() => {})
         throw err
-      } finally {
+        // v8 on Node 26 counts the unreachable end of a catch block that always throws as a branch.
+        /* v8 ignore start */
+      } /* v8 ignore stop */ finally {
         client.release()
       }
     },

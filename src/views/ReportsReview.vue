@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useAuth } from '../stores/auth'
 import * as api from '../lib/reportsApi'
 import { prefillUrl, MEDIUM_LABELS } from '../lib/reportPrefill'
+import PageHeader from '../components/PageHeader.vue'
+import StatePanel from '../components/StatePanel.vue'
 
 const auth = useAuth()
 const access = ref(null)
@@ -71,27 +73,21 @@ const when = (d) => new Date(d).toLocaleString()
 
 <template>
   <section class="review">
-    <header>
-      <p class="eyebrow">Reclusiam</p>
-      <h1 class="rv-title">Report Review</h1>
-    </header>
+    <PageHeader eyebrow="Reclusiam" title="Report Review" />
 
-    <div v-if="!auth.signedIn || !auth.token" class="panel-forge rv-pad">
-      <p>Sign in with Discord to review reports.</p>
-      <button class="btn-ember" @click="auth.signIn()">Sign in with Discord</button>
-    </div>
-    <p v-else-if="!access && !error" class="rv-muted">Checking your roles…</p>
-    <div v-else-if="access && !access.reviewer && !access.admin" class="panel-forge rv-pad">
-      <p>Restricted to Reclusiarchs.</p>
-    </div>
+    <StatePanel v-if="!auth.signedIn || !auth.token" kind="gate" class="rv-gate" body="Sign in with Discord to review reports.">
+      <button type="button" class="btn-ember btn-md" @click="auth.signIn()">Sign in with Discord</button>
+    </StatePanel>
+    <StatePanel v-else-if="!access && !error" kind="loading" class="rv-loading" body="Checking your roles…" />
+    <StatePanel v-else-if="access && !access.reviewer && !access.admin" kind="gate" class="rv-gate" body="Restricted to Reclusiarchs." />
 
-    <p v-if="error" class="rv-error" role="alert">{{ error }}</p>
+    <StatePanel v-if="error" kind="error" class="rv-error" :body="error" />
 
     <template v-if="access && (access.reviewer || access.admin)">
       <p v-if="!access.reviewer" class="rv-muted">Administrator view: read-only. Reclusiarchs act on reports.</p>
 
       <div class="rv-filters">
-        <button v-for="f in ['open', 'mine', 'all']" :key="f" class="rv-chip" :class="{ on: filter === f }" @click="filter = f">
+        <button v-for="f in ['open', 'mine', 'all']" :key="f" type="button" class="rv-chip tab-forge rm-fade" :class="{ on: filter === f }" @click="filter = f">
           {{ f }}
         </button>
       </div>
@@ -124,23 +120,23 @@ const when = (d) => new Date(d).toLocaleString()
 
           <!-- Reclusiarch actions -->
           <div v-if="access.reviewer && selected.status === 'received'" class="rv-actions">
-            <button class="btn-ember" :disabled="busy" @click="act('claim')">Claim</button>
+            <button class="btn-ember btn-md" :disabled="busy" @click="act('claim')">Claim</button>
           </div>
 
           <div v-if="access.reviewer && selected.status === 'under_review'" class="rv-actions">
             <label>Notes (required to resolve; added to the official form on escalation)
-              <textarea v-model="note" rows="4" maxlength="4000" />
+              <textarea v-model="note" class="field-forge" rows="4" maxlength="4000" />
             </label>
-            <button class="btn-drake" :disabled="busy || !note.trim()" @click="act('resolve')">Resolve</button>
+            <button class="btn-drake btn-md" :disabled="busy || !note.trim()" @click="act('resolve')">Resolve</button>
 
             <div class="rv-escalate">
               <label>Follow-up with those involved?
-                <select v-model="followUp"><option>Yes</option><option>No</option></select>
+                <select v-model="followUp" class="field-forge"><option>Yes</option><option>No</option></select>
               </label>
-              <a class="btn-ember" :href="escalateLink" target="_blank" rel="noopener" @click="formOpened = true">
+              <a class="btn-ember btn-md" :href="escalateLink" target="_blank" rel="noopener" @click="formOpened = true">
                 1. Open official form (pre-filled)
               </a>
-              <button class="btn-ember" :disabled="busy || !formOpened" @click="act('escalate')">
+              <button class="btn-ember btn-md" :disabled="busy || !formOpened" @click="act('escalate')">
                 2. I submitted it: mark escalated
               </button>
             </div>
@@ -149,9 +145,9 @@ const when = (d) => new Date(d).toLocaleString()
           <!-- Admin failsafe -->
           <div v-if="access.admin && ['resolved', 'escalated'].includes(selected.status)" class="rv-actions">
             <label>Reason to reopen (failsafe)
-              <textarea v-model="note" rows="2" maxlength="4000" />
+              <textarea v-model="note" class="field-forge" rows="2" maxlength="4000" />
             </label>
-            <button class="btn-ember" :disabled="busy || !note.trim()" @click="act('reopen')">Reopen</button>
+            <button class="btn-ember btn-md" :disabled="busy || !note.trim()" @click="act('reopen')">Reopen</button>
           </div>
 
           <h3>History</h3>
@@ -173,52 +169,25 @@ const when = (d) => new Date(d).toLocaleString()
   margin: 0 auto;
   padding: 4rem 1.5rem 2rem;
 }
-.rv-title {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  font-weight: 700;
-  font-size: clamp(2rem, 6vw, 3.2rem);
-  color: var(--color-bone);
-  margin: 0.4rem 0 1rem;
-}
 .rv-muted {
   color: var(--color-smoke);
 }
-.rv-error {
-  color: #ff8f7a;
+
+/* A gate, the roles check and an error are StatePanels (the shared panel); the page only spaces them. */
+.rv-gate,
+.rv-loading {
+  margin-top: 1.6rem;
 }
-.rv-pad {
-  padding: 1.4rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  align-items: flex-start;
+.rv-error {
+  margin: 1.2rem 0;
 }
 .rv-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
   margin: 1rem 0;
 }
-.rv-chip {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 0.76rem;
-  color: var(--color-smoke);
-  background: rgba(14, 28, 22, 0.5);
-  border: 1px solid var(--color-ash);
-  border-radius: 999px;
-  padding: 0.35rem 0.8rem;
-  cursor: pointer;
-  transition: transform var(--dur-press) var(--ease-forge);
-}
-.rv-chip:active {
-  transform: scale(0.97);
-}
-.rv-chip.on {
-  color: var(--color-bone);
-  border-color: var(--color-drake);
-}
+/* The look of a filter chip is .tab-forge (style.css); rv-chip stays as the name the markup uses. */
 .rv-layout {
   display: grid;
   grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
@@ -256,7 +225,7 @@ const when = (d) => new Date(d).toLocaleString()
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
 }
 .rv-status[data-status='received'] {
@@ -281,7 +250,7 @@ const when = (d) => new Date(d).toLocaleString()
 .rv-detail h3 {
   font-family: var(--font-display);
   text-transform: uppercase;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   margin: 1.6rem 0 0.5rem;
 }
 .rv-detail dl {
@@ -314,17 +283,12 @@ const when = (d) => new Date(d).toLocaleString()
   flex-direction: column;
   gap: 0.35rem;
   width: 100%;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
+/* The look is .field-forge (style.css); the actions only set the width. */
 .rv-actions textarea,
 .rv-actions select {
   width: 100%;
-  padding: 0.6rem 0.8rem;
-  background: rgba(14, 28, 22, 0.6);
-  border: 1px solid var(--color-ash);
-  border-radius: 3px;
-  color: var(--color-bone);
-  font: inherit;
 }
 .rv-escalate {
   display: flex;

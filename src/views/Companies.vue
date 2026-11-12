@@ -104,7 +104,7 @@ function backToIndex() {
     >
       <input
         v-model="query"
-        class="c-search"
+        class="c-search field-forge"
         type="search"
         placeholder="Search companies, sections, brothers…"
         aria-label="Search companies"
@@ -206,16 +206,7 @@ function backToIndex() {
 .c-search {
   margin-top: 1.4rem;
   width: 100%;
-  max-width: 26rem;
-  padding: 0.7rem 1rem;
-  background: rgba(14, 28, 22, 0.6);
-  border: 1px solid var(--color-ash);
-  border-radius: 3px;
-  color: var(--color-bone);
-  font-size: 0.95rem;
-}
-.c-search::placeholder {
-  color: var(--color-faint);
+  max-width: 26rem; /* the look is .field-forge; the page sets the width */
 }
 .rs-dev-scenes {
   display: flex;
@@ -223,7 +214,7 @@ function backToIndex() {
   gap: 0.4rem 0.9rem;
   margin: 0 0 1rem;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
 }
 @media (hover: hover) and (pointer: fine) {
@@ -235,7 +226,7 @@ function backToIndex() {
 .c-note {
   margin: 0 0 1.4rem;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--color-averland);
 }
 .c-hc {
@@ -260,11 +251,11 @@ function backToIndex() {
   gap: 0.5rem;
   padding: 0.35rem 0.7rem 0.35rem 0.4rem;
   border: 1px solid var(--color-ash);
-  border-radius: 999px;
-  font-size: 0.8rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
   color: var(--color-smoke);
   /* the chips sit low enough now (High Command above them) to cross the lava glow; a dark backing keeps the text readable */
-  background: rgba(5, 10, 8, 0.6);
+  background: color-mix(in srgb, var(--color-obsidian) 60%, transparent);
   font-family: inherit;
   cursor: pointer;
   min-height: var(--tap);
@@ -291,10 +282,10 @@ function backToIndex() {
   padding: 0 0.3rem;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-gold);
-  background: rgba(223, 184, 91, 0.1);
-  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-gold) 10%, transparent);
+  border-radius: var(--radius-pill);
 }
 .c-empty {
   color: var(--color-smoke);

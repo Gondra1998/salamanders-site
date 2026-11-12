@@ -49,6 +49,7 @@ const bodyId = `rs-body-${props.branch.key}`
     <div class="rs-bar">
       <span v-if="!embedded" class="rs-sigil" aria-hidden="true">{{ branch.sigil }}</span>
       <component :is="embedded ? 'h3' : 'h2'" class="rs-title">
+        <span v-if="embedded" class="stud" aria-hidden="true" />
         <button
           v-if="branch.openable"
           type="button"
@@ -103,7 +104,7 @@ const bodyId = `rs-body-${props.branch.key}`
 
 <style scoped>
 .rs-panel {
-  border-radius: 3px;
+  border-radius: var(--radius-md);
   contain: layout style; /* an opening branch re-lays-out itself, not the whole document */
   transition:
     border-color var(--dur-state) var(--ease-forge),
@@ -111,20 +112,20 @@ const bodyId = `rs-body-${props.branch.key}`
 }
 @media (hover: hover) and (pointer: fine) {
   .rs-panel:not(.rs-static):hover {
-    border-color: rgba(89, 214, 108, 0.45);
+    border-color: color-mix(in srgb, var(--color-drake) 45%, transparent);
   }
 }
 .rs-panel[data-open] {
-  border-color: rgba(255, 106, 43, 0.5);
-  box-shadow: 0 0 40px -18px rgba(255, 106, 43, 0.55);
+  border-color: color-mix(in srgb, var(--color-ember) 50%, transparent);
+  box-shadow: 0 0 40px -18px color-mix(in srgb, var(--color-ember) 55%, transparent);
 }
 /* added by the page when a status link or deep link lands here */
 .rs-flash {
   animation: rs-flash 1.4s var(--ease-forge);
 }
 @keyframes rs-flash {
-  0% { box-shadow: 0 0 0 3px rgba(223, 184, 91, 0.7); }
-  100% { box-shadow: 0 0 0 3px rgba(223, 184, 91, 0); }
+  0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-gold) 70%, transparent); }
+  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-gold) 0%, transparent); }
 }
 
 .rs-bar {
@@ -144,21 +145,29 @@ const bodyId = `rs-body-${props.branch.key}`
   height: 2.9rem;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: var(--text-base);
   color: var(--color-gold);
-  background: linear-gradient(180deg, rgba(223, 184, 91, 0.16), rgba(223, 184, 91, 0.03));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-gold) 16%, transparent),
+    color-mix(in srgb, var(--color-gold) 3%, transparent)
+  );
   clip-path: polygon(15% 0, 85% 0, 100% 50%, 85% 100%, 15% 100%, 0 50%);
-  box-shadow: inset 0 0 0 1px rgba(223, 184, 91, 0.4);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-gold) 40%, transparent);
 }
 .rs-panel[data-open] .rs-sigil {
   color: var(--color-whitehot);
-  background: linear-gradient(180deg, rgba(255, 106, 43, 0.28), rgba(223, 184, 91, 0.05));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-ember) 28%, transparent),
+    color-mix(in srgb, var(--color-gold) 5%, transparent)
+  );
 }
 .rs-title {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.12rem;
+  font-size: var(--text-lg);
   line-height: 1.1;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -179,7 +188,7 @@ const bodyId = `rs-body-${props.branch.key}`
   outline-offset: -2px;
 }
 .rs-static .rs-title {
-  color: #cfdad2;
+  color: var(--color-pewter);
 }
 
 .rs-head {
@@ -193,7 +202,7 @@ const bodyId = `rs-body-${props.branch.key}`
   width: 100%;
   margin: 0 0 -0.1rem;
   font-family: var(--font-mono);
-  font-size: max(0.62rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   font-weight: 400;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -210,14 +219,14 @@ const bodyId = `rs-body-${props.branch.key}`
 }
 .rs-more {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
 }
 .rs-vacant {
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   font-style: italic;
   color: var(--color-vacant);
 }
@@ -239,7 +248,7 @@ const bodyId = `rs-body-${props.branch.key}`
   justify-content: flex-end;
   gap: 0.6rem;
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   color: var(--color-smoke);
 }
 .rs-chev {
@@ -268,13 +277,18 @@ const bodyId = `rs-body-${props.branch.key}`
   grid-column: 3;
 }
 .rs-embedded .rs-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   font-family: var(--font-mono);
   font-weight: 400;
-  font-size: 0.74rem;
+  font-size: var(--text-xs);
   letter-spacing: 0.16em;
   color: var(--color-gold);
-  padding-left: 0.9rem;
-  border-left: 2px solid var(--color-ember);
+}
+/* The Stud Rule: the ember sits in a stud before the label, not in a side border. */
+.rs-embedded .rs-title .stud {
+  color: var(--color-ember);
 }
 
 /* The body collapses by grid-template-rows (0fr to 1fr), so nothing is measured in JS. */

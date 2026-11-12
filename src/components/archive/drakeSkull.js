@@ -20,7 +20,7 @@
  * cls? }) — paint in order — using the gradients the plaque defines:
  * #skull-bone, #skull-bronze, #skull-soot, #skull-glow.
  */
-import { f, hand, sample, cut, shake } from './wrought'
+import { f, hand, sample, cut, shake } from './wrought.js'
 
 const closed = (pts, per = 6) => `M${sample(pts, per).map((q) => `${f(q[0])} ${f(q[1])}`).join('L')}Z`
 const line = (pts) => `M${pts.map((q) => `${f(q[0])} ${f(q[1])}`).join('L')}`

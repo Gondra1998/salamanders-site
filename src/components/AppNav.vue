@@ -43,7 +43,7 @@ function freshPlanner() {
 
 <template>
   <header class="nav">
-    <div class="nav-bar">
+    <div class="nav-bar" :class="{ 'signed-in': auth.signedIn }">
       <RouterLink to="/" class="brand" @click="open = false">
         <span class="brand-diamond" aria-hidden="true" />
         <span class="brand-text">Salamanders</span>
@@ -348,6 +348,18 @@ function freshPlanner() {
     display: none;
   }
   .burger {
+    display: flex;
+  }
+}
+/* Signed in, the bar also holds the name, Sign out and up to four more links. At its fullest (Version History, and a
+   name at its 8rem) it needs 1221px, so the menu takes over sooner. Signed out, it fits down to the rule above. */
+@media (max-width: 1240px) {
+  .signed-in > .nav-links,
+  .signed-in > .nav-cta,
+  .signed-in > .auth {
+    display: none;
+  }
+  .signed-in > .burger {
     display: flex;
   }
 }

@@ -224,6 +224,13 @@
   box-shadow: 0 -6px 18px rgb(0 0 0 / 0.5);
   cursor: pointer;
 }
+/* The Watch Commander's "Edit page" is fixed to the foot of the screen too, so it rises above the bar wherever the bar
+   can show. From 900px the hall is always too wide to have one. */
+@media (max-width: 899px) {
+  .dw .dw-area:has(.av-bar) .pe-open {
+    bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
 .dw .av-bar .av-thumb {
   width: 52px;
   height: 52px;

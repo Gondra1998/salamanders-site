@@ -20,6 +20,8 @@ const props = defineProps({
 defineEmits(['toggle'])
 
 const embedded = computed(() => props.variant === 'embedded')
+// Under a company's own header, which already names it, the bar is just "Ranks".
+const title = computed(() => (embedded.value ? 'Ranks' : props.branch.label))
 // a real branch (own page or embedded) as against the Unassigned panel
 const ofBranch = computed(() => props.variant !== 'unassigned')
 
@@ -56,9 +58,9 @@ const bodyId = `rs-body-${props.branch.key}`
           :aria-label="embedded ? `${branch.label} ranks` : undefined"
           @click="$emit('toggle')"
         >
-          {{ embedded ? 'Ranks' : branch.label }}
+          {{ title }}
         </button>
-        <template v-else>{{ embedded ? 'Ranks' : branch.label }}</template>
+        <template v-else>{{ title }}</template>
       </component>
 
       <div v-if="branch.head" class="rs-head">

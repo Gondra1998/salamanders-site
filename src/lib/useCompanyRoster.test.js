@@ -93,7 +93,7 @@ describe('useCompanyRoster: who sees what', () => {
     expect(roster.stale.value).toBe(true)
   })
 
-  it('a signed-in account without the Legion role (403) gets the public view and is not asked again (Review Focus 3)', async () => {
+  it('a signed-in account without the Legion role (403) gets the public view and is not asked again', async () => {
     vi.useFakeTimers()
     api.getRoster.mockRejectedValue(apiError(403, 'The roster is open to the XVIIIth Legion.'))
     const { roster } = host()
@@ -119,6 +119,80 @@ describe('useCompanyRoster: who sees what', () => {
     expect(roster.mode.value).toBe('full')
     expect(roster.note.value).toBe('')
     expect(api.getPublicRoster).toHaveBeenCalledTimes(1) // fetched once, not per poll
+  })
+
+  it('keeps the note up while it retries, so the page does not shift by a line every minute', async () => {
+    vi.useFakeTimers()
+    api.getRoster.mockRejectedValueOnce(apiError(503, 'down'))
+    const { roster } = host()
+    roster.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(roster.note.value).toBe('The live roster is unavailable. Showing the public view.')
+    let answer
+    api.getRoster.mockReturnValueOnce(new Promise((resolve, reject) => (answer = { resolve, reject })))
+    await vi.advanceTimersByTimeAsync(MINUTE) // the retry is out, and has not come back
+    expect(api.getRoster).toHaveBeenCalledTimes(2)
+    expect(roster.note.value).toBe('The live roster is unavailable. Showing the public view.')
+    answer.reject(apiError(503, 'still down'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(roster.note.value).toBe('The live roster is unavailable. Showing the public view.')
+    api.getRoster.mockReturnValueOnce(new Promise((resolve, reject) => (answer = { resolve, reject })))
+    await vi.advanceTimersByTimeAsync(MINUTE)
+    expect(roster.note.value).toBe('The live roster is unavailable. Showing the public view.')
+    answer.resolve(ROSTER) // back: the full view, and the note goes with the answer
+    await vi.advanceTimersByTimeAsync(0)
+    expect(roster.mode.value).toBe('full')
+    expect(roster.note.value).toBe('')
+  })
+
+  it('on a return visit, with the public roster still in hand, shows no note before it has asked anything', async () => {
+    auth.token = null
+    auth.member = null
+    await useRosterPublic().load() // the store outlives the page: this is the first visit's copy
+    const { roster } = host()
+    expect(roster.mode.value).toBe('public')
+    expect(roster.note.value).toBe('')
+    roster.start()
+    await flushPromises()
+    expect(roster.note.value).toBe('')
+  })
+
+  it('says nothing about a public view it does not have, when the public roster fails too', async () => {
+    vi.useFakeTimers()
+    api.getRoster.mockRejectedValue(apiError(503, 'down'))
+    api.getPublicRoster.mockRejectedValue(apiError(503, 'down'))
+    const { roster } = host()
+    roster.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(roster.mode.value).toBe('none')
+    expect(roster.note.value).toBe('')
+  })
+
+  it('once the full view is back, a failed refresh keeps it with no note, though the public copy is still held', async () => {
+    vi.useFakeTimers()
+    api.getRoster.mockRejectedValueOnce(apiError(503, 'down'))
+    const { roster } = host()
+    roster.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(roster.note.value).not.toBe('') // down: the public view, with the note
+    await vi.advanceTimersByTimeAsync(MINUTE)
+    expect(roster.mode.value).toBe('full')
+    api.getRoster.mockRejectedValueOnce(apiError(503, 'down again'))
+    await vi.advanceTimersByTimeAsync(MINUTE)
+    expect(roster.mode.value).toBe('full')
+    expect(roster.note.value).toBe('')
+  })
+
+  it('drops the note when a retry is refused: there is nothing unavailable about a refusal', async () => {
+    vi.useFakeTimers()
+    api.getRoster.mockRejectedValueOnce(apiError(503, 'down')).mockRejectedValueOnce(apiError(403, 'not Legion'))
+    const { roster } = host()
+    roster.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(roster.note.value).toBe('The live roster is unavailable. Showing the public view.')
+    await vi.advanceTimersByTimeAsync(MINUTE)
+    expect(roster.mode.value).toBe('public')
+    expect(roster.note.value).toBe('')
   })
 
   it('keeps the full view, with no note, when a refresh fails and a roster is in hand', async () => {
@@ -148,7 +222,7 @@ describe('useCompanyRoster: polling', () => {
     expect(api.getRoster).toHaveBeenCalledTimes(3)
   })
 
-  it('drops to the public view and stops when the token goes bad on a poll (Review Focus 3)', async () => {
+  it('drops to the public view and stops when the token goes bad on a poll', async () => {
     vi.useFakeTimers()
     const { roster } = host()
     roster.start()
@@ -244,7 +318,7 @@ describe('useCompanyRoster: signing out, and a public failure', () => {
     expect(api.getRoster).toHaveBeenCalledTimes(1)
   })
 
-  it('shows nothing, and does not throw, when the public roster cannot be had (Review Focus 4)', async () => {
+  it('shows nothing, and does not throw, when the public roster cannot be had', async () => {
     auth.token = null
     auth.member = null
     api.getPublicRoster.mockRejectedValue(apiError(503, 'The roster is not available yet. Try again.'))

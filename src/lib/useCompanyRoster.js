@@ -33,7 +33,10 @@ export function useCompanyRoster({ infirmaryOpen }) {
   // nothing to show yet, and still working out what to show
   const loading = computed(() => mode.value === 'none' && !decided.value)
   const view = computed(() => (mode.value === 'full' ? store.view : mode.value === 'public' ? pub.view : null))
-  const note = computed(() => (!store.roster && store.status === 'error' && pub.snapshot ? UNAVAILABLE : ''))
+  // Whether the last load to finish failed. Not store.status, which is 'loading' while a retry is out: the note
+  // would drop for the length of every request and come back, and the page shift by a line each minute.
+  const down = shallowRef(false)
+  const note = computed(() => (!store.roster && down.value && pub.snapshot ? UNAVAILABLE : ''))
   const updated = computed(() => (store.roster ? new Date(store.roster.fetchedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''))
   const stale = computed(() => Boolean(store.roster?.stale))
 
@@ -46,6 +49,7 @@ export function useCompanyRoster({ infirmaryOpen }) {
 
   async function tick() {
     await loadMember()
+    down.value = store.status === 'error'
     if (!store.roster) {
       if (store.status !== 'error') polling.stop() // refused: nothing to retry
       if (!pub.snapshot) {

@@ -60,24 +60,3 @@ describe('useOpenBranches', () => {
     expect(o.allOpen(['a'])).toBe(true)
   })
 })
-
-describe('useOpenBranches: hashKey', () => {
-  const at = (hash) => window.history.replaceState(null, '', `/roster${hash}`)
-
-  it('reads #company-3', () => {
-    at('#company-3')
-    expect(useOpenBranches().hashKey()).toBe('company-3')
-  })
-
-  it('decodes an encoded key', () => {
-    at('#company%2D3')
-    expect(useOpenBranches().hashKey()).toBe('company-3')
-  })
-
-  it('ignores the sign-in fragment, an empty hash, and a bad escape, without throwing', () => {
-    for (const hash of ['#access_token=abc&expires_in=3600', '#', '', '#%E0%A4%A']) {
-      at(hash)
-      expect(useOpenBranches().hashKey(), hash).toBeNull()
-    }
-  })
-})

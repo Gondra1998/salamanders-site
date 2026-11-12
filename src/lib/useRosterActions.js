@@ -1,5 +1,5 @@
 import { computed, nextTick, shallowRef } from 'vue'
-import { branchKeyOfArticle } from './companyKeys'
+import { HIGH_COMMAND_ID, branchKeyOfArticle, fragmentId } from './companyKeys'
 import { scrollBehavior } from './motion'
 import { openNow, withReaderPinned } from './pinReader'
 
@@ -67,7 +67,7 @@ export function useRosterActions({ root, view, open, infirmaryOpen, viewerId, lo
       return
     }
     await showOrder()
-    if (key === 'high-command') {
+    if (key === HIGH_COMMAND_ID) {
       targetOf(key)?.scrollIntoView({ behavior: scrollBehavior(), block: 'center' })
       return
     }
@@ -96,22 +96,22 @@ export function useRosterActions({ root, view, open, infirmaryOpen, viewerId, lo
     scrollNow(id, { behavior: 'instant' })
   }
 
-  // A chip: scroll to the company (or High Command, or Muster). Synchronous unless the Infirmary is open.
-  function scrollToArticle(id) {
-    if (infirmaryOpen.value) return showOrder().then(() => scrollNow(id))
-    scrollNow(id)
+  // A chip: scroll to the company (or High Command, or Muster), bringing the order back first if the Infirmary hides it.
+  async function scrollToArticle(id) {
+    await showOrder()
+    scrollNow(id, { behavior: scrollBehavior() })
   }
 
   /**
    * /companies#third lands on that company. The story is already on the page, so scroll at once; the
    * bar opens when the roster first arrives, and the scroll is repeated then, because High Command and
    * the bars have by then changed the layout above. The sign-in callback also uses the fragment
-   * (`#access_token=…`); useOpenBranches ignores that, and anything that is not one of our ids.
+   * (`#access_token=…`); fragmentId ignores that, and anything that is not one of our ids is ignored here.
    */
   let scrolled = false
   let opened = false
   async function applyHash() {
-    const id = open.hashKey()
+    const id = fragmentId(location.hash)
     const key = id ? branchKeyOfArticle(id) : null
     if (!key) return
     if (!scrolled) {

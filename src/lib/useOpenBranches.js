@@ -23,20 +23,5 @@ export function useOpenBranches() {
   const setAll = (keys, value) => change((s) => keys.forEach((k) => (value ? s.add(k) : s.delete(k))))
   const allOpen = (keys) => keys.length > 0 && keys.every((k) => open.value.has(k))
 
-  /**
-   * The branch key in the URL fragment (`/roster#company-3`), or null. The sign-in
-   * callback also uses the fragment (`#access_token=…`), so anything with `=` is
-   * not ours. Whether the key names a real branch is the caller's check.
-   */
-  const hashKey = () => {
-    const raw = globalThis.location?.hash?.slice(1) ?? ''
-    if (!raw || raw.includes('=')) return null
-    try {
-      return decodeURIComponent(raw) || null
-    } catch {
-      return null
-    }
-  }
-
-  return { open, isOpen, toggle, openKey, setAll, allOpen, hashKey }
+  return { open, isOpen, toggle, openKey, setAll, allOpen }
 }

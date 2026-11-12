@@ -9,6 +9,7 @@ import RanksPlaceholder from '../components/company/RanksPlaceholder.vue'
 import ToolsPlaceholder from '../components/company/ToolsPlaceholder.vue'
 import { useAuth } from '../stores/auth'
 import { HIGH_COMMAND_ENTRY, MUSTER_ENTRY } from '../lib/companyKeys'
+import { scrollBehavior } from '../lib/motion'
 import { ROSTER_VIEWER } from '../lib/rosterContext'
 import { SCENES } from '../lib/rosterScenes'
 import { useCompanyNotables } from '../lib/useCompanyNotables'
@@ -88,7 +89,7 @@ const branchByKey = computed(() => new Map((view.value?.branches ?? []).map((b) 
 // "↑ Index" on a company: back to the chip row, with focus there so the next Tab is a chip.
 function backToIndex() {
   const index = document.getElementById('company-index')
-  index?.scrollIntoView()
+  index?.scrollIntoView({ behavior: scrollBehavior() })
   index?.focus({ preventScroll: true })
 }
 </script>

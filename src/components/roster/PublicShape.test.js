@@ -24,12 +24,21 @@ describe('PublicShape', () => {
     expect(rows[1].attributes('data-rank')).toBe('sergeant')
     expect(rows[1].attributes('data-lateral')).toBeUndefined()
     expect(rows[2].attributes('data-lateral')).toBeDefined()
-    expect(rows[0].attributes('style')).toContain('--h: rgb(255,106,43)')
-    expect(rows[0].attributes('style')).toContain('--hp')
-    expect(rows[0].attributes('style')).toContain('--hn')
+    // three different colours, so a node and its two spine segments cannot be swapped unnoticed
+    const style = rows[0].element.style
+    expect(['--h', '--hp', '--hn'].map((v) => style.getPropertyValue(v))).toEqual(['rgb(255,106,43)', 'rgb(242,210,122)', 'rgb(224,67,29)'])
   })
 
-  it('names the extra heads, as chips and never with an image (Review Focus 1)', () => {
+  it('gives every row its own heat, not the first row\'s', () => {
+    const ramp = (n) => ({ h: `rgb(${n},0,0)`, hp: `rgb(0,${n},0)`, hn: `rgb(0,0,${n})` })
+    const rows = render({ items: [item(0, 'Sergeant', 6, { heat: ramp(1) }), item(1, 'Scout', 12, { heat: ramp(2) })] }).findAll('.rs-shape-row')
+    expect(rows.map((r) => ['--h', '--hp', '--hn'].map((v) => r.element.style.getPropertyValue(v)))).toEqual([
+      ['rgb(1,0,0)', 'rgb(0,1,0)', 'rgb(0,0,1)'],
+      ['rgb(2,0,0)', 'rgb(0,2,0)', 'rgb(0,0,2)'],
+    ])
+  })
+
+  it('names the extra heads, as chips and never with an image', () => {
     const extra = { rank: { key: 'venerable-dreadnought', label: 'Venerable Dreadnought', tier: 1 }, members: [person(3, { avatar: 'https://cdn.discordapp.com/x.png' }), person(4), person(5)] }
     const w = render({ extraHeads: extra, items: [] })
     const chips = w.findAll('.rs-shape-heads li.rs-member')
@@ -38,7 +47,7 @@ describe('PublicShape', () => {
     expect(w.find('img').exists()).toBe(false)
   })
 
-  it('shows a name containing markup as text (Review Focus 2)', () => {
+  it('shows a name containing markup as text', () => {
     const extra = { rank: { key: 'k', label: 'K', tier: 1 }, members: [person(1, { name: '<b>x</b>' })] }
     const w = render({ extraHeads: extra })
     expect(w.find('.rs-shape-heads .rs-name').text()).toBe('<b>x</b>')

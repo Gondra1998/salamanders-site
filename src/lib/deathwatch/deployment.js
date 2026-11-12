@@ -20,13 +20,22 @@ export async function getDeployment(token) {
 
 const list = ref([])
 let asked = false
-/** The list, fetched once per page load and shared. Empty until it arrives, or if it fails. */
+// After a failure the list is asked for again, a few times, further apart: a blip, or the server's 503 before its
+// roster has loaded. A refusal (4xx) is final.
+const RETRY_MS = [3000, 10000, 30000]
+function ask(tries = 0) {
+  getDeployment(useAuth().token)
+    .then((v) => (list.value = v))
+    .catch((err) => {
+      if (err?.status >= 400 && err.status < 500) return
+      if (tries < RETRY_MS.length) setTimeout(() => ask(tries + 1), RETRY_MS[tries])
+    })
+}
+/** The list, fetched once per page load and shared. Empty until it arrives, or if it cannot be had. */
 export function useDeployment() {
   if (!asked) {
     asked = true
-    getDeployment(useAuth().token)
-      .then((v) => (list.value = v))
-      .catch(() => {})
+    ask()
   }
   return list
 }

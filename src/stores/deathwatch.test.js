@@ -7,6 +7,7 @@ vi.mock('../lib/deathwatch/fixture', () => ({ loadFixture: vi.fn() }))
 import { getMe } from '../lib/deathwatch/api'
 import { loadFixture } from '../lib/deathwatch/fixture'
 import { ME_TIMEOUT_MS, useDeathwatch } from './deathwatch'
+import { ROLES } from '../lib/deathwatch/areas'
 
 const apiError = (status) => Object.assign(new Error('nope'), { status })
 const deferred = () => {
@@ -117,15 +118,17 @@ describe('deathwatch store', () => {
     }
   })
 
-  it('keeps the standings the server names, strings only, and none for someone refused or when there is no list', async () => {
+  it('keeps the standings the server names, strings only, none for someone refused or a list that is none, and every one from a server from before them', async () => {
     const s = useDeathwatch()
     const cases = [
       [{ access: true, roles: ['legion', 'deployment'] }, ['legion', 'deployment']],
       [{ access: true, roles: ['legion', 7, null, { a: 1 }, ['x'], 'accolade'] }, ['legion', 'accolade']],
       [{ access: true, roles: 'legion' }, []],
       [{ access: true, roles: { 0: 'legion', length: 1 } }, []],
-      [{ access: true }, []],
+      [{ access: true }, ROLES.map(([r]) => r)],
+      [{ access: true, roles: null }, []],
       [{ access: false, roles: ['legion'] }, []],
+      [{ access: false }, []],
     ]
     for (const [body, roles] of cases) {
       getMe.mockResolvedValue(body)
@@ -231,8 +234,8 @@ describe('deathwatch store', () => {
 
   // Any mix of loads and resets, their answers landing in any order: only the last call started may leave a mark.
   const OUTCOMES = [
-    { reply: { access: true, watchCommander: true }, state: { status: 'allowed', commander: true, command: true, roles: [] } },
-    { reply: { access: true, deathwatchCommand: true }, state: { status: 'allowed', commander: false, command: true, roles: [] } },
+    { reply: { access: true, watchCommander: true, roles: [] }, state: { status: 'allowed', commander: true, command: true, roles: [] } },
+    { reply: { access: true, deathwatchCommand: true, roles: [] }, state: { status: 'allowed', commander: false, command: true, roles: [] } },
     { reply: { access: true, roles: ['legion'] }, state: { status: 'allowed', commander: false, command: false, roles: ['legion'] } },
     { reply: { access: false }, state: { status: 'denied', commander: false, command: false, roles: [] } },
     { error: apiError(401), state: { status: 'signin', commander: false, command: false, roles: [] } },

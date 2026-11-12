@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { getMe } from '../lib/deathwatch/api'
 import { loadFixture } from '../lib/deathwatch/fixture'
+import { ROLES } from '../lib/deathwatch/areas'
 
 // Whether the signed-in user may see the Deathwatch area, whether they are the Watch Commander, and whether they
 // hold the Deathwatch Command role (the Armouring Hall's Watch Command tab), and which standings they hold (the
@@ -47,7 +48,10 @@ export const useDeathwatch = defineStore('deathwatch', {
         const allowed = me?.access === true
         const commander = allowed && me.watchCommander === true
         // The standings the parts of the area open to (lib/deathwatch/areas.js): strings only, and none when refused.
-        const roles = allowed && Array.isArray(me.roles) ? me.roles.filter((r) => typeof r === 'string') : []
+        // An answer with no `roles` at all is a server from before them, as just after the site deploys and before the
+        // API is rebuilt: its old rule holds, every part open but the Administratum. A `roles` that is no list fails
+        // closed.
+        const roles = !allowed ? [] : me.roles === undefined ? ROLES.map(([r]) => r) : Array.isArray(me.roles) ? me.roles.filter((r) => typeof r === 'string') : []
         this.$patch({ status: allowed ? 'allowed' : 'denied', commander, command: commander || (allowed && me.deathwatchCommand === true), roles })
       } catch (err) {
         if (mine !== seq) return

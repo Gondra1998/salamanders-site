@@ -125,6 +125,8 @@ const deathwatch = createDeathwatchHandler({
   // The Deployment list: members holding DEATHWATCH_ROLE_ID, from the roster's cache (no extra Discord calls).
   roster,
   deploymentRoleIds: (process.env.DEATHWATCH_ROLE_ID || '').split(',').filter(Boolean),
+  // The faces: Legion and Emissary members the Event Tracker names, for their pictures there.
+  faceRoleIds: [LEGION_ROLE, process.env.EMISSARY_ROLE_ID].filter(Boolean),
 })
 
 // The Reliquarium, members-only art and clips galleries — see galleryHandler.js. Until the clips channel

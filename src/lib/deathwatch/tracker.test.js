@@ -6,10 +6,12 @@ import {
   calc,
   findMission,
   honours,
+  idsOf,
   kd,
   nextOpenSlot,
   parseBackup,
   progression,
+  slotIds,
   teamStats,
   withMission,
 } from './tracker'
@@ -197,6 +199,26 @@ describe('Manage', () => {
     const a = archiveDoc(teams(), WEIGHTS, 'Tour', new Date('2026-10-01T00:00:00Z'))
     expect(a.sum).toEqual({ champ: 'Alpha', pts: 1275, nt: 2, nm: 3 })
     expect(a.teams[1].ki).toEqual([])
+  })
+
+  it('keeps the Discord id each slot was filled with, through the archive and a backup, renamed or not', () => {
+    const A = '300000000000000041'
+    const B = '300000000000000042'
+    const deployment = [{ id: A, name: 'a1', avatar: null }]
+    const before = { di: { a2: B, gone: '300000000000000043' } }
+    // The Deployment brother of that name, else the id kept from before; a typed name with neither has none.
+    expect(slotIds(['a1', 'a2', 'typed'], deployment, before)).toEqual({ a1: A, a2: B })
+    expect(slotIds(['a1'], [], undefined)).toEqual({})
+    const ts = teams()
+    ts[1].di = { a1: A, a2: B, x: 'no id', y: 7 }
+    // Only ids of names on the roster count; the archive and a backup keep the Discord ids.
+    expect(calc(ts).ids).toEqual(new Map([['a1', A], ['a2', B]]))
+    expect(archiveDoc(ts, WEIGHTS, 'Tour').teams[0].di).toEqual({ a1: A, a2: B })
+    expect(archiveDoc(ts, WEIGHTS, 'Tour').teams[1].di).toEqual({})
+    expect(parseBackup({ teams: Object.values(ts) }).teams[0].di).toEqual({ a1: A, a2: B })
+    expect(idsOf({ di: [A] })).toEqual([])
+    expect(idsOf({ di: null })).toEqual([])
+    expect(idsOf(null)).toEqual([])
   })
 
   it('puts a mission in its slot and finds the next open one', () => {

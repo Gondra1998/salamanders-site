@@ -1,11 +1,12 @@
 <script setup>
-// A player, as on the company roster (RosterMember .rs-member): a pill led by their avatar (the Discord picture of the
-// "Deathwatch Deployment" brother of that name, else initials), the name as a link to their profile, then the KIA
-// tag if they fell and the guest tag if asked for.
+// A player, as on the company roster (RosterMember .rs-member): a pill led by their avatar, else initials, the name
+// as a link to their profile, then the KIA tag if they fell and the guest tag if asked for. The avatar is the Discord
+// picture of the member the Kill Team was filled with (by their id, so a rename does not lose it), else of the
+// member of that name: from the Deployment list or the Legion and Emissary faces (lib/deathwatch/deployment.js).
 import { computed } from 'vue'
 import { kiaLabel } from '../../../lib/deathwatch/tracker'
 import { initials, safeAvatar } from '../../../lib/rosterAvatar'
-import { useDeployment } from '../../../lib/deathwatch/deployment'
+import { useFaces } from '../../../lib/deathwatch/deployment'
 
 const props = defineProps({
   name: { type: String, required: true },
@@ -13,8 +14,12 @@ const props = defineProps({
   to: { type: Object, default: null },
   guest: { type: Boolean, default: false },
 })
-const deployment = useDeployment()
-const avatar = computed(() => safeAvatar(deployment.value.find((m) => m.name === props.name)?.avatar))
+const faces = useFaces()
+const avatar = computed(() => {
+  const id = props.R.ids?.get(props.name)
+  // With an id, only that member: someone else may have taken the name since.
+  return safeAvatar(faces.value.find((m) => (id ? m.id === id : m.name === props.name))?.avatar)
+})
 </script>
 
 <template>

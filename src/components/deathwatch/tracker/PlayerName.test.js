@@ -5,10 +5,11 @@ import { mount, RouterLinkStub } from '@vue/test-utils'
 
 // Invented values only: the deployment list as the server would give it.
 vi.mock('../../../lib/deathwatch/deployment', () => ({
-  useDeployment: () =>
+  useFaces: () =>
     ref([
       { id: '300000000000000001', name: 'Brother Avit', avatar: 'https://cdn.discordapp.com/avatars/300000000000000001/abc.png' },
       { id: '300000000000000002', name: 'Brother Evil', avatar: 'https://example.com/a.png' },
+      { id: '300000000000000003', name: 'Brother New Name', avatar: 'https://cdn.discordapp.com/avatars/300000000000000003/def.png' },
     ]),
 }))
 import PlayerName from './PlayerName.vue'
@@ -21,6 +22,15 @@ describe('PlayerName', () => {
     const w = mountName({ name: 'Brother Avit' })
     expect(w.get('.dw-av img').attributes('src')).toBe('https://cdn.discordapp.com/avatars/300000000000000001/abc.png')
     expect(w.get('.dw-av').attributes('aria-hidden')).toBe('true')
+  })
+
+  it('finds the member the Kill Team was filled with by their id, renamed or not, and nobody else of that name', () => {
+    const ids = new Map([['Brother Old Name', '300000000000000003'], ['Brother Avit', '300000000000000099']])
+    const renamed = mount(PlayerName, { props: { name: 'Brother Old Name', R: { ...R, ids } }, global: { stubs: { RouterLink: RouterLinkStub } } })
+    expect(renamed.get('.dw-av img').attributes('src')).toBe('https://cdn.discordapp.com/avatars/300000000000000003/def.png')
+    // Filled with someone not on the lists any more: no picture, though someone else now goes by that name.
+    const gone = mount(PlayerName, { props: { name: 'Brother Avit', R: { ...R, ids } }, global: { stubs: { RouterLink: RouterLinkStub } } })
+    expect(gone.find('.dw-av img').exists()).toBe(false)
   })
 
   it('shows initials, and no picture, for a name not on the list or a picture from anywhere but Discord', () => {

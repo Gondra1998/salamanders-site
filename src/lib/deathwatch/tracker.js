@@ -141,6 +141,7 @@ export function calc(teams, custom) {
   CK.slots = ts.flatMap((t) => t.m.filter((m) => (+m[4] || 0) + (+m[6] || 0) > SLOTS).map((m) => `${t.n} W${m[0]} O${m[1]}`))
   const kia = new Map(src.flatMap((t) => (t.ki ?? []).filter((n) => (t.ro ?? []).includes(n)).map((n) => [n, +(t.kw ?? {})[n] || 0])))
   Object.assign(CK, moreChecks(ts, home, kia))
+  const ids = new Map(src.flatMap((t) => idsOf(t).filter(([n]) => (t.ro ?? []).includes(n))))
   return {
     S,
     ts: ts.sort((a, b) => a.r - b.r),
@@ -152,8 +153,22 @@ export function calc(teams, custom) {
     CK,
     names: [...new Set([...Object.keys(home), ...Object.keys(P)])],
     kia,
+    ids,
   }
 }
+
+/**
+ * A Kill Team's slots' Discord ids, as Manage saves them (`di`): for each name, the Deployment brother of that name,
+ * else the one the team was filled with before (renamed since, or no longer deployed); a typed name with neither
+ * has none. → { name: id }.
+ */
+export function slotIds(names, deployment, team) {
+  const before = Object.fromEntries(idsOf(team))
+  return Object.fromEntries(names.flatMap((n) => [[n, deployment.find((m) => m.name === n)?.id ?? before[n]]]).filter(([, id]) => id))
+}
+
+/** A Kill Team's Discord ids, as Manage filled its slots (`di`, name → id): → [[name, id]], Discord ids only. */
+export const idsOf = (t) => (t?.di !== null && typeof t?.di === 'object' && !Array.isArray(t.di) ? Object.entries(t.di).filter(([, id]) => typeof id === 'string' && /^\d{17,20}$/.test(id)) : [])
 
 /**
  * The checks that point at what to fix: each finding is { label } and where it is, a team (t: its id), a mission
@@ -354,7 +369,7 @@ export function parseBackup(x) {
       rk,
       rows.map(([name, cls, ...nums]) => [name, cls, ...nums.map(toNum)]),
     ])
-    return { id: t.id, n: t.n, co: typeof t.co === 'string' ? t.co : COMPANIES[0], ro: t.ro.map(String), ki: Array.isArray(t.ki) ? t.ki.map(String) : [], kw, m }
+    return { id: t.id, n: t.n, co: typeof t.co === 'string' ? t.co : COMPANIES[0], ro: t.ro.map(String), ki: Array.isArray(t.ki) ? t.ki.map(String) : [], kw, di: Object.fromEntries(idsOf(t)), m }
   })
   let scoring = null
   if (x.scoring && typeof x.scoring === 'object') {
@@ -371,7 +386,7 @@ export function archiveDoc(teams, S, name, at = new Date()) {
     name,
     at: at.toISOString(),
     sc: { ...S },
-    teams: Object.values(teams).map((t) => ({ id: t.id, n: t.n, co: t.co, ro: t.ro ?? [], ki: t.ki ?? [], kw: t.kw ?? {}, m: t.m ?? [] })),
+    teams: Object.values(teams).map((t) => ({ id: t.id, n: t.n, co: t.co, ro: t.ro ?? [], ki: t.ki ?? [], kw: t.kw ?? {}, di: Object.fromEntries(idsOf(t)), m: t.m ?? [] })),
     sum: { champ: c && c.tot > 0 ? c.n : '', pts: c ? c.tot : 0, nt: R.ts.length, nm: R.ts.reduce((a, t) => a + t.pl, 0) },
   }
 }

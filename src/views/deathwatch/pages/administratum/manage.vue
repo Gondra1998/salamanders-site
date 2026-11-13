@@ -6,7 +6,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTracker } from '../../../../lib/deathwatch/useTracker'
-import { COMPANIES, WEIGHT_LABELS, archiveDoc, clone, parseBackup } from '../../../../lib/deathwatch/tracker'
+import { COMPANIES, WEIGHT_LABELS, archiveDoc, clone, parseBackup, slotIds } from '../../../../lib/deathwatch/tracker'
 import { download } from '../../../../lib/deathwatch/download'
 import { useDeployment } from '../../../../lib/deathwatch/deployment'
 import TrackerState from '../../../../components/deathwatch/tracker/TrackerState.vue'
@@ -88,6 +88,7 @@ async function saveTeam(t) {
   d.ro = sl.map((s) => s.n)
   d.ki = [...new Set(sl.filter((s) => s.k !== '').map((s) => s.n))]
   d.kw = Object.fromEntries(sl.filter((s) => +s.k > 0).map((s) => [s.n, +s.k]))
+  d.di = slotIds(d.ro, deployment.value, t)
   try {
     await save('teams', t.id, d)
     forms[t.id].msg = 'Saved ✓'

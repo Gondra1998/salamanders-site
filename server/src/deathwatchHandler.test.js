@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createDeathwatchHandler, trackerReaders } from './deathwatchHandler'
+import { createDeathwatchHandler, namedIn, trackerReaders } from './deathwatchHandler'
 import { createDeathwatchAccess } from './deathwatchAccess'
 import { Upstream } from './discordRoles'
 import { MAX_ACTIVE_GRANTS, MAX_BODY_BYTES } from './deathwatchValidate'
@@ -68,7 +68,7 @@ function memStore() {
 }
 
 // `roster`: the roster cache's holding() (roster.js), absent by default.
-function setup({ configured = true, roster = null, deploymentRoleIds = [DW] } = {}) {
+function setup({ configured = true, roster = null, deploymentRoleIds = [DW], faceRoleIds } = {}) {
   const users = structuredClone(USERS)
   const fail = { discord: false }
   const byToken = (request) => users[(request.headers.get('Authorization') || '').slice(7)]
@@ -91,7 +91,7 @@ function setup({ configured = true, roster = null, deploymentRoleIds = [DW] } = 
     legionRoleId: LEGION,
   })
   // deploymentRoleIds: null leaves it out, as a server with no Deployment role set does.
-  const handle = createDeathwatchHandler({ access, store, roster, ...(deploymentRoleIds ? { deploymentRoleIds } : {}) })
+  const handle = createDeathwatchHandler({ access, store, roster, ...(deploymentRoleIds ? { deploymentRoleIds } : {}), ...(faceRoleIds ? { faceRoleIds } : {}) })
 
   // body: an object (sent as JSON), or `raw` for a literal body; `headers` override the defaults.
   async function call(who, method, path, body, { raw, headers = {} } = {}) {
@@ -367,7 +367,7 @@ describe('GET /deathwatch/deployment', () => {
     const { call } = setup({ roster: r })
     for (const who of ['commander', 'watcher', 'commandOnly']) {
       const res = await call(who, 'GET', '/deathwatch/deployment')
-      expect([res.status, res.body], who).toEqual([200, { members: MEMBERS }])
+      expect([res.status, res.body], who).toEqual([200, { members: MEMBERS, faces: [] }])
     }
     expect(r.holding).toHaveBeenCalledWith([DW])
   })
@@ -401,6 +401,53 @@ describe('GET /deathwatch/deployment', () => {
     expect(await res()).toEqual(NOT_YET)
     expect(await res({ roster: roster(), deploymentRoleIds: null })).toEqual(NOT_YET)
     expect(await res({ roster: { holding: async () => null } })).toEqual(NOT_YET)
+  })
+})
+
+describe('the faces in GET /deathwatch/deployment', () => {
+  // Invented values only. The Legion and Emissary members, of whom the tracker names some.
+  const MEMBERS = [{ id: '300000000000000011', name: 'Brother Orrin', avatar: null }]
+  const FACES = [
+    { id: '300000000000000011', name: 'Brother Orrin', avatar: null }, // deployed: listed once, as a member
+    { id: '300000000000000021', name: 'Brother Named', avatar: null }, // on a live roster by name
+    { id: '300000000000000022', name: 'Brother Renamed', avatar: null }, // entered by id, renamed since
+    { id: '300000000000000023', name: 'Brother Archived', avatar: null }, // on an archived roster
+    { id: '300000000000000024', name: 'Brother Stranger', avatar: null }, // never entered
+  ]
+  const holding = (faces = FACES) => vi.fn(async (ids) => (ids.includes(DW) ? MEMBERS : faces))
+  const fill = (store) => {
+    store.docs.teams.set('1', { ro: ['Brother Named', 'Brother Old Name', 'Brother Orrin'], di: { 'Brother Old Name': '300000000000000022' } })
+    store.docs.archive.set('e1', { teams: [{ ro: ['Brother Archived'] }] })
+  }
+
+  it('adds the Legion and Emissary members the tracker names, by id or by name, who are not deployed', async () => {
+    const r = { holding: holding() }
+    const { call, store } = setup({ roster: r, faceRoleIds: [LEGION, 'EMISSARY'] })
+    fill(store)
+    const res = await call('watcher', 'GET', '/deathwatch/deployment')
+    expect(res.body).toEqual({ members: MEMBERS, faces: FACES.slice(1, 4) })
+    expect(r.holding).toHaveBeenCalledWith([LEGION, 'EMISSARY'])
+  })
+
+  it('has none with no face roles set, and none while that list cannot be had', async () => {
+    const plain = setup({ roster: { holding: holding() } })
+    fill(plain.store)
+    expect((await plain.call('watcher', 'GET', '/deathwatch/deployment')).body.faces).toEqual([])
+    const late = setup({ roster: { holding: holding(null) }, faceRoleIds: [LEGION] })
+    fill(late.store)
+    expect((await late.call('watcher', 'GET', '/deathwatch/deployment')).body).toEqual({ members: MEMBERS, faces: [] })
+  })
+
+  it('reads the names and ids from any document, skipping what is not a roster or not an id', () => {
+    const all = {
+      teams: { a: { ro: ['A', 7], di: { A: '300000000000000031', B: 'not an id', C: 5 } }, b: { ro: 'A', di: null }, c: null, d: { di: ['300000000000000032'] } },
+      archive: { e: { teams: [{ ro: ['E'] }, null] }, f: { teams: 'none' }, g: null },
+    }
+    const { ids, names } = namedIn(all)
+    expect([...names].sort()).toEqual(['A', 'E'])
+    expect([...ids]).toEqual(['300000000000000031', '300000000000000032'])
+    expect(namedIn(undefined)).toEqual({ ids: new Set(), names: new Set() })
+    expect(namedIn({})).toEqual({ ids: new Set(), names: new Set() })
   })
 })
 

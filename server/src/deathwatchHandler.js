@@ -1,6 +1,7 @@
 /**
  * The Deathwatch routes: who am I, the area's data, document edits, and grants.
- * Also the Deathwatch Deployment list (who holds the role, from the roster's member cache, roster.js).
+ * Also the Deathwatch Deployment list (who holds the role, from the roster's member cache, roster.js), and the
+ * pictures of the Legion and Emissary members the Event Tracker names who no longer hold it.
  * Modeled on reports.js. Every route asks deathwatchAccess.js for a live
  * verdict and every uncertain path fails closed: 401 (no Discord identity),
  * 403 (not allowed), 503 (Discord unreachable, or the role ids are not set).
@@ -46,7 +47,23 @@ async function readJson(request) {
   return { body }
 }
 
-export function createDeathwatchHandler({ access, store, roster = null, deploymentRoleIds = [] }) {
+/**
+ * Who the Event Tracker's documents name, in the live event and every archived one: the Discord ids its Kill Teams
+ * were filled with (a team's `di`, name → id) and the names on their rosters. → { ids, names }, two Sets.
+ */
+export function namedIn(all) {
+  const teams = Object.values(all?.teams ?? {})
+  for (const e of Object.values(all?.archive ?? {})) if (Array.isArray(e?.teams)) teams.push(...e.teams)
+  const ids = new Set()
+  const names = new Set()
+  for (const t of teams) {
+    if (Array.isArray(t?.ro)) for (const n of t.ro) if (typeof n === 'string') names.add(n)
+    if (t?.di !== null && typeof t?.di === 'object') for (const id of Object.values(t.di)) if (isDiscordId(id)) ids.add(id)
+  }
+  return { ids, names }
+}
+
+export function createDeathwatchHandler({ access, store, roster = null, deploymentRoleIds = [], faceRoleIds = [] }) {
   const me = async (_request, verdict) =>
     reply(200, {
       access: verdict.access,
@@ -70,13 +87,23 @@ export function createDeathwatchHandler({ access, store, roster = null, deployme
     return send(200, text, { ETag: etag })
   }
 
-  // The battle-brothers holding Deathwatch Deployment (names and avatars, for Manage's Kill Team slots and the
-  // tracker's names): to the Event Tracker's readers only, as its data is.
+  // The battle-brothers holding Deathwatch Deployment (ids, names and avatars, for Manage's Kill Team slots and the
+  // tracker's names), and the faces: the Legion and Emissary members the tracker names, by id or by name, who are
+  // not among them, so a brother who leaves Deployment keeps his picture in the archive. To the Event Tracker's
+  // readers only, as its data is.
   async function deployment(_request, verdict) {
-    if (!verdict.access || !readsTracker(verdict, (await store.readAll()).cfg)) return reply(403, { error: 'Restricted to the Event Tracker.' })
+    const all = await store.readAll()
+    if (!verdict.access || !readsTracker(verdict, all.cfg)) return reply(403, { error: 'Restricted to the Event Tracker.' })
     const members = roster && deploymentRoleIds.length ? await roster.holding(deploymentRoleIds) : null
     if (!members) return reply(503, { error: 'The member list is not available yet. Try again.' })
-    return reply(200, { members })
+    let faces = []
+    if (faceRoleIds.length) {
+      const listed = new Set(members.map((m) => m.id))
+      const { ids, names } = namedIn(all)
+      const pool = await roster.holding(faceRoleIds)
+      if (pool) faces = pool.filter((m) => !listed.has(m.id) && (ids.has(m.id) || names.has(m.name)))
+    }
+    return reply(200, { members, faces })
   }
 
   async function writeDoc(request, verdict) {

@@ -79,12 +79,15 @@ describe('DeathwatchHub', () => {
     expect(mountHub().find('.dw-legal').exists()).toBe(false)
   })
 
-  it('shows the Administratum button to the Watch Commander only', () => {
-    expect(mountHub({ commander: false }).find('a.dw-manage').exists()).toBe(false)
+  it('shows the Administratum button to the Watch Commander, the desk and admins, and to nobody else', () => {
+    for (const roles of [['legion', 'deployment', 'command'], ['legion']]) expect(mountHub({ roles }).find('a.dw-manage').exists()).toBe(false)
     const manage = mountHub({ commander: true }).find('a.dw-manage')
     expect(manage.text()).toBe('Administratum')
     expect(manage.attributes('href')).toBe('/deathwatch/administratum/enter-mission')
     expect(manage.find('svg').attributes('aria-hidden')).toBe('true')
+    expect(mountHub({ roles: ['deployment', 'desk'] }).find('a.dw-manage').attributes('href')).toBe('/deathwatch/administratum/enter-mission')
+    // An admin cannot enter a mission: the button opens the desk, to look at.
+    expect(mountHub({ roles: ['deployment', 'admin'] }).find('a.dw-manage').attributes('href')).toBe('/deathwatch/administratum/manage')
     expect(cards(mountHub({ commander: true })).map((c) => c.title)).not.toContain('Administratum')
   })
 })
@@ -138,12 +141,10 @@ describe('DeathwatchHub, locked cards', () => {
     expect(locked(mountHub({ commander: true, roles: [] }))).toEqual([])
   })
 
-  it('locks the cards as the Watch Commander set them in Access, over the defaults', () => {
+  it('pays no heed to gates saved under the old Access page', () => {
     const g = { eventtracker: ['legion'], hallofrelics: ['deployment'], recruitment: [] }
-    expect(locked(mountHub({ roles: ['legion'], g }))).toEqual(['Armouring Hall', 'Chronicles of Valor', 'Hall of Relics'])
-    const w = mountHub({ roles: ['legion'], g })
-    expect(w.find('.dw-call').classes()).toContain('is-locked') // Recruitment opened to nobody but him
-    expect(locked(mountHub({ commander: true, roles: [], g }))).toEqual([])
+    expect(locked(mountHub({ roles: ['legion'], g }))).toEqual(['Event Tracker', 'Armouring Hall', 'Chronicles of Valor'])
+    expect(mountHub({ roles: ['legion'], g }).find('.dw-call').classes()).not.toContain('is-locked')
   })
 
   it('gives a locked card no link and the lock over it, and an open one neither lock nor blur', () => {

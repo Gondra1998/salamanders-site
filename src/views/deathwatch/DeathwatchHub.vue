@@ -1,12 +1,12 @@
 <script setup>
 // The fortress's front hall, as the original's destination menu: the crest and the name, one painted card for
-// each area (straight to its first view), and the card to Recruitment. The Manage button is the Watch
-// Commander's alone (a convenience only: the server enforces it). The animated door that opened onto this menu
+// each area (straight to its first view), and the card to Recruitment. The Administratum button is the Watch
+// Commander's, the desk's and the admins' (a convenience only: the server enforces it); it opens on entering a
+// mission for those who can, and on the desk for an admin, who only looks. The animated door that opened onto this menu
 // is not part of it here.
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { AREAS, LOCK_TEXT, mayOpen, resolveArea } from '../../lib/deathwatch/areas'
-import { useGates } from '../../lib/deathwatch/useGates'
 import { iconFor } from '../../lib/deathwatch/icons'
 import { useDeathwatch } from '../../stores/deathwatch'
 import DeathwatchLock from '../../components/deathwatch/DeathwatchLock.vue'
@@ -18,7 +18,6 @@ import chroniclesArt from '../../components/deathwatch/img/card-chronicles.webp'
 import relicsArt from '../../components/deathwatch/img/card-relics.webp'
 
 const store = useDeathwatch()
-const gates = useGates()
 const who = computed(() => ({ commander: store.commander, held: store.roles }))
 const ART = { eventtracker: trackerArt, armouringhall: armouringArt, chronicles: chroniclesArt, hallofrelics: relicsArt }
 // The four areas everyone sees. Manage has no card: it is a button, below.
@@ -31,14 +30,15 @@ const cards = computed(() =>
       blurb,
       art: ART[area],
       to: resolveArea({ area }).canonical,
-      locked: !mayOpen(gates.value[area], who.value),
+      locked: !mayOpen(AREAS[area].roles, who.value),
     })),
 )
-const manageTo = resolveArea({ area: 'administratum' }).canonical
+const manageShown = computed(() => mayOpen(AREAS.administratum.roles, who.value))
+const manageTo = computed(() => resolveArea({ area: 'administratum', tab: store.canEdit ? 'enter-mission' : 'manage' }).canonical)
 const recruitmentTo = resolveArea({ area: 'recruitment' }).canonical
 // The hub itself is open to everyone the gate lets in, so nobody lands in a dead end; each card and the call to
 // enlist carry their own area's lock (areas.js).
-const enlistLocked = computed(() => !mayOpen(gates.value.recruitment, who.value))
+const enlistLocked = computed(() => !mayOpen(AREAS.recruitment.roles, who.value))
 </script>
 
 <template>
@@ -74,7 +74,7 @@ const enlistLocked = computed(() => !mayOpen(gates.value.recruitment, who.value)
       </div>
       <DeathwatchLock v-if="enlistLocked" overlay />
     </div>
-    <RouterLink v-if="store.commander" class="dw-manage dw-btn rm-fade" :to="manageTo">
+    <RouterLink v-if="manageShown" class="dw-manage dw-btn rm-fade" :to="manageTo">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
         <component :is="shape[0]" v-for="(shape, i) in iconFor('administratum')" :key="i" v-bind="shape[1]" />
       </svg>

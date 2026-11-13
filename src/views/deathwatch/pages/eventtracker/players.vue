@@ -17,6 +17,6 @@ const pick = (p) => router.push({ query: { ...route.query, p } })
 
 <template>
   <TrackerState :status="data.status" :error="data.error" @retry="reload">
-    <PlayersView :R="R" :player="player" :to="live" :notes="gate.commander" @pick="pick" />
+    <PlayersView :R="R" :player="player" :to="live" :notes="gate.canEdit" @pick="pick" />
   </TrackerState>
 </template>

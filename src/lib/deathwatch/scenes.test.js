@@ -5,7 +5,7 @@ import { AREAS, mayOpen } from './areas'
 describe('SCENES', () => {
   it('names the everyday member, the Commander, one scene per standing, the gate states and the two data scenes', () => {
     expect(SCENES).toEqual([
-      'allowed', 'commander', 'legion', 'emissary', 'deployment', 'command', 'accolade',
+      'allowed', 'commander', 'legion', 'emissary', 'deployment', 'command', 'accolade', 'desk', 'admin',
       'denied', 'signin', 'checking', 'unavailable', 'empty', 'active-event',
     ])
   })
@@ -20,6 +20,8 @@ describe('sceneOf', () => {
     ['deployment', 'allowed', false, false, ['legion', 'deployment']],
     ['command', 'allowed', false, true, ['legion', 'deployment', 'command']],
     ['accolade', 'allowed', false, false, ['legion', 'xenosbane']],
+    ['desk', 'allowed', false, false, ['legion', 'deployment', 'desk']],
+    ['admin', 'allowed', false, false, ['deployment', 'admin']],
     ['denied', 'denied', false, false, []],
     ['signin', 'signin', false, false, []],
     ['checking', 'checking', false, false, []],
@@ -71,6 +73,8 @@ describe('the access list, scene by scene', () => {
     ['deployment', row(true, true, false, true, true, true)],
     ['command', row(true, true, true, true, true, true)],
     ['accolade', row(false, false, false, true, true, true)],
+    ['desk', row(true, true, false, true, true, true, true)],
+    ['admin', row(true, true, false, true, false, false, true)],
     ['commander', row(true, true, true, true, true, true, true)],
   ])('%s', (name, want) => {
     expect(opens(name)).toEqual(want)

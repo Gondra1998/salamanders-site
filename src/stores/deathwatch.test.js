@@ -7,7 +7,7 @@ vi.mock('../lib/deathwatch/fixture', () => ({ loadFixture: vi.fn() }))
 import { getMe } from '../lib/deathwatch/api'
 import { loadFixture } from '../lib/deathwatch/fixture'
 import { ME_TIMEOUT_MS, useDeathwatch } from './deathwatch'
-import { ROLES } from '../lib/deathwatch/areas'
+import { LEGACY_ROLES } from '../lib/deathwatch/areas'
 
 const apiError = (status) => Object.assign(new Error('nope'), { status })
 const deferred = () => {
@@ -125,7 +125,7 @@ describe('deathwatch store', () => {
       [{ access: true, roles: ['legion', 7, null, { a: 1 }, ['x'], 'accolade'] }, ['legion', 'accolade']],
       [{ access: true, roles: 'legion' }, []],
       [{ access: true, roles: { 0: 'legion', length: 1 } }, []],
-      [{ access: true }, ROLES.map(([r]) => r)],
+      [{ access: true }, LEGACY_ROLES],
       [{ access: true, roles: null }, []],
       [{ access: false, roles: ['legion'] }, []],
       [{ access: false }, []],
@@ -361,6 +361,21 @@ describe('deathwatch store', () => {
       expect(s).toMatchObject({ status: 'unavailable', commander: false, command: false })
     } finally {
       vi.useRealTimers()
+    }
+  })
+
+  it('lets the Watch Commander and the desk change things, and nobody else', async () => {
+    const s = useDeathwatch()
+    for (const [me, want] of [
+      [{ access: true, watchCommander: true, roles: [] }, true],
+      [{ access: true, roles: ['deployment', 'desk'] }, true],
+      [{ access: true, roles: ['deployment', 'admin'] }, false],
+      [{ access: true }, false], // a server from before the standings: never the desk
+      [{ access: false, roles: ['desk'] }, false],
+    ]) {
+      getMe.mockResolvedValue(me)
+      await s.load('tok')
+      expect(s.canEdit, JSON.stringify(me)).toBe(want)
     }
   })
 })

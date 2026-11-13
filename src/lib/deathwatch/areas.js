@@ -54,7 +54,7 @@ export const AREAS = {
       { slug: 'standard', label: 'Standard', items: ['watchbrother', 'companyheraldry'] },
       { slug: 'specialist', label: 'Specialist', items: ['reclusiarc', 'librarium', 'apothecarion', 'mechanicus'] },
       // Only Deathwatch Command (and the Watch Commander) see this tab (DeathwatchNav) or open it.
-      { slug: 'watch-command', label: 'Watch Command', command: true, roles: ['command'], items: ['watchsergeant', 'watchchaplain', 'watchlibrarian', 'watchapothecary', 'watchtechmarine'] },
+      { slug: 'watch-command', label: 'Watch Command', command: true, roles: ['command'], lock: 'Reserved for the Deathwatch Command.', items: ['watchsergeant', 'watchchaplain', 'watchlibrarian', 'watchapothecary', 'watchtechmarine'] },
       tab('restricted-wargear', 'Restricted Wargear'),
     ],
   },
@@ -84,12 +84,14 @@ export const AREAS = {
     roles: LEGION,
     tabs: [tab('terms-of-service', 'Terms of Service'), tab('requirements', 'Requirements')],
   },
+  // The Watch Commander's, the desk's (given by hand in Access: runs it) and the guild admins' (see it, change nothing).
+  // The server refuses every write but the Watch Commander's and the desk's, whatever is shown.
   administratum: {
     label: 'Administratum',
     blurb: "The Watch Commander's dashboard",
-    roles: [],
+    roles: ['desk', 'admin'],
     tabs: [
-      tab('enter-mission', 'Enter mission'),
+      { ...tab('enter-mission', 'Enter mission'), roles: ['desk'], lock: 'Reserved for the Watch Commander and the desk.' },
       tab('manage', 'Manage'),
       tab('checks', 'Checks'),
       tab('records', 'Records'),
@@ -129,3 +131,23 @@ export function gatesOf(g) {
 
 /** Whether someone may open a part that lists `roles`: the Watch Commander, or a holder of any one of them. */
 export const mayOpen = (roles, { commander, held }) => commander === true || roles.some((r) => held.includes(r))
+
+/** Whether someone may change things in the Administratum: the Watch Commander, or the desk. Never an admin. */
+export const canEdit = (who) => mayOpen(['desk'], who)
+
+/** An area's tabs that someone may open: those with no `roles` of their own, and those they hold one of. */
+export const tabsFor = (area, who) => AREAS[area].tabs.filter((t) => !t.roles || mayOpen(t.roles, who))
+
+/**
+ * What a `/deathwatch/me` with no `roles` stands for: a server from before the standings, as just after the site
+ * deploys and before the API is rebuilt. Its old rule holds: every part open but the Administratum, so never the
+ * desk or admin.
+ */
+export const LEGACY_ROLES = ['legion', 'emissary', 'deployment', 'command', 'xenosbane', 'vigilia']
+
+/** What the Watch Commander can give one person in Access (server/src/deathwatchValidate.js KINDS), in page order. */
+export const ACCESS_KINDS = [
+  ['desk', 'Desk'],
+  ['watchcommand', 'Watch Command'],
+  ['deathwatch', 'Deathwatch'],
+]

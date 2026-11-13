@@ -21,6 +21,6 @@ const pick = (id) => router.replace({ query: { ...route.query, t: String(id) } }
       <h2 class="dw-plaque">Kill Team profile</h2>
       <p class="dw-empty">No Kill Teams in the running event.</p>
     </template>
-    <KillTeamView v-else :R="R" :team-id="teamId" :to="live" :notes="gate.commander" @pick="pick" />
+    <KillTeamView v-else :R="R" :team-id="teamId" :to="live" :notes="gate.canEdit" @pick="pick" />
   </TrackerState>
 </template>

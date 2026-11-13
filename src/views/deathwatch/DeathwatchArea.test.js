@@ -316,23 +316,39 @@ describe('DeathwatchArea', () => {
     }
   })
 
-  it('gates an area as the Watch Commander set it in Access, and opens it to him whatever he set', async () => {
+  it('pays no heed to gates saved under the old Access page', async () => {
     const g = { chronicles: ['legion'], eventtracker: [] }
-    expect((await mountAt('/deathwatch/chronicles/in-memoriam', { roles: ['legion'], g })).w.find('.dw-lock').exists()).toBe(false)
-    expect((await mountAt('/deathwatch/chronicles/in-memoriam', { roles: ['xenosbane'], g })).w.find('.dw-lock').exists()).toBe(true)
-    expect((await mountAt('/deathwatch/eventtracker/players', { roles: ALL, g })).w.find('.dw-lock').exists()).toBe(true)
-    expect((await mountAt('/deathwatch/eventtracker/players', { commander: true, g })).w.find('.dw-lock').exists()).toBe(false)
+    expect((await mountAt('/deathwatch/chronicles/in-memoriam', { roles: ['legion'], g })).w.find('.dw-lock').exists()).toBe(true)
+    expect((await mountAt('/deathwatch/eventtracker/players', { roles: ALL, g })).w.find('.dw-lock').exists()).toBe(false)
+  })
+
+  it('opens the Administratum to the desk, with Enter mission, and to an admin without it, locked if asked for', async () => {
+    const desk = (await mountAt('/deathwatch/administratum/manage', { roles: ['deployment', 'desk'] })).w
+    expect(desk.find('.dw-area-restricted').exists()).toBe(false)
+    expect(desk.findAll('aside nav a').map((a) => a.text())).toContain('Enter mission')
+    const admin = (await mountAt('/deathwatch/administratum/manage', { roles: ['deployment', 'admin'] })).w
+    expect(admin.find('.dw-area-restricted').exists()).toBe(false)
+    expect(admin.findAll('aside nav a').map((a) => a.text())).not.toContain('Enter mission')
+    expect(admin.find('.mb-enter').exists()).toBe(false)
+    const asked = (await mountAt('/deathwatch/administratum/enter-mission', { roles: ['deployment', 'admin'] })).w
+    expect(asked.text()).toContain('Reserved for the Watch Commander and the desk.')
+    expect(asked.find('h2').exists()).toBe(false)
+  })
+
+  it('offers "Edit page" to the desk, and not to an admin', async () => {
+    expect((await mountAt('/deathwatch/recruitment/requirements', { roles: ['legion', 'deployment', 'desk'] })).w.find('.pe-open').exists()).toBe(true)
+    expect((await mountAt('/deathwatch/recruitment/requirements', { roles: ['legion', 'deployment', 'admin'] })).w.find('.pe-open').exists()).toBe(false)
   })
 
   it('keeps Manage restricted for Deathwatch Command, who is not the Watch Commander', async () => {
     const { w } = await mountAt('/deathwatch/administratum/checks', { commander: false, command: true })
-    expect(w.text()).toContain('Restricted to the Watch Commander.')
+    expect(w.text()).toContain('Restricted to the Administratum.')
     expect(w.find('nav').exists()).toBe(false)
   })
 
   it('shows anyone else a notice in place of the Manage area, with no way into its views', async () => {
     const { w } = await mountAt('/deathwatch/administratum/checks', { commander: false })
-    expect(w.text()).toContain('Restricted to the Watch Commander.')
+    expect(w.text()).toContain('Restricted to the Administratum.')
     expect(w.find('nav').exists()).toBe(false)
     expect(w.text()).not.toContain('This view is being rebuilt.')
     expect(w.text()).not.toContain('Checks')

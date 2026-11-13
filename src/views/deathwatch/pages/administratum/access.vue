@@ -1,66 +1,50 @@
 <script setup>
-// Manage → Access. Page access: which Discord roles open which part of the area, saved as the cfg document `g` (area
-// → roles; lib/deathwatch/areas.js has the defaults and reads it back). Manage itself stays the Watch Commander's, as
-// does everything for him. Grants: access given by hand to one Discord user who holds no role (it counts as
-// Deathwatch Deployment); listed, added by Discord user id, revoked. The server checks the Watch Commander on every
-// write, and keeps the Event Tracker's data to the roles it is opened to.
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+// Administratum → Access: the people the Watch Commander lets in by hand, above what their Discord roles give them.
+// He finds a member by display name or user id (asked of the server as he types, from the bot's member list) and gives
+// them one kind at a time: the desk, Watch Command, or the Deathwatch itself (lib/deathwatch/areas.js ACCESS_KINDS).
+// The desk and the guild's admins see the list; only he adds or removes, and the server checks that on every call.
+// Leaving the guild ends what was given for good: the server drops such a person from the list itself.
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuth } from '../../../../stores/auth'
-import { useTracker } from '../../../../lib/deathwatch/useTracker'
-import { AREAS, GATED, ROLES, gatesOf } from '../../../../lib/deathwatch/areas'
-import { addGrant, listGrants, removeGrant } from '../../../../lib/deathwatch/grants'
-import TrackerState from '../../../../components/deathwatch/tracker/TrackerState.vue'
+import { useDeathwatch } from '../../../../stores/deathwatch'
+import { ACCESS_KINDS } from '../../../../lib/deathwatch/areas'
+import { addAccess, listAccess, removeAccess, searchMembers } from '../../../../lib/deathwatch/people'
+import { useMemberSearch } from '../../../../lib/deathwatch/memberSearch'
+import { initials, safeAvatar } from '../../../../lib/rosterAvatar'
 
 const auth = useAuth()
-const { data, save, reload } = useTracker()
+const gate = useDeathwatch()
+const LABEL = Object.fromEntries(ACCESS_KINDS)
 
-// Page access: a working copy of the saved gates, as area → Set of roles.
-const saved = computed(() => gatesOf(data.cfg.g))
-const sets = reactive({})
-const fill = (g) => GATED.forEach((a) => (sets[a] = new Set(g[a])))
-watch(saved, fill, { immediate: true })
-const changed = computed(() => GATED.some((a) => sets[a].size !== saved.value[a].length || saved.value[a].some((r) => !sets[a].has(r))))
-const toggle = (a, r) => (sets[a].has(r) ? sets[a].delete(r) : sets[a].add(r))
-const gm = ref({ text: '', ok: true })
-async function saveGates() {
-  try {
-    await save('cfg', 'g', Object.fromEntries(GATED.map((a) => [a, ROLES.map(([k]) => k).filter((k) => sets[a].has(k))])))
-    gm.value = { text: 'Page access saved ✓', ok: true }
-  } catch (err) {
-    gm.value = { text: `Not saved: ${err?.message || 'error'}`, ok: false }
-  }
-}
-// Back to areas.js's defaults: the choice is deleted, not copied, so a later change to the defaults reaches it.
-async function resetGates() {
-  try {
-    await save('cfg', 'g', null)
-    gm.value = { text: 'Back to the defaults ✓', ok: true }
-  } catch (err) {
-    gm.value = { text: `Not reset: ${err?.message || 'error'}`, ok: false }
-  }
-}
-
-// Grants.
-const grants = ref([])
-const gState = ref('loading')
-const id = ref('')
-const msg = ref({ text: '', ok: true })
-const busy = ref(false)
+// The list, as the server holds it.
+const people = ref([])
+const state = ref('loading')
+const failure = ref('')
 async function load() {
   try {
-    grants.value = await listGrants(auth.token)
-    gState.value = 'ready'
+    people.value = await listAccess(auth.token)
+    state.value = 'ready'
   } catch (err) {
-    msg.value = { text: err?.message || 'The grants could not be loaded.', ok: false }
-    gState.value = 'error'
+    // An API from before this page (just after the site deploys, before the API is rebuilt) does not know the route.
+    failure.value = err?.status === 404 ? 'The access list is not available yet.' : err?.message || 'The access list could not be loaded.'
+    state.value = 'error'
   }
 }
 onMounted(load)
-// One action at a time; the list is fetched again after it, so it shows what the server holds.
-async function act(fn, done) {
+const holds = (id, kind) => people.value.some((p) => p.id === id && p.kind === kind)
+const nameOf = (p) => p.name ?? p.id
+const when = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+
+// The search, the Watch Commander's alone.
+const search = reactive(useMemberSearch((q) => searchMembers(auth.token, q)))
+
+// One change at a time; the list is fetched again after it, so it shows what the server holds.
+const msg = ref({ text: '', ok: true })
+const busy = ref(false)
+async function act(change, done) {
   busy.value = true
   try {
-    await fn()
+    await change()
     msg.value = { text: done, ok: true }
     await load()
   } catch (err) {
@@ -69,122 +53,144 @@ async function act(fn, done) {
     busy.value = false
   }
 }
-function add() {
-  const v = id.value.trim()
-  if (!/^\d{17,20}$/.test(v)) return (msg.value = { text: 'Enter a Discord user id (17 to 20 digits).', ok: false })
-  act(() => addGrant(auth.token, v), `Access granted to ${v}.`).then(() => msg.value.ok && (id.value = ''))
+const add = (m, kind) => act(() => addAccess(auth.token, m.id, kind), `${m.name} added: ${LABEL[kind]}.`)
+function remove(p) {
+  if (!confirm(`Remove ${nameOf(p)}'s ${LABEL[p.kind]} access?`)) return
+  act(() => removeAccess(auth.token, p.id, p.kind), `${nameOf(p)} removed: ${LABEL[p.kind]}.`)
 }
-function revoke(g) {
-  if (!confirm(`Revoke access for ${g.discordId}?`)) return
-  act(() => removeGrant(auth.token, g.discordId), `Access revoked for ${g.discordId}.`)
-}
-const when = (t) => (t ? new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '')
+const avatarOf = (m) => safeAvatar(m.avatar)
+const initialsOf = (m) => (m.name ? initials(m.name) : '?')
+const searching = computed(() => gate.commander)
 </script>
 
 <template>
-  <TrackerState :status="data.status" :error="data.error" @retry="reload">
-    <h2 class="dw-plaque">Page access</h2>
-    <p class="dw-sub">
-      Tick the Discord roles that may open each part of the fortress; anyone else sees it locked. The Watch Commander opens everything, and Manage is his
-      alone. The Watch Command tab of the Armouring Hall stays with Deathwatch Command.
-    </p>
-    <div class="dw-scroll">
-      <table class="dw-table ac-grid">
+  <div class="dw-page ac">
+    <h2 class="dw-plaque">Access</h2>
+    <p class="dw-sub">Discord roles still open the Deathwatch by themselves. Here are the people given access by hand.</p>
+
+    <section v-if="searching" class="ac-find" aria-label="Find a member">
+      <label class="dw-field">
+        Find a member
+        <input v-model="search.query" type="search" autocomplete="off" spellcheck="false" placeholder="Type a name or paste a user ID" />
+      </label>
+      <p v-if="search.state === 'loading'" class="dw-sub" role="status">Searching…</p>
+      <p v-else-if="search.state === 'empty'" class="dw-empty" role="status">No member matches.</p>
+      <p v-else-if="search.state === 'error'" class="dw-msg bad" role="status">{{ search.message }}</p>
+      <ul v-if="search.results.length" class="ac-results">
+        <li v-for="m in search.results" :key="m.id" class="ac-person">
+          <span class="dw-av" :data-i="initialsOf(m)" aria-hidden="true"><img v-if="avatarOf(m)" :src="avatarOf(m)" width="64" height="64" decoding="async" alt="" /></span>
+          <span class="ac-name">{{ m.name }}</span>
+          <span class="ac-id" :title="m.id">…{{ m.id.slice(-4) }}</span>
+          <span class="ac-add">
+            <button v-for="[k, l] in ACCESS_KINDS" :key="k" type="button" class="dw-btn rm-fade" :disabled="busy || holds(m.id, k)" @click="add(m, k)">
+              {{ holds(m.id, k) ? 'Added' : l }}
+            </button>
+          </span>
+        </li>
+      </ul>
+    </section>
+
+    <h2 class="dw-plaque">People with access</h2>
+    <p v-if="msg.text" class="dw-msg" :class="msg.ok ? 'ok' : 'bad'" :role="msg.ok ? 'status' : 'alert'">{{ msg.text }}</p>
+    <p v-if="state === 'loading'" class="dw-sub" role="status">Loading…</p>
+    <p v-else-if="state === 'error'" class="dw-msg bad" role="alert">{{ failure }}</p>
+    <p v-else-if="!people.length" class="dw-empty">Nobody has been given access by hand.</p>
+    <div v-else class="dw-scroll">
+      <table class="dw-table ac-list">
         <thead>
           <tr>
-            <th class="l">Role</th>
-            <th v-for="a in GATED" :key="a">{{ AREAS[a].label }}</th>
+            <th class="l">Member</th>
+            <th class="l">Access</th>
+            <th class="l">Added</th>
+            <th v-if="searching"><span class="dw-sr-only">Remove</span></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="[r, label] in ROLES" :key="r">
-            <th class="l" scope="row">{{ label }}</th>
-            <td v-for="a in GATED" :key="a">
-              <label class="ac-cell"><input type="checkbox" class="ac-box" :checked="sets[a].has(r)" :aria-label="`${label} opens ${AREAS[a].label}`" @change="toggle(a, r)" /></label>
+          <tr v-for="p in people" :key="`${p.id}:${p.kind}`">
+            <td class="l">
+              <span class="ac-person">
+                <span class="dw-av" :data-i="initialsOf(p)" aria-hidden="true"><img v-if="avatarOf(p)" :src="avatarOf(p)" width="64" height="64" decoding="async" alt="" /></span>
+                <span class="ac-name">{{ nameOf(p) }}</span>
+              </span>
             </td>
-          </tr>
-          <tr class="ac-fixed">
-            <th class="l" scope="row">Watch Commander</th>
-            <td v-for="a in GATED" :key="a">
-              <input type="checkbox" class="ac-box" checked disabled :aria-label="`Watch Commander opens ${AREAS[a].label}`" />
+            <td class="l">{{ LABEL[p.kind] }}</td>
+            <td class="l">{{ when(p.grantedAt) }} · by {{ p.grantedBy }}</td>
+            <td v-if="searching">
+              <button type="button" class="dw-btn danger rm-fade" :disabled="busy" @click="remove(p)">Remove</button>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div class="dw-actions">
-      <button type="button" class="dw-btn primary rm-fade" :disabled="!changed" @click="saveGates">Save page access</button>
-      <button type="button" class="dw-btn rm-fade" :disabled="!data.cfg.g" @click="resetGates">Back to defaults</button>
-      <span v-if="changed" class="dw-msg">Unsaved changes</span>
-      <span v-else-if="gm.text" class="dw-msg" :class="gm.ok ? 'ok' : 'bad'" role="status">{{ gm.text }}</span>
-    </div>
-
-    <h2 class="dw-plaque">Grants</h2>
-    <p class="dw-sub">
-      Let in someone who holds no role, by their Discord user id (Discord: Developer Mode on, then right-click the user, Copy User ID). A grant counts as
-      Deathwatch Deployment.
-    </p>
-    <form class="dw-form" @submit.prevent="add">
-      <label class="dw-field">
-        Discord user id
-        <input v-model="id" inputmode="numeric" autocomplete="off" placeholder="17 to 20 digits" />
-      </label>
-      <div class="dw-actions"><button type="submit" class="dw-btn rm-fade" :disabled="busy">Grant access</button></div>
-    </form>
-    <p v-if="msg.text" class="dw-msg" :class="msg.ok ? 'ok' : 'bad'" :role="gState === 'error' ? 'alert' : 'status'">{{ msg.text }}</p>
-    <p v-if="gState === 'loading'" class="dw-sub" role="status">Loading…</p>
-    <p v-else-if="gState === 'ready' && !grants.length" class="dw-empty">Nobody has been granted access by hand.</p>
-    <div v-else-if="grants.length" class="dw-scroll">
-      <table class="dw-table">
-        <thead>
-          <tr><th class="l">Discord user id</th><th class="l">Granted by</th><th>Since</th><th><span class="dw-sr-only">Revoke</span></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="g in grants" :key="g.discordId">
-            <td class="l"><b>{{ g.discordId }}</b></td>
-            <td class="l">{{ g.grantedBy }}</td>
-            <td>{{ when(g.grantedAt) }}</td>
-            <td>
-              <button type="button" class="dw-btn danger rm-fade" :disabled="busy" @click="revoke(g)">Revoke</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </TrackerState>
+  </div>
 </template>
 
 <style scoped>
-.ac-grid th:not(.l),
-.ac-grid td {
-  text-align: center;
-  white-space: normal;
-}
-.dw-table.ac-grid tbody th {
-  font: 600 0.95rem / 1.3 var(--mg-sans, inherit);
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--dw-ink);
-  white-space: nowrap;
-}
-.ac-cell {
+.ac-find {
   display: grid;
-  place-items: center;
-  min-height: 44px;
-  cursor: pointer;
+  gap: 0.75rem;
+  margin-bottom: 1.6rem;
 }
-.ac-box {
-  width: 20px;
-  height: 20px;
-  accent-color: var(--dw-accent);
-  cursor: pointer;
+.ac-results {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-.ac-box:disabled {
-  cursor: default;
+.ac-results li {
+  flex-wrap: wrap;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--dw-line-2);
+  background: rgb(255 255 255 / 0.025);
 }
-.ac-fixed th,
-.ac-fixed td {
+.ac-person {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.ac-name {
+  font-weight: 600;
+  color: var(--dw-ink);
+  overflow-wrap: anywhere;
+}
+.ac-id {
+  font: 500 0.8rem / 1 var(--dw-font-cond);
+  letter-spacing: 0.04em;
   color: var(--dw-muted);
-  border-top: 1px solid var(--dw-line-2);
+}
+.ac-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+/* The roster's avatar, as on the Event Tracker (PlayerName.vue): the initials are drawn by CSS, the picture over them. */
+.dw-av {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  font: 600 0.6875rem / 1 var(--dw-font-cond);
+  letter-spacing: 0.02em;
+  color: var(--dw-ink);
+  background: linear-gradient(180deg, #2c4137, #1a2a22);
+  border: 1px solid var(--dw-line-2);
+}
+.dw-av::before {
+  content: attr(data-i);
+}
+.dw-av img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 </style>

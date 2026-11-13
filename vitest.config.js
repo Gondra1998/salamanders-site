@@ -17,6 +17,7 @@ const GATED = [
   'src/lib/deathwatch/sheetDrag.js',
   'src/lib/deathwatch/icons.js',
   'src/stores/deathwatch.js',
+  'src/lib/deathwatch/memberSearch.js',
   'src/lib/useCompanyNotables.js',
   'server/src/displayNames.js',
   'server/src/rosterMember.js',

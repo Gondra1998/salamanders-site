@@ -13,16 +13,6 @@ const LEGION = ['legion', 'emissary']
 // (`killmarine`), which opens no part: it is there to be checked for one thing of its own.
 const ACCOLADES = ['xenosbane', 'vigilia']
 
-/** Every role a part can be opened to, in the order Manage → Access lists them, with its name there. */
-export const ROLES = [
-  ['legion', 'Legion'],
-  ['emissary', 'Emissary'],
-  ['deployment', 'Deathwatch Deployment'],
-  ['command', 'Deathwatch Command'],
-  ['xenosbane', 'Xenosbane Sigil'],
-  ['vigilia', 'Vigilia Mortis in Aeternum'],
-]
-
 /** The lock's words on an area's card and page where they are its own; any other says the lock's "Access restricted." */
 export const LOCK_TEXT = {
   eventtracker: 'Access restricted to Enlisted Brothers Only.',
@@ -115,18 +105,6 @@ export function resolveArea(params) {
   const { slug, items = [] } = tabs.find((t) => t.slug === wanted) ?? tabs[0]
   const item = items.includes(sub) ? sub : (items[0] ?? '')
   return { area, tab: slug, sub: item, canonical: `/deathwatch/${area}/${slug}${item ? `/${item}` : ''}` }
-}
-
-/** The parts Manage → Access gates: every area but Manage, which stays the Watch Commander's. */
-export const GATED = Object.keys(AREAS).filter((a) => a !== 'administratum')
-
-/**
- * Each gated area's roles: the Watch Commander's choice (the cfg document `g`, area → roles), else the defaults
- * above. A stored list keeps only the roles it knows; one that is not a list falls back to the default.
- */
-export function gatesOf(g) {
-  const known = new Set(ROLES.map(([k]) => k))
-  return Object.fromEntries(GATED.map((a) => [a, Array.isArray(g?.[a]) ? g[a].filter((r) => known.has(r)) : AREAS[a].roles]))
 }
 
 /** Whether someone may open a part that lists `roles`: the Watch Commander, or a holder of any one of them. */

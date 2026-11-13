@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createDeathwatchStore } from './deathwatchStore'
-import { MAX_ACTIVE_ACCESS, MAX_ACTIVE_GRANTS } from './deathwatchValidate'
+import { MAX_ACTIVE_ACCESS } from './deathwatchValidate'
 
 // The SQL itself is proven against real Postgres by the e2e stack (e2e/tests/deathwatch-api.spec.js).
 // Here a recording pool pins what the store asks for, in what order, and what it does on failure.
@@ -104,79 +104,6 @@ describe('writeDoc', () => {
     expect(sqls().at(-1)).toBe('rollback')
     expect(sqls()).not.toContain('commit')
     expect(release).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('grants', () => {
-  it('isGranted asks for an unrevoked grant of that user', async () => {
-    const hit = fakePool([['from deathwatch_grants', [{ one: 1 }]]])
-    expect(await createDeathwatchStore(hit.pool).isGranted(TARGET)).toBe(true)
-    expect(hit.log[0].sql).toContain('revoked_at is null')
-    expect(hit.log[0].params).toEqual([TARGET])
-    expect(await createDeathwatchStore(fakePool().pool).isGranted(TARGET)).toBe(false)
-  })
-
-  it('listGrants returns the active grants, camelCased', async () => {
-    const at = new Date('2026-01-02T03:04:05Z')
-    const { pool, log } = fakePool([['from deathwatch_grants', [{ discord_id: TARGET, granted_by: ACTOR.id, granted_at: at }]]])
-    expect(await createDeathwatchStore(pool).listGrants()).toEqual([{ discordId: TARGET, grantedBy: ACTOR.id, grantedAt: at }])
-    expect(log[0].sql).toContain('revoked_at is null')
-  })
-
-  it('grant takes the lock, inserts, and records the event', async () => {
-    const { pool, log, sqls } = fakePool([['as active', []], ['count(', [{ n: 3 }]]])
-    expect(await createDeathwatchStore(pool).grant(TARGET, ACTOR)).toBe('granted')
-    expect(sqls()).toEqual([
-      'begin',
-      has('pg_advisory_xact_lock'),
-      has('as active'),
-      has('count('),
-      has('insert into deathwatch_grants'),
-      has('insert into deathwatch_grant_events'),
-      'commit',
-    ])
-    expect(log[4].sql).toContain('revoked_at = null')
-    expect(log[4].sql).toContain('revoked_by = null')
-    expect(log[4].params).toEqual([TARGET, ACTOR.id])
-    expect(log[5].params).toEqual([TARGET, ACTOR.id, 'granted'])
-  })
-
-  it('grant is a no-op for a user who already has an active grant', async () => {
-    const { pool, sqls } = fakePool([['as active', [{ active: true }]]])
-    expect(await createDeathwatchStore(pool).grant(TARGET, ACTOR)).toBe('exists')
-    expect(sqls()).toEqual(['begin', has('pg_advisory_xact_lock'), has('as active'), 'commit'])
-  })
-
-  it('grant renews a revoked grant', async () => {
-    const { pool, sqls } = fakePool([['as active', [{ active: false }]], ['count(', [{ n: 0 }]]])
-    expect(await createDeathwatchStore(pool).grant(TARGET, ACTOR)).toBe('granted')
-    expect(sqls()).toContainEqual(has('insert into deathwatch_grants'))
-  })
-
-  it('grant refuses at the active-grant limit and inserts nothing', async () => {
-    const { pool, sqls } = fakePool([['as active', []], ['count(', [{ n: String(MAX_ACTIVE_GRANTS) }]]])
-    expect(await createDeathwatchStore(pool).grant(TARGET, ACTOR)).toBe('limit')
-    expect(sqls()).toEqual(['begin', has('pg_advisory_xact_lock'), has('as active'), has('count('), 'commit'])
-  })
-
-  it('grant still has room one below the limit', async () => {
-    const { pool } = fakePool([['as active', []], ['count(', [{ n: MAX_ACTIVE_GRANTS - 1 }]]])
-    expect(await createDeathwatchStore(pool).grant(TARGET, ACTOR)).toBe('granted')
-  })
-
-  it('revoke marks the grant revoked and records the event', async () => {
-    const { pool, log, sqls } = fakePool([['update deathwatch_grants', [{ discord_id: TARGET }]]])
-    expect(await createDeathwatchStore(pool).revoke(TARGET, ACTOR)).toBe('revoked')
-    expect(sqls()).toEqual(['begin', has('update deathwatch_grants'), has('insert into deathwatch_grant_events'), 'commit'])
-    expect(log[1].sql).toContain('revoked_at is null')
-    expect(log[1].params).toEqual([TARGET, ACTOR.id])
-    expect(log[2].params).toEqual([TARGET, ACTOR.id, 'revoked'])
-  })
-
-  it('revoke reports none, and records nothing, when there is no active grant', async () => {
-    const { pool, sqls } = fakePool([['update deathwatch_grants', []]])
-    expect(await createDeathwatchStore(pool).revoke(TARGET, ACTOR)).toBe('none')
-    expect(sqls()).toEqual(['begin', has('update deathwatch_grants'), 'commit'])
   })
 })
 

@@ -10,8 +10,6 @@ import {
   isKind,
   parseAccessBody,
   parseDocWrite,
-  parseGrantBody,
-  MAX_ACTIVE_GRANTS,
 } from './deathwatchValidate'
 
 const write = (over = {}) => ({ col: 'teams', id: 'alpha', op: 'set', doc: { n: 1 }, ...over })
@@ -23,7 +21,6 @@ describe('limits', () => {
     expect(MAX_DOC_BYTES).toBe(1_048_576)
     expect(MAX_BODY_BYTES).toBe(2_097_152)
     expect(MAX_ACTIVE_ACCESS).toBe(1000)
-    expect(MAX_ACTIVE_GRANTS).toBe(200)
     expect(KINDS).toEqual(['deathwatch', 'watchcommand', 'desk'])
   })
 })
@@ -116,20 +113,6 @@ describe('parseAccessBody', () => {
     for (const kind of ['Desk', 'DESK', ' desk', 'admin', 'deployment', 'command', '', '__proto__', 'toString', ['desk'], { desk: 1 }, null, undefined, 1]) {
       expect(parseAccessBody({ discordId: ID, kind })).toBe('Unknown access kind.')
     }
-  })
-})
-
-describe('parseGrantBody', () => {
-  it('accepts 17 to 20 digits and returns only the id', () => {
-    for (const discordId of ['1'.repeat(17), '2'.repeat(18), '3'.repeat(20)]) {
-      expect(parseGrantBody({ discordId, extra: 'ignored' })).toEqual({ discordId })
-    }
-  })
-
-  it('rejects anything else', () => {
-    const bad = ['1'.repeat(16), '1'.repeat(21), 'abc', ' ' + '1'.repeat(18), '1'.repeat(18) + '\n', 123456789012345678, undefined]
-    for (const discordId of bad) expect(isError(parseGrantBody({ discordId }))).toBe(true)
-    for (const b of [null, undefined, [], 'x', {}]) expect(isError(parseGrantBody(b))).toBe(true)
   })
 })
 

@@ -13,8 +13,6 @@ export const MAX_BODY_BYTES = 2_097_152
 // Watch Command tab, or the Administratum desk. A ceiling on the active rows, far above any real use, only bounds abuse.
 export const KINDS = ['deathwatch', 'watchcommand', 'desk']
 export const MAX_ACTIVE_ACCESS = 1000
-// The old grants (deathwatch_grants), until their routes go (Task 4 of the access plan).
-export const MAX_ACTIVE_GRANTS = 200
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const SNOWFLAKE = /^\d{17,20}$/
@@ -61,11 +59,4 @@ export function parseAccessBody(b) {
   if (!isDiscordId(b.discordId)) return 'Enter a Discord user id (17 to 20 digits).'
   if (!isKind(b.kind)) return 'Unknown access kind.'
   return { discordId: b.discordId, kind: b.kind }
-}
-
-/** → { discordId }, or an error message string. */
-export function parseGrantBody(b) {
-  if (!isObject(b)) return 'Malformed request.'
-  if (!isDiscordId(b.discordId)) return 'Enter a Discord user id (17 to 20 digits).'
-  return { discordId: b.discordId }
 }

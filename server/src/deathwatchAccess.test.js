@@ -2,12 +2,18 @@ import { describe, it, expect, vi } from 'vitest'
 import * as fc from 'fast-check'
 import { createDeathwatchAccess } from './deathwatchAccess'
 import { Upstream, createDiscordRoles } from './discordRoles'
+import { createAdminCheck } from './deathwatchAdmins'
 
 // Invented ids only: the real role and user ids never enter the repo.
 const DW = '200000000000000101'
 const WC = '200000000000000102'
 const LEGION = '200000000000000199'
 const CMD = '200000000000000110' // the Deathwatch Command role: a different role from the Watch Commander
+// Every member here joined long before anything was given to them, unless a test says otherwise.
+const EARLY = '2025-01-01T00:00:00.000Z'
+const LATE = new Date('2026-06-01T00:00:00.000Z')
+const given = (...kinds) => kinds.map((kind) => ({ kind, grantedAt: LATE }))
+const NOBODY_ADMIN = { isAdmin: async () => false }
 
 const USERS = {
   commander: { id: '300000000000000001', username: 'commander', roles: [WC] },
@@ -23,7 +29,7 @@ const TOKENS = { ...USERS, 'tok-a': USERS.watcher, 'tok-b': USERS.watcher }
 const req = (token) =>
   new Request('https://api.test/deathwatch/me', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
 
-function setup({ granted = [], ...opts } = {}) {
+function setup({ granted = [], delegated = {}, joinedAt = EARLY, ...opts } = {}) {
   const clock = { t: 1_000 }
   const fail = { identify: false, roles: false }
   const roles = {
@@ -32,24 +38,35 @@ function setup({ granted = [], ...opts } = {}) {
       const u = TOKENS[(request.headers.get('Authorization') || '').slice(7)]
       return u ? { id: u.id, username: u.username } : null
     }),
-    rolesOf: vi.fn(async (id) => {
+    memberOf: vi.fn(async (id) => {
       if (fail.roles) throw new Upstream()
-      return Object.values(USERS).find((u) => u.id === id).roles
+      const held = Object.values(USERS).find((u) => u.id === id).roles
+      return held === null ? null : { roles: held, joinedAt }
     }),
-    isAdmin: async () => false, // nobody here is an administrator; the last describe runs the real seam
   }
-  const grants = new Set(granted)
-  const store = { isGranted: vi.fn(async (id) => grants.has(id)) }
+  // What the Watch Commander has given whom (deathwatch_access): a "grant" is the general level, given after joining.
+  const delegations = new Map(Object.entries(delegated))
+  for (const id of granted) delegations.set(id, given('deathwatch'))
+  const removed = []
+  const store = {
+    delegationsOf: vi.fn(async (id) => [...(delegations.get(id) ?? [])]),
+    removeAccess: async (id, kind, actor) => {
+      removed.push([id, kind, actor])
+      delegations.set(id, (delegations.get(id) ?? []).filter((d) => d.kind !== kind))
+      return 'removed'
+    },
+  }
   const access = createDeathwatchAccess({
     roles,
     store,
+    admins: NOBODY_ADMIN, // nobody here is an administrator; the admin describe runs the real seam
     deathwatchRoleId: DW,
     commanderRoleId: WC,
     deathwatchCommandRoleId: CMD,
     now: () => clock.t,
     ...opts,
   })
-  return { access, roles, store, clock, fail, grants }
+  return { access, roles, store, clock, fail, delegations, removed }
 }
 
 describe('configured', () => {
@@ -79,6 +96,7 @@ describe('the verdict', () => {
       access: true,
       watchCommander: true,
       deathwatchCommand: false,
+      desk: true,
       roles: [],
     })
   })
@@ -114,10 +132,11 @@ describe('the verdict', () => {
     }
   })
 
-  it('lets a granted user who is not in the guild in', async () => {
-    const { access } = setup({ granted: [USERS.stranger.id] })
+  it('gives someone not in the guild nothing, whatever was given to them, and leaves the row alone', async () => {
+    const { access, removed } = setup({ delegated: { [USERS.stranger.id]: given('deathwatch', 'desk', 'watchcommand') } })
     const v = await access.resolve(req('stranger'))
-    expect([v.access, v.watchCommander]).toEqual([true, false])
+    expect([v.access, v.desk, v.roles]).toEqual([false, false, []])
+    expect(removed).toEqual([])
   })
 
   it('denies, without an error, a user who is not in the guild and has no grant', async () => {
@@ -126,17 +145,9 @@ describe('the verdict', () => {
     expect([v.access, v.watchCommander]).toEqual([false, false])
   })
 
-  it('does not touch the grants table for someone a role already admits', async () => {
-    const { access, store } = setup()
-    await access.resolve(req('watcher'))
-    await access.resolve(req('commander'))
-    expect(store.isGranted).not.toHaveBeenCalled()
-  })
-
-  it('asks the grants table about the user it identified', async () => {
-    const { access, store } = setup()
-    await access.resolve(req('plain'))
-    expect(store.isGranted).toHaveBeenCalledWith(USERS.plain.id)
+  it('counts only what was given to the user it identified', async () => {
+    const { access } = setup({ granted: [USERS.watcher.id] })
+    expect((await access.resolve(req('plain'))).access).toBe(false)
   })
 })
 
@@ -145,8 +156,9 @@ describe('the Deathwatch Command role', () => {
   // `deathwatchCommandRoleId` is passed through as given, `undefined` included (a default would swallow it); CMD when absent.
   const verdictHolding = ({ held, granted = false, ...rest }) =>
     createDeathwatchAccess({
-      roles: { identify: async () => ({ id: ME, username: 'me' }), rolesOf: async () => held, isAdmin: async () => false },
-      store: { isGranted: async () => granted },
+      roles: { identify: async () => ({ id: ME, username: 'me' }), memberOf: async () => ({ roles: held, joinedAt: EARLY }) },
+      store: { delegationsOf: async () => (granted ? given('deathwatch') : []) },
+      admins: NOBODY_ADMIN,
       deathwatchRoleId: DW,
       commanderRoleId: WC,
       deathwatchCommandRoleId: 'deathwatchCommandRoleId' in rest ? rest.deathwatchCommandRoleId : CMD,
@@ -234,7 +246,7 @@ describe('no identity, no cache', () => {
     expect(await access.resolve(req('nobody'))).toBeNull()
     expect(await access.resolve(req('nobody'))).toBeNull()
     expect(roles.identify).toHaveBeenCalledTimes(3)
-    expect(roles.rolesOf).not.toHaveBeenCalled()
+    expect(roles.memberOf).not.toHaveBeenCalled()
   })
 })
 
@@ -263,7 +275,7 @@ describe('the verdict cache', () => {
     clock.t = 1_000 + 29_999
     await access.resolve(req('watcher'))
     expect(roles.identify).toHaveBeenCalledTimes(1)
-    expect(roles.rolesOf).toHaveBeenCalledTimes(1)
+    expect(roles.memberOf).toHaveBeenCalledTimes(1)
     clock.t = 1_000 + 30_000
     await access.resolve(req('watcher'))
     expect(roles.identify).toHaveBeenCalledTimes(2)
@@ -307,9 +319,9 @@ describe('the verdict cache', () => {
   })
 
   it('drops every cached verdict on forget', async () => {
-    const { access, roles, grants } = setup()
+    const { access, roles, delegations } = setup()
     expect((await access.resolve(req('plain'))).access).toBe(false)
-    grants.add(USERS.plain.id)
+    delegations.set(USERS.plain.id, given('deathwatch'))
     expect((await access.resolve(req('plain'))).access).toBe(false) // still the cached answer
     access.forget()
     expect((await access.resolve(req('plain'))).access).toBe(true)
@@ -317,14 +329,14 @@ describe('the verdict cache', () => {
   })
 
   it('does not remember a verdict that a forget() overtook while it was being looked up', async () => {
-    const { access, store, grants } = setup({ granted: [USERS.plain.id] })
+    const { access, store, delegations } = setup({ granted: [USERS.plain.id] })
     let answer
-    store.isGranted.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+    store.delegationsOf.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
     const inFlight = access.resolve(req('plain')) // a read that is about to be told "granted"
-    await vi.waitFor(() => expect(store.isGranted).toHaveBeenCalled())
-    grants.delete(USERS.plain.id) // the grant is revoked, and every cached verdict dropped,
+    await vi.waitFor(() => expect(store.delegationsOf).toHaveBeenCalled())
+    delegations.delete(USERS.plain.id) // the grant is revoked, and every cached verdict dropped,
     access.forget() // while that lookup is still running
-    answer(true)
+    answer(given('deathwatch'))
     expect((await inFlight).access).toBe(true) // the caller who asked early still gets what was true then
     expect((await access.resolve(req('plain'))).access).toBe(false) // but it was not kept for the next read
   })
@@ -355,10 +367,10 @@ describe('several Deathwatch roles', () => {
     const access = createDeathwatchAccess({
       roles: {
         identify: async () => ({ id: '300000000000000009', username: 'u' }),
-        rolesOf: async () => held,
-        isAdmin: async () => false,
+        memberOf: async () => ({ roles: held, joinedAt: EARLY }),
       },
-      store: { isGranted: async () => false },
+      store: { delegationsOf: async () => [] },
+      admins: NOBODY_ADMIN,
       deathwatchRoleId,
       commanderRoleId: WC,
     })
@@ -488,7 +500,7 @@ describe('administrators and the guild owner', () => {
     }
     const routes = {
       '/users/@me': { status: 200, body: { id: ME, username: 'me' } },
-      [`/v10/guilds/${GUILD}/members/${ME}`]: { status: 200, body: { roles: held } },
+      [`/v10/guilds/${GUILD}/members/${ME}`]: { status: 200, body: { roles: held, joined_at: EARLY } },
       [`/v10/guilds/${GUILD}`]: { status: guildStatus, body: guild },
     }
     const fetchImpl = async (url) => {
@@ -498,7 +510,8 @@ describe('administrators and the guild owner', () => {
     const roles = createDiscordRoles({ fetchImpl, apiBase: 'https://d.test/api', guildId: GUILD, botToken: 'bot' })
     const access = createDeathwatchAccess({
       roles,
-      store: { isGranted: async () => granted },
+      store: { delegationsOf: async () => (granted ? given('deathwatch') : []) },
+      admins: createAdminCheck({ roles }),
       deathwatchRoleId,
       commanderRoleId: WC,
       deathwatchCommandRoleId: CMD,
@@ -560,10 +573,13 @@ describe('administrators and the guild owner', () => {
       const has = Object.fromEntries(ways.map((w, i) => [w, Boolean(mask & (1 << i))]))
       const held = [has.admin && ADMIN_ROLE, has.reader && DW, has.commander && WC, has.command && CMD].filter(Boolean)
       const v = await verdictFor({ owner: has.owner ? ME : OWNER, held, granted: has.granted })
-      // The Watch Commander opens everything, so nobody asks the grants table or the guild about them.
-      const deployment = has.reader || has.command || (!has.commander && (has.owner || has.admin || has.granted))
+      // The Watch Commander opens everything, so nobody asks the guild whether he is an admin too. What was given to
+      // a member counts whoever they are.
+      const admin = !has.commander && (has.owner || has.admin)
+      const deployment = has.reader || has.command || has.granted || admin
       expect(v.deathwatchCommand, JSON.stringify(has)).toBe(has.command)
-      expect(v.roles, JSON.stringify(has)).toEqual([deployment && 'deployment', has.command && 'command'].filter(Boolean))
+      expect(v.roles, JSON.stringify(has)).toEqual([deployment && 'deployment', has.command && 'command', admin && 'admin'].filter(Boolean))
+      expect(v.desk, JSON.stringify(has)).toBe(has.commander)
       expect(standing(v), JSON.stringify(has)).toEqual([ways.some((w) => has[w]), has.commander])
     }
   })
@@ -580,14 +596,13 @@ describe('administrators and the guild owner', () => {
 
   it('lets an error that is not Upstream through, whatever else is held', async () => {
     const access = createDeathwatchAccess({
-      roles: {
-        identify: async () => ({ id: ME, username: 'me' }),
-        rolesOf: async () => [LEGION],
+      roles: { identify: async () => ({ id: ME, username: 'me' }), memberOf: async () => ({ roles: [LEGION], joinedAt: EARLY }) },
+      admins: {
         isAdmin: async () => {
           throw new TypeError('bug')
         },
       },
-      store: { isGranted: async () => false },
+      store: { delegationsOf: async () => [] },
       deathwatchRoleId: DW,
       commanderRoleId: WC,
       deathwatchCommandRoleId: CMD,
@@ -605,8 +620,9 @@ describe('the Legion, Emissary and award standings', () => {
   const ME = '300000000000000031'
   const verdictHolding = (held, opts = {}) =>
     createDeathwatchAccess({
-      roles: { identify: async () => ({ id: ME, username: 'me' }), rolesOf: async () => held, isAdmin: async () => false },
-      store: { isGranted: async () => false },
+      roles: { identify: async () => ({ id: ME, username: 'me' }), memberOf: async () => ({ roles: held, joinedAt: EARLY }) },
+      store: { delegationsOf: async () => [] },
+      admins: NOBODY_ADMIN,
       deathwatchRoleId: DW,
       commanderRoleId: WC,
       deathwatchCommandRoleId: CMD,
@@ -662,5 +678,112 @@ describe('the Legion, Emissary and award standings', () => {
     const configured = (opts) => createDeathwatchAccess({ roles: {}, store: {}, ...opts }).configured
     expect(configured({ commanderRoleId: WC, legionRoleId: LEGION, emissaryRoleId: EMI, xenosbaneRoleId: XEN })).toBe(false)
     expect(configured({ deathwatchRoleId: DW, commanderRoleId: WC, legionRoleId: 'x' })).toBe(true)
+  })
+})
+
+describe('what the Watch Commander gives by hand, and leaving the guild', () => {
+  const resolveAs = async (who, opts) => {
+    const t = setup(opts)
+    return { ...t, v: await t.access.resolve(req(who)) }
+  }
+
+  it('the desk lets a plain member run the desk, and in at the general level', async () => {
+    const { v } = await resolveAs('plain', { delegated: { [USERS.plain.id]: given('desk') } })
+    expect([v.access, v.watchCommander, v.desk, v.deathwatchCommand, v.roles]).toEqual([true, false, true, false, ['deployment', 'desk']])
+  })
+
+  it('Watch Command is the same as holding the Deathwatch Command role', async () => {
+    const { v } = await resolveAs('plain', { delegated: { [USERS.plain.id]: given('watchcommand') } })
+    expect([v.access, v.desk, v.deathwatchCommand, v.roles]).toEqual([true, false, true, ['deployment', 'command']])
+  })
+
+  it('the general level is deployment and nothing more', async () => {
+    const { v } = await resolveAs('plain', { delegated: { [USERS.plain.id]: given('deathwatch') } })
+    expect([v.access, v.desk, v.deathwatchCommand, v.roles]).toEqual([true, false, false, ['deployment']])
+  })
+
+  it('adds to what a role already gives', async () => {
+    const { v } = await resolveAs('watcher', { delegated: { [USERS.watcher.id]: given('desk', 'watchcommand') } })
+    expect([v.desk, v.deathwatchCommand, v.roles]).toEqual([true, true, ['deployment', 'command', 'desk']])
+  })
+
+  it('the Watch Commander runs the desk without being given it', async () => {
+    const { v } = await resolveAs('commander')
+    expect([v.access, v.desk, v.roles]).toEqual([true, true, []])
+  })
+
+  it('an admin sees, and runs nothing', async () => {
+    const { v } = await resolveAs('plain', { admins: { isAdmin: async () => true } })
+    expect([v.access, v.desk, v.watchCommander, v.roles]).toEqual([true, false, false, ['deployment', 'admin']])
+  })
+
+  it('the Watch Commander is never asked about, or named, as an admin', async () => {
+    const { v } = await resolveAs('commander', { admins: { isAdmin: async () => true } })
+    expect(v.roles).toEqual([])
+  })
+
+  it('someone who left and came back has lost it: it counts for nothing and is removed', async () => {
+    const opts = { joinedAt: '2026-07-01T00:00:00.000Z', delegated: { [USERS.plain.id]: given('desk', 'deathwatch') } }
+    const { v, removed, access } = await resolveAs('plain', opts)
+    expect([v.access, v.desk, v.roles]).toEqual([false, false, []])
+    expect(removed).toEqual([
+      [USERS.plain.id, 'desk', 'left-guild'],
+      [USERS.plain.id, 'deathwatch', 'left-guild'],
+    ])
+    access.forget()
+    expect((await access.resolve(req('plain'))).access).toBe(false)
+  })
+
+  it('a rejoin one second after it was given is still a rejoin, roster or no roster', async () => {
+    const { v, removed } = await resolveAs('plain', {
+      joinedAt: new Date(LATE.getTime() + 1000).toISOString(),
+      delegated: { [USERS.plain.id]: given('desk') },
+    })
+    expect([v.access, v.desk]).toEqual([false, false])
+    expect(removed).toEqual([[USERS.plain.id, 'desk', 'left-guild']])
+  })
+
+  it('joining at the very instant it was given is not before it', async () => {
+    const { v, removed } = await resolveAs('plain', { joinedAt: LATE.toISOString(), delegated: { [USERS.plain.id]: given('desk') } })
+    expect(v.desk).toBe(false)
+    expect(removed).toHaveLength(1)
+  })
+
+  it('a join date Discord did not give proves nothing: it neither counts nor is removed', async () => {
+    for (const joinedAt of [null, 'garbage']) {
+      const { v, removed } = await resolveAs('plain', { joinedAt, delegated: { [USERS.plain.id]: given('desk') } })
+      expect([v.access, v.desk]).toEqual([false, false])
+      expect(removed).toEqual([])
+    }
+  })
+
+  it('a desk delegate keeps the desk while the guild lookup for admins is down', async () => {
+    const down = { isAdmin: async () => Promise.reject(new Upstream()) }
+    const { v } = await resolveAs('plain', { admins: down, delegated: { [USERS.plain.id]: given('desk') } })
+    expect([v.access, v.desk, v.roles]).toEqual([true, true, ['deployment', 'desk']])
+  })
+
+  it('a plain member fails closed while it is down', async () => {
+    const t = setup({ admins: { isAdmin: async () => Promise.reject(new Upstream()) } })
+    await expect(t.access.resolve(req('plain'))).rejects.toBeInstanceOf(Upstream)
+  })
+
+  it('property: only a known kind, given after joining, ever adds anything', async () => {
+    const kind = fc.constantFrom('deathwatch', 'watchcommand', 'desk', 'admin', 'deployment', 'command', 'Desk', '', '__proto__')
+    const when = fc.constantFrom('after', 'before', 'unknown')
+    await fc.assert(
+      fc.asyncProperty(fc.array(fc.record({ kind, when }), { maxLength: 6 }), async (list) => {
+        const grantedAt = { after: LATE, before: new Date('2024-01-01T00:00:00Z'), unknown: 'not a date' }
+        const delegated = { [USERS.plain.id]: list.map((d) => ({ kind: d.kind, grantedAt: grantedAt[d.when] })) }
+        const { access } = setup({ delegated })
+        const v = await access.resolve(req('plain'))
+        const valid = new Set(list.filter((d) => d.when === 'after').map((d) => d.kind))
+        const deployed = ['deathwatch', 'watchcommand', 'desk'].some((k) => valid.has(k))
+        expect(v.desk).toBe(valid.has('desk'))
+        expect(v.deathwatchCommand).toBe(valid.has('watchcommand'))
+        expect(v.roles).toEqual([deployed && 'deployment', valid.has('watchcommand') && 'command', valid.has('desk') && 'desk'].filter(Boolean))
+        expect(v.access).toBe(deployed)
+      }),
+    )
   })
 })

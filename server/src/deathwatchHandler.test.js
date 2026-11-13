@@ -15,7 +15,7 @@ const USERS = {
   watcher: { id: '300000000000000002', roles: [DW] },
   command: { id: '300000000000000007', roles: [DW, CMD] }, // Deathwatch Command, never the Watch Commander
   commandOnly: { id: '300000000000000008', roles: [CMD] }, // the role without the Deathwatch one: deployed all the same
-  granted: { id: '300000000000000003', roles: null }, // not in the guild; gets a grant in some tests
+  granted: { id: '300000000000000003', roles: [] }, // in the guild with no role; gets a grant in some tests
   plain: { id: '300000000000000004', roles: [] },
   legion: { id: '300000000000000005', roles: [LEGION] }, // in, but no Event Tracker
   stranger: { id: '300000000000000006', roles: null }, // not in the guild, never granted
@@ -46,7 +46,8 @@ function memStore() {
       history.push({ col, id, op, doc, actor: actor.id })
       return { changed: true }
     }),
-    isGranted: vi.fn(async (id) => grants.get(id)?.active === true),
+    // A grant is the general level given by hand, after the member joined (deathwatchAccess.js).
+    delegationsOf: vi.fn(async (id) => (grants.get(id)?.active ? [{ kind: 'deathwatch', grantedAt: new Date('2026-06-01T00:00:00Z') }] : [])),
     listGrants: vi.fn(async () =>
       [...grants].filter(([, g]) => g.active).map(([discordId, g]) => ({ discordId, grantedBy: g.by, grantedAt: 't0' })),
     ),
@@ -78,13 +79,16 @@ function setup({ configured = true, roster = null, deploymentRoleIds = [DW], fac
       const u = byToken(request)
       return u ? { id: u.id, username: 'u' + u.id } : null
     }),
-    rolesOf: vi.fn(async (id) => Object.values(users).find((u) => u.id === id).roles),
-    isAdmin: async () => false, // nobody here is an administrator
+    memberOf: vi.fn(async (id) => {
+      const held = Object.values(users).find((u) => u.id === id).roles
+      return held === null ? null : { roles: held, joinedAt: '2025-01-01T00:00:00.000Z' }
+    }),
   }
   const store = memStore()
   const access = createDeathwatchAccess({
     roles,
     store,
+    admins: { isAdmin: async () => false }, // nobody here is an administrator
     deathwatchRoleId: configured ? DW : undefined,
     commanderRoleId: configured ? WC : undefined,
     deathwatchCommandRoleId: CMD, // set even when the area is not: it must not configure anything
@@ -180,7 +184,7 @@ describe('routing and the common failures', () => {
 
   it('lets an unexpected error propagate', async () => {
     const { call, roles } = setup()
-    roles.rolesOf.mockRejectedValueOnce(new Error('db down'))
+    roles.memberOf.mockRejectedValueOnce(new Error('db down'))
     await expect(call('commander', 'GET', '/deathwatch/me')).rejects.toThrow('db down')
   })
 
@@ -363,7 +367,7 @@ describe('GET /deathwatch/data', () => {
     const { call, roles } = setup()
     await call('watcher', 'GET', '/deathwatch/data')
     await call('watcher', 'GET', '/deathwatch/data')
-    expect(roles.rolesOf).toHaveBeenCalledTimes(1)
+    expect(roles.memberOf).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -5,6 +5,8 @@
  *
  * identify()  → {id, username} | null (no/invalid token). Throws Upstream.
  * rolesOf()   → role id[] | null (not in the guild). Throws Upstream.
+ * memberOf()  → { roles, joinedAt } | null: the same lookup, with when the present membership began (or null).
+ * guildAdmins() → { ownerId, adminRoleIds, everyoneAdmin }: whom the guild makes an admin. Throws Upstream.
  * isAdmin()   → guild owner, or a held role (incl. @everyone) grants
  *               Administrator. Throws Upstream.
  * Upstream = Discord unreachable, misconfigured, or answering oddly; callers
@@ -13,6 +15,9 @@
 const TOKEN = /^Bearer ([A-Za-z0-9._~+/-]{1,512}=*)$/
 const SNOWFLAKE = /^\d{17,20}$/
 const ADMINISTRATOR = 0x8n
+// A role's permissions as a bigint; anything that is not digits is none.
+const perms = (r) => BigInt(/^\d{1,40}$/.test(r.permissions) ? r.permissions : 0)
+const carriesAdmin = (r) => (perms(r) & ADMINISTRATOR) === ADMINISTRATOR
 
 export class Upstream extends Error {}
 
@@ -57,9 +62,27 @@ export function createDiscordRoles({ fetchImpl = fetch, apiBase, guildId, botTok
     if (guild.body.owner_id === userId) return true
     // @everyone's role id is the guild id; its permissions apply to everyone.
     const held = new Set([...(roles || []), guildId])
-    const perms = (r) => BigInt(/^\d{1,40}$/.test(r.permissions) ? r.permissions : 0)
-    return guild.body.roles.some((r) => held.has(r.id) && (perms(r) & ADMINISTRATOR) === ADMINISTRATOR)
+    return guild.body.roles.some((r) => held.has(r.id) && carriesAdmin(r))
   }
 
-  return { identify, rolesOf, isAdmin }
+  async function memberOf(userId) {
+    const member = await bot(`/v10/guilds/${guildId}/members/${userId}`)
+    if (member.status === 404) return null
+    if (member.status !== 200 || !Array.isArray(member.body?.roles)) throw new Upstream()
+    return { roles: member.body.roles, joinedAt: typeof member.body.joined_at === 'string' ? member.body.joined_at : null }
+  }
+
+  async function guildAdmins() {
+    const guild = await bot(`/v10/guilds/${guildId}`)
+    if (guild.status !== 200 || !Array.isArray(guild.body?.roles)) throw new Upstream()
+    const roles = guild.body.roles.filter((r) => typeof r?.id === 'string')
+    return {
+      ownerId: typeof guild.body.owner_id === 'string' ? guild.body.owner_id : null,
+      adminRoleIds: roles.filter((r) => r.id !== guildId && carriesAdmin(r)).map((r) => r.id),
+      // @everyone's role id is the guild id; its permissions apply to everyone.
+      everyoneAdmin: roles.some((r) => r.id === guildId && carriesAdmin(r)),
+    }
+  }
+
+  return { identify, rolesOf, isAdmin, memberOf, guildAdmins }
 }

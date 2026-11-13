@@ -130,15 +130,20 @@ describe('memberFacts', () => {
     expect(memberFacts({ roles: [], user: { id: [UID] } }, GUILD)).toBe(null)
   })
 
-  it('reads id, name, avatar, bot and roles', () => {
-    const f = memberFacts(raw({ avatar: HASH, user: { id: UID, username: 't', bot: true } }), GUILD)
+  it('reads id, name, avatar, bot, roles and when they joined', () => {
+    const f = memberFacts(raw({ avatar: HASH, joined_at: '2025-03-04T05:06:07.000000+00:00', user: { id: UID, username: 't', bot: true } }), GUILD)
     expect(f).toEqual({
       id: UID,
       name: 'Brother Tester',
       avatar: `https://cdn.discordapp.com/guilds/${GUILD}/users/${UID}/avatars/${HASH}.png?size=64`,
       bot: true,
       roles: new Set(['1', '2']),
+      joinedAt: '2025-03-04T05:06:07.000000+00:00',
     })
+  })
+
+  it('has no join date unless Discord gave one as a string', () => {
+    for (const joined_at of [undefined, null, 1735689600000, {}, ['2025-01-01']]) expect(memberFacts(raw({ joined_at }), GUILD).joinedAt).toBe(null)
   })
 
   it('is a bot only when the flag is exactly true', () => {

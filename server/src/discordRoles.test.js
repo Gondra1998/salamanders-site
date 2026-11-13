@@ -224,3 +224,77 @@ describe('Discord unreachable', () => {
     await expect(unreachable(async () => broken).rolesOf(USER)).rejects.toBeInstanceOf(Upstream)
   })
 })
+
+describe('memberOf', () => {
+  const at = (route) => make({ [`/v10/guilds/${GUILD}/members/${USER}`]: route }).roles.memberOf(USER)
+
+  it('returns the roles and when they joined, with the bot token', async () => {
+    const { roles, d } = make({ [`/v10/guilds/${GUILD}/members/${USER}`]: { status: 200, body: { roles: [PLAIN_ROLE], joined_at: '2025-01-01T00:00:00.000000+00:00' } } })
+    expect(await roles.memberOf(USER)).toEqual({ roles: [PLAIN_ROLE], joinedAt: '2025-01-01T00:00:00.000000+00:00' })
+    expect(d.seen[0][1]).toBe('Bot bot')
+  })
+
+  it('is null for someone not in the guild', async () => {
+    await expect(at({ status: 404, body: { message: 'Unknown Member' } })).resolves.toBeNull()
+  })
+
+  it('has no join date unless it is a string', async () => {
+    for (const joined_at of [undefined, null, 1735689600000, {}]) {
+      await expect(at({ status: 200, body: { roles: [], joined_at } })).resolves.toEqual({ roles: [], joinedAt: null })
+    }
+  })
+
+  it.each([
+    ['500', { status: 500, body: { roles: [PLAIN_ROLE] } }],
+    ['403', { status: 403, body: {} }],
+    ['200 without a roles array', { status: 200, body: { roles: 'x', joined_at: '2025-01-01T00:00:00Z' } }],
+    ['200 with a body that is not JSON', { status: 200, raw: 'nope' }],
+  ])('a %s is a failure, never an answer', async (_, route) => {
+    await expect(at(route)).rejects.toBeInstanceOf(Upstream)
+  })
+
+  it('a network failure is a failure', async () => {
+    const roles = createDiscordRoles({ fetchImpl: async () => { throw new Error('down') }, apiBase: 'https://d.test/api', guildId: GUILD, botToken: 'bot' })
+    await expect(roles.memberOf(USER)).rejects.toBeInstanceOf(Upstream)
+  })
+})
+
+describe('guildAdmins', () => {
+  const read = (route) => make({ [`/v10/guilds/${GUILD}`]: route }).roles.guildAdmins()
+
+  it('names the owner and the roles that carry the Administrator permission', async () => {
+    await expect(read(guild())).resolves.toEqual({ ownerId: '9', adminRoleIds: [ADMIN_ROLE], everyoneAdmin: false })
+  })
+
+  it('says when @everyone itself carries it, without listing it as a role', async () => {
+    await expect(read(guild({ roles: [{ id: GUILD, permissions: '8' }, { id: PLAIN_ROLE, permissions: '0' }] }))).resolves.toEqual({
+      ownerId: '9',
+      adminRoleIds: [],
+      everyoneAdmin: true,
+    })
+  })
+
+  it('counts the bit only, and anything that is not digits as no permissions', async () => {
+    const roles = [
+      { id: '200000000000000001', permissions: String(0x8n | (1n << 40n)) },
+      { id: '200000000000000002', permissions: String(0x7) },
+      { id: '200000000000000003', permissions: '8x' },
+      { id: '200000000000000004', permissions: null },
+      { id: '200000000000000005' },
+      null,
+      { permissions: '8' },
+    ]
+    await expect(read(guild({ roles }))).resolves.toEqual({ ownerId: '9', adminRoleIds: ['200000000000000001'], everyoneAdmin: false })
+  })
+
+  it('has no owner unless the owner id is a string', async () => {
+    await expect(read(guild({ owner_id: 9 }))).resolves.toMatchObject({ ownerId: null })
+  })
+
+  it.each([
+    ['500', { status: 500, body: {} }],
+    ['200 without a roles list', { status: 200, body: { owner_id: '9' } }],
+  ])('a %s is a failure', async (_, route) => {
+    await expect(read(route)).rejects.toBeInstanceOf(Upstream)
+  })
+})

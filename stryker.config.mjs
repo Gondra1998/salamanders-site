@@ -31,6 +31,8 @@ export default {
     'server/src/deathwatchValidate.js',
     'server/src/deathwatchAccess.js',
     'server/src/deathwatchHandler.js',
+    'server/src/deathwatchPeople.js',
+    'server/src/deathwatchAdmins.js',
     'server/src/membership.js',
     'server/src/membershipHandler.js',
     'server/src/buildsView.js',

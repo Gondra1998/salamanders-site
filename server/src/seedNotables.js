@@ -1,12 +1,13 @@
 /**
- * One-off: store the Companies page's Notable Server Members in the database, from a document read on stdin (the
- * Companies data, src/data/companies.json, or an object of companyId → entries; see companyNotables.js).
- * Safe to re-run: each company in the document gets its entries replaced, the others are left alone.
+ * Store the Companies page's Notable Server Members in the database, from a document read on stdin: an object of
+ * companyId → entries (see companyNotables.js), kept outside the repo because it holds real names.
+ * Safe to re-run: each company in the document gets its entries replaced, and an empty list takes it out. Companies
+ * the document does not name are left alone.
  *
  * Prints counts only. The entries are real members' names, so nothing here echoes them, and a document that does
  * not parse is reported without the parser's message (which can quote the text around the fault).
  *
- *   docker compose exec -T api bun run src/seedNotables.js < ../src/data/companies.json
+ *   docker compose exec -T api bun run src/seedNotables.js < /path/outside/the/repo/notables.json
  */
 import { Pool } from 'pg'
 import { notablesFrom } from './companyNotables.js'
@@ -29,7 +30,8 @@ try {
 }
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
-const stored = await createCompanyNotablesStore(pool).seed(pairs)
+const changed = await createCompanyNotablesStore(pool).seed(pairs)
 const members = pairs.reduce((n, [, entries]) => n + entries.length, 0)
-console.log(`Stored ${members} notable members for ${stored} companies.`)
+const cleared = pairs.filter(([, entries]) => entries.length === 0).length
+console.log(`Stored ${members} notable members for ${changed - cleared} companies. Cleared ${cleared}.`)
 await pool.end()

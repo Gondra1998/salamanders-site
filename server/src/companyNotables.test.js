@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import fc from 'fast-check'
 import { notablesFrom } from './companyNotables.js'
 
 // Invented names only: the real ones are members' and never enter the repo.
@@ -47,11 +48,30 @@ describe('the Companies data', () => {
 })
 
 describe('a map of company ids', () => {
-  it('returns the same pairs, and leaves out a company with an empty list', () => {
+  it('returns the same pairs, and an empty list is kept: it is how a company is cleared', () => {
     expect(notablesFrom({ alpha: [ONE, TWO], quiet: [], beta: [NAME_ONLY] })).toStrictEqual([
       ['alpha', [ONE, TWO]],
+      ['quiet', []],
       ['beta', [NAME_ONLY]],
     ])
+  })
+
+  it('takes a document that only clears', () => {
+    expect(notablesFrom({ quiet: [] })).toStrictEqual([['quiet', []]])
+  })
+
+  // Compared as pairs, not as objects: an id such as constructor is valid, and an object's own constructor key is what
+  // toStrictEqual reads to compare types.
+  it('hands back every company it was given, in order and with its entries, for any valid map', () => {
+    const line = fc.string({ minLength: 1, maxLength: 20 }).filter((s) => s.trim() !== '')
+    const entry = fc.array(line, { minLength: 1, maxLength: 8 })
+    const id = fc.stringMatching(/^[A-Za-z0-9_-]{1,64}$/)
+    const map = fc.dictionary(id, fc.array(entry, { maxLength: 5 }), { minKeys: 1, maxKeys: 6, noNullPrototype: true })
+    fc.assert(
+      fc.property(map, (m) => {
+        expect(notablesFrom(m)).toStrictEqual(Object.entries(m))
+      }),
+    )
   })
 
   it('keeps an id like __proto__ as an ordinary key', () => {
@@ -122,7 +142,6 @@ describe('refuses what it cannot store, naming the place and never the text', ()
     fails([], 'No notable members found to store.')
     fails([company('plain')], 'No notable members found to store.')
     fails({}, 'No notable members found to store.')
-    fails({ quiet: [] }, 'No notable members found to store.')
   })
 
   it('a document that is neither the Companies data nor an object', () => {

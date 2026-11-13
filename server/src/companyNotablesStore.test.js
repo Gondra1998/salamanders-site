@@ -66,6 +66,24 @@ describe('seed', () => {
     )
   })
 
+  it('an empty list takes the company out, and touches no other, in the same transaction', async () => {
+    const { pool, log } = fakePool()
+    const n = await createCompanyNotablesStore(pool).seed([['alpha', [ONE]], ['quiet', []], ['beta', [TWO]]])
+    expect(n).toBe(3)
+    expect(log.map((l) => l.sql.split(' ')[0])).toStrictEqual(['begin', 'insert', 'delete', 'insert', 'commit'])
+    expect(log[2].sql).toBe('delete from company_notables where company_id = $1')
+    expect(log[2].params).toStrictEqual(['quiet'])
+  })
+
+  it('rolls back everything when taking a company out fails', async () => {
+    const boom = new Error('delete failed')
+    const { pool, sqls, release } = fakePool([['delete from', boom]])
+    await expect(createCompanyNotablesStore(pool).seed([['alpha', [ONE]], ['quiet', []]])).rejects.toBe(boom)
+    expect(sqls().at(-1)).toBe('rollback')
+    expect(sqls()).not.toContain('commit')
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
   it('with nothing to store, commits an empty transaction and says zero', async () => {
     const { pool, log } = fakePool()
     expect(await createCompanyNotablesStore(pool).seed([])).toBe(0)

@@ -9,7 +9,6 @@
 ## Before you create this
 
 - [ ] I used invented values only, as the one rule in CONTRIBUTING.md says
-- [ ] I did not edit `src/data/companies.json`
 - [ ] I looked at it on a phone (`bun run dev:lan`)
 - [ ] `bun run test` and `bun run build` pass
 - [ ] The title looks like `type(scope): subject`

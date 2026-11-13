@@ -52,7 +52,8 @@ export function parseDocWrite(b) {
   return { col: b.col, id: b.id, op: 'set', doc: b.doc }
 }
 
-export const isKind = (v) => typeof v === 'string' && KINDS.includes(v)
+// includes() never matches anything but one of these strings.
+export const isKind = (v) => KINDS.includes(v)
 
 /** → { discordId, kind }, or an error message string. */
 export function parseAccessBody(b) {

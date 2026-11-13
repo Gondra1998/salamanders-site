@@ -84,12 +84,11 @@ describe('searchMembers', () => {
     expect(names('brother')).toEqual(['Brother Avar', 'Brother Kael'])
   })
 
-  it('shows two members with one name side by side, told apart by id', () => {
-    const twins = [person(10, 'Brother Ostar'), person(11, 'Brother Ostar')]
-    expect(searchMembers(twins, 'ostar').map((m) => m.id)).toEqual([id(10), id(11)])
-    expect(searchMembers([...twins].reverse(), 'ostar').map((m) => m.id)).toEqual([id(10), id(11)])
-    const three = [person(12, 'Brother Ostar'), person(10, 'Brother Ostar'), person(11, 'Brother Ostar')]
-    expect(searchMembers(three, 'ostar').map((m) => m.id)).toEqual([id(10), id(11), id(12)])
+  it('keeps members with one name side by side in the roster\'s order, told apart by id', () => {
+    const twins = [person(11, 'Brother Ostar'), person(10, 'Brother Ostar')]
+    expect(searchMembers(twins, 'ostar').map((m) => m.id)).toEqual([id(11), id(10)])
+    const three = [person(12, 'Brother Ostar'), person(1, 'Brother Ostarion'), person(10, 'Brother Ostar')]
+    expect(searchMembers(three, 'ostar').map((m) => m.id)).toEqual([id(12), id(10), id(1)])
   })
 
   it('stops at ten, or at the limit given', () => {

@@ -10,23 +10,16 @@
 
 const SNOWFLAKE = /^\d{17,20}$/
 
-// A Date (as Postgres hands timestamptz back) or a date string, as epoch milliseconds; anything else is NaN.
+// A Date (as Postgres hands timestamptz back) or a date string, as epoch milliseconds; anything else is NaN, and
+// every comparison with NaN is false, so an unknown date makes both answers below false.
 // Never the Date constructor on raw input: new Date(null) is the epoch, which would make null "long ago".
 const timeOf = (v) => (v instanceof Date ? v.getTime() : typeof v === 'string' ? Date.parse(v) : NaN)
 
 /** Whether a member who joined at `joinedAt` was already in the guild when the access was given at `grantedAt`. */
-export function joinedBefore(joinedAt, grantedAt) {
-  const j = timeOf(joinedAt)
-  const g = timeOf(grantedAt)
-  return Number.isFinite(j) && Number.isFinite(g) && j < g
-}
+export const joinedBefore = (joinedAt, grantedAt) => timeOf(joinedAt) < timeOf(grantedAt)
 
 /** Whether a member's present membership began at or after the access was given: they left and came back. */
-export function rejoinedSince(joinedAt, grantedAt) {
-  const j = timeOf(joinedAt)
-  const g = timeOf(grantedAt)
-  return Number.isFinite(j) && Number.isFinite(g) && j >= g
-}
+export const rejoinedSince = (joinedAt, grantedAt) => timeOf(joinedAt) >= timeOf(grantedAt)
 
 /**
  * Whether the person of an access row (`{ discordId, grantedAt }`) has left since it was given, by the roster's
@@ -40,20 +33,21 @@ export function departed(row, byId) {
 /**
  * The members a query finds, for the Watch Commander's search: → [{ id, name, avatar }], at most `limit`.
  * A query of 17 to 20 digits is a user id and finds that one member. Anything else needs two characters and finds
- * the names holding it, ignoring case: the names that start with it first, then the rest, each by name.
+ * the names holding it, ignoring case: the names that start with it first, then the rest, each by name. Members of
+ * one name keep the order they came in (the roster's, by id: the sort is stable), told apart on the page by id.
  */
 export function searchMembers(people, q, limit = 10) {
   if (!Array.isArray(people) || typeof q !== 'string') return []
   const t = q.trim()
   const valid = people.filter((p) => typeof p?.id === 'string' && typeof p.name === 'string')
   const pick = ({ id, name, avatar }) => ({ id, name, avatar })
-  if (SNOWFLAKE.test(t)) return valid.filter((p) => p.id === t).slice(0, 1).map(pick)
+  if (SNOWFLAKE.test(t)) return valid.filter((p) => p.id === t).map(pick)
   if (t.length < 2) return []
   const low = t.toLowerCase()
   const starts = (p) => p.name.toLowerCase().startsWith(low)
   return valid
     .filter((p) => p.name.toLowerCase().includes(low))
-    .sort((a, b) => starts(b) - starts(a) || a.name.localeCompare(b.name) || (a.id < b.id ? -1 : 1))
+    .sort((a, b) => starts(b) - starts(a) || a.name.localeCompare(b.name))
     .slice(0, limit)
     .map(pick)
 }

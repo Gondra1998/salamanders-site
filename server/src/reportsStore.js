@@ -2,6 +2,8 @@
  * Postgres side of reports.js. Every state change and its audit row commit
  * together; nothing here deletes. Rows come back camelCased for the API.
  */
+import { createInTx } from './inTx.js'
+
 const toReport = (r) => ({
   id: Number(r.id),
   reporter: { id: r.reporter_discord_id, username: r.reporter_username },
@@ -30,20 +32,7 @@ const toEvent = (e) => ({
 const COLUMNS = `*, to_char(incident_date, 'YYYY-MM-DD') as incident_date`
 
 export function createReportsStore(pool) {
-  async function inTx(fn) {
-    const client = await pool.connect()
-    try {
-      await client.query('begin')
-      const out = await fn(client)
-      await client.query('commit')
-      return out
-    } catch (err) {
-      await client.query('rollback').catch(() => {})
-      throw err
-    } finally {
-      client.release()
-    }
-  }
+  const inTx = createInTx(pool)
 
   const event = (q, id, actor, action, note) =>
     q.query(

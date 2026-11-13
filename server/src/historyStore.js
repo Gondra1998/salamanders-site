@@ -5,6 +5,7 @@
  * deletes a row. Rows come back camelCased with ISO timestamps.
  */
 import { rowToBuild } from './buildRow.js'
+import { createInTx } from './inTx.js'
 
 const iso = (d) => (d instanceof Date ? d.toISOString() : d)
 
@@ -45,20 +46,7 @@ const toRevocation = (r) => ({
 })
 
 export function createHistoryStore(pool) {
-  async function inTx(fn) {
-    const client = await pool.connect()
-    try {
-      await client.query('begin')
-      const out = await fn(client)
-      await client.query('commit')
-      return out
-    } catch (err) {
-      await client.query('rollback').catch(() => {})
-      throw err
-    } finally {
-      client.release()
-    }
-  }
+  const inTx = createInTx(pool)
 
   const event = (q, { subject, subjectId, action, actor, snapshot, note }) =>
     q.query(

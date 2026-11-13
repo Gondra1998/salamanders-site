@@ -22,9 +22,10 @@
  * viewer per poll. `fresh` skips the cache entirely (writes and grant changes),
  * and forget() empties it (a grant changed, so nobody should keep a stale verdict).
  * Only successful lookups are cached: not a missing identity, not a failure.
+ * The cache itself is verdictCache.js, shared with galleryAccess.js.
  */
-import { createHash } from 'node:crypto'
 import { Upstream } from './discordRoles.js'
+import { createVerdictCache } from './verdictCache.js'
 
 const SNOWFLAKE = /^\d{17,20}$/
 const isSnowflake = (v) => typeof v === 'string' && SNOWFLAKE.test(v)
@@ -50,9 +51,9 @@ export function createDeathwatchAccess({
   xenosbaneRoleId,
   vigiliaRoleId,
   killMarineRoleId,
-  ttlMs = 30_000,
-  maxEntries = 1000,
-  now = Date.now,
+  ttlMs,
+  maxEntries,
+  now,
 }) {
   // No defaults for these two: until both are set the handler answers 503.
   const deathwatchRoleIds = parseRoleIds(deathwatchRoleId)
@@ -66,10 +67,6 @@ export function createDeathwatchAccess({
     vigilia: parseRoleId(vigiliaRoleId),
     killmarine: parseRoleId(killMarineRoleId),
   }
-  const cache = new Map() // sha256 of the Authorization header -> { verdict, until }
-  // Replaced by forget(). A lookup that began under an earlier epoch may be telling a story forget() has
-  // since made false (a grant revoked mid-lookup), so its verdict is returned but not remembered.
-  let epoch = {}
 
   async function lookup(request) {
     const user = await roles.identify(request)
@@ -102,28 +99,11 @@ export function createDeathwatchAccess({
     return { user, access: watchCommander || names.length > 0, watchCommander, deathwatchCommand: standing.command, roles: names }
   }
 
-  function remember(key, verdict) {
-    if (!cache.has(key) && cache.size >= maxEntries) cache.delete(cache.keys().next().value)
-    cache.set(key, { verdict, until: now() + ttlMs })
-  }
-
-  /** → { user, access, watchCommander, deathwatchCommand, roles }, or null when there is no valid Discord identity. */
-  async function resolve(request, { fresh = false } = {}) {
-    const header = request.headers.get('Authorization')
-    if (fresh || !header) return lookup(request)
-    const key = createHash('sha256').update(header).digest('hex')
-    const hit = cache.get(key)
-    if (hit && now() < hit.until) return hit.verdict
-    const began = epoch
-    const verdict = await lookup(request)
-    if (verdict && began === epoch) remember(key, verdict)
-    return verdict
-  }
-
-  function forget() {
-    cache.clear()
-    epoch = {}
-  }
+  /**
+   * resolve(request, { fresh }) → { user, access, watchCommander, deathwatchCommand, roles }, or null when there is
+   * no valid Discord identity. forget() drops every cached verdict.
+   */
+  const { resolve, forget } = createVerdictCache({ lookup, ttlMs, maxEntries, now })
 
   return { configured, resolve, forget }
 }

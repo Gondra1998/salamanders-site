@@ -14,6 +14,7 @@
 import { Upstream } from './discordRoles.js'
 import { etagOf, ifNoneMatches } from './deathwatchEtag.js'
 import { MAX_ACTIVE_GRANTS, MAX_BODY_BYTES, isDiscordId, parseDocWrite, parseGrantBody } from './deathwatchValidate.js'
+import { readJson as readJsonWithin, reply, send } from './httpReply.js'
 
 const GRANT_ROUTE = /^\/deathwatch\/grants\/([^/]+)$/
 
@@ -23,29 +24,12 @@ export function trackerReaders(cfg) {
   return Array.isArray(list) ? list.filter((r) => typeof r === 'string') : ['deployment']
 }
 
-function send(status, text, headers = {}) {
-  return new Response(text, { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers } })
-}
-const reply = (status, body) => send(status, JSON.stringify(body))
-
 /**
  * → { body } parsed from a JSON request, or { status, error } for the reply to give instead.
  * Text that is not JSON leaves `body` undefined, which parseDocWrite and parseGrantBody refuse as malformed.
  */
-async function readJson(request) {
-  // Stryker disable next-line StringLiteral: a missing header and any other default are both not application/json
-  const type = (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase()
-  if (type !== 'application/json') return { status: 415, error: 'Send JSON (Content-Type: application/json).' }
-  const text = await request.text()
-  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) return { status: 413, error: 'The request is too large (2 MB at most).' }
-  let body
-  try {
-    body = JSON.parse(text)
-  } catch {
-    // left undefined
-  }
-  return { body }
-}
+const readJson = (request) =>
+  readJsonWithin(request, { maxBytes: MAX_BODY_BYTES, tooLarge: 'The request is too large (2 MB at most).' })
 
 /**
  * Who the Event Tracker's documents name, in the live event and every archived one: the Discord ids its Kill Teams
@@ -83,7 +67,8 @@ export function createDeathwatchHandler({ access, store, roster = null, deployme
     const tracker = readsTracker(verdict, all.cfg)
     const text = JSON.stringify(tracker ? all : { teams: {}, cfg: all.cfg, archive: {} })
     const etag = etagOf(text)
-    if (ifNoneMatches(request.headers.get('If-None-Match'), etag)) return send(304, null, { ETag: etag })
+    // A bodiless send names no content type of its own; this 304 has always carried the one its 200 does.
+    if (ifNoneMatches(request.headers.get('If-None-Match'), etag)) return send(304, null, { 'Content-Type': 'application/json', ETag: etag })
     return send(200, text, { ETag: etag })
   }
 

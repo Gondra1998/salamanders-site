@@ -75,17 +75,16 @@ answers 200 `{ companies: { <companyId>: [[name, ...lines], ...] } }` to a signe
 check as `/membership`), 401 with no or an invalid token, 403 to a signed-in non-member and 503 when Discord
 cannot answer. Every answer is `private, no-store`.
 
-To put the entries in, apply the new table once (the command under "Existing databases" above), then, from this
-folder, seed from the Companies data while it still holds them:
+To change the entries, write a JSON object of `companyId` → `[[name, ...lines], ...]` to a file outside the repo
+(it holds real names), then, from this folder:
 
 ```sh
-docker compose exec -T api bun run src/seedNotables.js < ../src/data/companies.json
+docker compose exec -T api bun run src/seedNotables.js < /path/outside/the/repo/notables.json
 ```
 
-It prints counts only, never a name, and is safe to re-run: each company in the file gets its entries replaced.
-The file may instead be a JSON object of `companyId` → `[[name, ...lines], ...]`, which is how the entries are
-changed later. A document it cannot store is refused with the position of the fault (`company 3, entry 2`),
-not the text.
+It prints counts only, never a name, and is safe to re-run. Each company in the file gets its entries replaced, an
+empty list takes that company out, and companies the file does not name are left alone. A document it cannot store
+is refused with the position of the fault (`company 3, entry 2`), not the text.
 
 ## Deathwatch (`/deathwatch/*`)
 

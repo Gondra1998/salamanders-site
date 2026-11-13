@@ -11,13 +11,17 @@ export function createCompanyNotablesStore(pool) {
       return Object.fromEntries(rows.map((r) => [r.company_id, r.entries]))
     },
 
-    /** Stores each [companyId, entries] pair in one transaction, replacing that company's earlier entries and
-     * leaving the others alone. → how many companies were stored. */
+    /** Applies each [companyId, entries] pair in one transaction, replacing that company's earlier entries (an empty
+     * list takes the company out) and leaving the others alone. → how many companies were changed. */
     async seed(pairs) {
       const client = await pool.connect()
       try {
         await client.query('begin')
         for (const [id, entries] of pairs) {
+          if (entries.length === 0) {
+            await client.query('delete from company_notables where company_id = $1', [id])
+            continue
+          }
           await client.query(
             `insert into company_notables (company_id, entries) values ($1, $2::jsonb)
              on conflict (company_id) do update set entries = excluded.entries, updated_at = now()`,

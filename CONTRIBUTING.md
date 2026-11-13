@@ -14,10 +14,6 @@ anything from the sealed Legion Archive, whether in code, tests, fixtures, scree
 invented values, and make invented ids obviously fake, like `111111111111111111`. Links to the guild's Discord server
 and Discord channel ids are fine; user ids and role ids are not.
 
-One file still holds real member data: `src/data/companies.json` (extracted by hand). The owner maintains it. Do not
-edit it and do not copy values out of it. Moving that data out of the repo is tracked in
-[#42](https://github.com/BigZano/salamanders-site/issues/42), and this paragraph goes when that is done.
-
 If you find a real value somewhere else in the repo, email a maintainer or the owner directly, as above. Do not open a
 public issue or pull request about it, because that would publish it again.
 
@@ -157,7 +153,6 @@ contribute, GitHub holds your first check until a maintainer lets it run, which 
 | `main` cannot be deleted or force-pushed, except by an admin | A repository rule |
 | Only the maintainers merge | You have no write access to the original repo |
 | No real names, handles or ids | **Review only**: a maintainer reads the diff |
-| You did not edit the member data file | **Review only** |
 | Branch prefix, `type(scope): subject` titles, code style | **Review only** |
 | Phone check, `DESIGN.md` rules | **Review only** |
 

@@ -5,8 +5,9 @@
  *
  * notablesFrom(doc) reads them out of what the operator hands the seed script and returns [companyId, entries]
  * pairs, an entry being [name, ...blurb lines]. Two shapes are accepted:
- *   - the Companies data: an array of companies, each with sections[].notables
- *   - a plain object of companyId → entries
+ *   - a plain object of companyId → entries. An empty list means the company has none: the seed takes it out.
+ *   - the Companies data as it was before the entries left the repo: an array of companies, each with
+ *     sections[].notables. A company with none is skipped. The `notables: true` marker that file holds now is refused.
  * Anything else throws a plain Error. Its message names a position (company 3, entry 2), never the text, because
  * the text is a member's name and the message ends up in a terminal and its scrollback.
  */
@@ -34,7 +35,6 @@ function entriesOf(list, where) {
 }
 
 function collect(pairs, id, entries, where) {
-  if (entries.length === 0) return
   if (entries.length > MAX_ENTRIES) throw new Error(`${where}: more than ${MAX_ENTRIES} notable members.`)
   if (pairs.some(([seen]) => seen === id)) throw new Error(`${where}: the company id appears twice.`)
   pairs.push([id, entries])
@@ -47,7 +47,7 @@ function fromCompanies(list) {
     if (!validId(company?.id)) throw new Error(`${where}: no valid id.`)
     if (!Array.isArray(company.sections)) throw new Error(`${where}: no sections list.`)
     const entries = company.sections.flatMap((s) => (s && s.notables !== undefined ? entriesOf(s.notables, where) : []))
-    collect(pairs, company.id, entries, where)
+    if (entries.length > 0) collect(pairs, company.id, entries, where)
   })
   return pairs
 }

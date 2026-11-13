@@ -34,13 +34,14 @@ const emit = defineEmits(['update:page'])
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
   background: transparent;
   border: 1px solid var(--color-ash);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.4rem 0.8rem;
   cursor: pointer;
+  min-height: var(--tap);
   transition:
     color var(--dur-state) var(--ease-forge),
     border-color var(--dur-state) var(--ease-forge),
@@ -62,7 +63,7 @@ const emit = defineEmits(['update:page'])
 }
 .pager-label {
   font-family: var(--font-mono);
-  font-size: max(0.68rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
   min-width: 7rem;
   text-align: center;

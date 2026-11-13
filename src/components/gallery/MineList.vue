@@ -1,6 +1,7 @@
 <script setup>
 // The person's own clips and art in every status, with where each one stands and, while it can still be taken
-// down, a Remove that asks first, in the row, without a browser dialog.
+// down, a Remove that asks first, in the row, without a browser dialog. A removal is for good: the server deletes
+// the piece, its file and its history.
 import { onMounted, shallowRef } from 'vue'
 import { useAuth } from '../../stores/auth'
 import { useGallery } from '../../stores/gallery'
@@ -51,7 +52,7 @@ async function remove(id) {
         <span class="rq-chip" :data-status="item.status">{{ chipOf(item) }}</span>
         <div v-if="REMOVABLE.includes(item.status)" class="rq-mine-actions">
           <template v-if="asking === item.id">
-            <span class="rq-ask">Remove?</span>
+            <span class="rq-ask">Remove for good? It goes from the Reliquarium entirely, file and all.</span>
             <button type="button" class="btn-ember btn-sm" :disabled="removing !== null" @click="remove(item.id)">Yes</button>
             <button type="button" class="btn-ghost btn-sm" :disabled="removing !== null" @click="asking = null">No</button>
           </template>

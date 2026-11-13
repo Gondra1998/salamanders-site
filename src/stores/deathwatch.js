@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { getMe } from '../lib/deathwatch/api'
 import { loadFixture } from '../lib/deathwatch/fixture'
+import { ROLES } from '../lib/deathwatch/areas'
 
 // Whether the signed-in user may see the Deathwatch area, whether they are the Watch Commander, and whether they
-// hold the Deathwatch Command role (the Armouring Hall's Watch Command tab): the answer to GET /deathwatch/me,
+// hold the Deathwatch Command role (the Armouring Hall's Watch Command tab), and which standings they hold (the
+// parts of the area each opens): the answer to GET /deathwatch/me,
 // nothing more. It only decides what to show; the server enforces every read
 // and write again. Statuses: idle, checking, allowed, denied, signin, unavailable.
 
@@ -11,44 +13,57 @@ import { loadFixture } from '../lib/deathwatch/fixture'
 // slow response can never bring back a state the user has already left (sign-out resets).
 let seq = 0
 
+// A server that never answers counts as out of reach after this long, so the gate can offer to try again instead
+// of waiting until the browser gives up (minutes). An answer that comes later is dropped: "Try again" asks anew.
+export const ME_TIMEOUT_MS = 10_000
+
 const statusOf = (err) => (err?.status === 401 ? 'signin' : err?.status === 403 ? 'denied' : 'unavailable')
 
 export const useDeathwatch = defineStore('deathwatch', {
-  state: () => ({ status: 'idle', commander: false, command: false }),
+  state: () => ({ status: 'idle', commander: false, command: false, roles: [] }),
   actions: {
     async load(token) {
       const mine = ++seq
       // Straight away, before anything is awaited: this store outlives the gate, so an earlier visit's clearance
       // (even a commander's) must not be what the first render of a return visit sees.
-      this.$patch({ status: 'checking', commander: false, command: false })
+      this.$patch({ status: 'checking', commander: false, command: false, roles: [] })
       const fixture = await loadFixture()
       if (mine !== seq) return
       if (fixture) {
         // A dev scene: show that state without asking the server.
-        this.$patch({ status: fixture.status, commander: fixture.commander, command: fixture.command })
+        this.$patch({ status: fixture.status, commander: fixture.commander, command: fixture.command, roles: fixture.roles })
         return
       }
       if (!token) {
-        this.$patch({ status: 'signin', commander: false, command: false })
+        this.$patch({ status: 'signin', commander: false, command: false, roles: [] })
         return
       }
+      let timer
       try {
-        const me = await getMe(token)
+        const late = new Promise((_, no) => (timer = setTimeout(no, ME_TIMEOUT_MS)))
+        const me = await Promise.race([getMe(token), late])
         if (mine !== seq) return
         // Only a plain `true` counts: anything else fails closed. A commander always has access, and sees what
         // Deathwatch Command sees.
         const allowed = me?.access === true
         const commander = allowed && me.watchCommander === true
-        this.$patch({ status: allowed ? 'allowed' : 'denied', commander, command: commander || (allowed && me.deathwatchCommand === true) })
+        // The standings the parts of the area open to (lib/deathwatch/areas.js): strings only, and none when refused.
+        // An answer with no `roles` at all is a server from before them, as just after the site deploys and before the
+        // API is rebuilt: its old rule holds, every part open but the Administratum. A `roles` that is no list fails
+        // closed.
+        const roles = !allowed ? [] : me.roles === undefined ? ROLES.map(([r]) => r) : Array.isArray(me.roles) ? me.roles.filter((r) => typeof r === 'string') : []
+        this.$patch({ status: allowed ? 'allowed' : 'denied', commander, command: commander || (allowed && me.deathwatchCommand === true), roles })
       } catch (err) {
         if (mine !== seq) return
-        this.$patch({ status: statusOf(err), commander: false, command: false })
+        this.$patch({ status: statusOf(err), commander: false, command: false, roles: [] })
+      } finally {
+        clearTimeout(timer)
       }
     },
 
     reset() {
       seq++
-      this.$patch({ status: 'idle', commander: false, command: false })
+      this.$patch({ status: 'idle', commander: false, command: false, roles: [] })
     },
   },
 })

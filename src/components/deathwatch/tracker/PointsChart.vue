@@ -25,7 +25,7 @@ const pw = W - L - RT
 const ph = H - TP - B
 
 const mode = ref('tot')
-const table = ref(false)
+const table = ref(true) // opens on the numbers; the chart is one press away
 const focus = ref(0)
 const at = ref(-1)
 

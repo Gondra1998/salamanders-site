@@ -7,7 +7,7 @@ describe('the Deathwatch volcano profile', () => {
 
   it('is one profile for the hub and every page under it', () => {
     expect(deathwatch()).toBeDefined()
-    for (const path of ['/deathwatch', '/deathwatch/eventtracker/standings', '/deathwatch/manage/enter-mission']) {
+    for (const path of ['/deathwatch', '/deathwatch/eventtracker/standings', '/deathwatch/administratum/enter-mission']) {
       expect(profileFor(path), path).toBe(deathwatch())
     }
   })

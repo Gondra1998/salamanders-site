@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import fixture from '../data/roster.fixture.json'
 import { publicRoster } from '../../server/src/rosterPublic.js'
-import { buildRosterView } from './rosterView'
+import { buildRosterView, heatAt } from './rosterView'
 import { buildPublicView } from './rosterPublicView'
 
 const snapOf = (roster = fixture.roster) => ({ fetchedAt: roster.fetchedAt, stale: roster.stale, ...publicRoster(roster) })
@@ -67,7 +67,7 @@ describe('buildPublicView: against the full synthetic fixture', () => {
 })
 
 describe('buildPublicView: the cases the fixture does not pin', () => {
-  it('names every head holder; the bar shows two and the rest are the extra heads (Review Focus 1)', () => {
+  it('names every head holder; the bar shows two and the rest are the extra heads', () => {
     const view = buildPublicView(hand([
       branch('venerable-dreadnoughts', { kind: 'dreadnoughts', number: undefined, head: { rank: rank('venerable-dreadnought'), vacant: false, members: [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }] } }),
     ]))
@@ -108,14 +108,35 @@ describe('buildPublicView: the cases the fixture does not pin', () => {
     expect(b.shape[0].aside).toBe(true)
     expect(b.shape[2].lateral).toBe(true)
     expect(b.shape.map((s) => s.s)).toEqual([0, 1, 2, 3])
-    for (const s of b.shape) {
-      expect(s.heat.h).toMatch(/^rgb\(\d+,\d+,\d+\)$/)
-      expect(s.heat.hp).toMatch(/^rgb\(/)
-      expect(s.heat.hn).toMatch(/^rgb\(/)
-      expect('members' in s).toBe(false)
-    }
+    for (const s of b.shape) expect('members' in s).toBe(false)
+    // Two steps (Sergeant, Scout) share the ramp at 1/2 and 2/2; the aside sits half a step above the first,
+    // the lateral Terminator half a step below the Sergeant. hp and hn are the spine to the row and on from it.
+    const at = (h, hp, hn) => ({ h: heatAt(h), hp: heatAt(hp), hn: heatAt(hn) })
+    expect(b.shape.map((s) => s.heat)).toEqual([at(0.25, 0, 0.5), at(0.5, 0, 1), at(0.75, 0.5, 1), at(1, 0.5, 1)])
     expect(b.count).toBe(1 + 2 + 6 + 1 + 12)
     expect(b.openable).toBe(true)
+  })
+
+  it('grades a lone step, and a ladder of three, along the same ramp', () => {
+    const at = (h, hp, hn) => ({ h: heatAt(h), hp: heatAt(hp), hn: heatAt(hn) })
+    const heats = (rows, aside = 0) => buildPublicView(hand([branch('company-3', { aside, rows })])).branches[0].shape.map((s) => s.heat)
+    expect(heats([{ rank: rank('scout', 7), count: 3 }])).toEqual([at(1, 0, 1)])
+    expect(heats([], 2)).toEqual([at(0.5, 0, 1)]) // nothing but the aside: half of a single step
+    expect(heats([3, 5, 7].map((t) => ({ rank: rank(`r${t}`, t), count: 1 })))).toEqual([at(1 / 3, 0, 2 / 3), at(2 / 3, 1 / 3, 1), at(1, 2 / 3, 1)])
+  })
+
+  it('passes a head or High Command rank on by its known fields only, so nothing a later server adds rides along', () => {
+    const extra = { key: 'captain', label: 'Captain', tier: 1, roleId: '900000000000000099', note: 'internal' }
+    const view = buildPublicView(hand(
+      [branch('venerable-dreadnoughts', { head: { rank: extra, vacant: false, members: [{ name: 'A' }, { name: 'B' }, { name: 'C' }] } })],
+      [{ rank: extra, members: [{ name: 'M1' }, { name: 'M2' }] }, { rank: { ...extra, key: 'pyre-guard' }, members: [{ name: 'P1' }] }],
+    ))
+    const known = { key: 'captain', label: 'Captain', tier: 1 }
+    const b = view.branches[0]
+    expect(b.head.rank).toStrictEqual(known)
+    expect(b.extraHeads.rank).toStrictEqual(known)
+    expect(view.banner.hero.rank).toStrictEqual(known)
+    expect(view.banner.court.map((r) => r.rank)).toStrictEqual([known, { ...known, key: 'pyre-guard' }])
   })
 
   it('keeps a company number and gives other branches null', () => {

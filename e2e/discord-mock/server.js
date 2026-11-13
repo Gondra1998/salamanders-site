@@ -42,7 +42,7 @@ const USERS = {
   // The guild owner and a holder of an Administrator role: both open the Deathwatch area, neither is a Commander.
   'test-owner-token': { id: '200000000000000005', username: 'owner-tester' },
   'test-admin-token': { id: '200000000000000006', username: 'admin-tester' },
-  // The Deathwatch Command role: with a Deathwatch role (a member), and on its own (no way in).
+  // The Deathwatch Command role: with a Deathwatch role, and on its own (deployed all the same).
   'test-command-token': { id: '200000000000000007', username: 'command-tester' },
   'test-command-only-token': { id: '200000000000000008', username: 'command-only-tester' },
   // Not in the guild at all: the spec gives this id a grant and takes it away again.
@@ -206,6 +206,13 @@ async function r2(request, key) {
     if (Number(declared) !== bytes.length) return s3Error(400, 'IncompleteBody')
     objects.set(key, { type: request.headers.get('Content-Type') || 'application/octet-stream', bytes })
     return new Response(null, { status: 200, headers: { ETag: `"${Bun.hash(bytes).toString(16)}"` } })
+  }
+  // A DELETE, signed as r2.js signs one; real R2 answers 204 whether or not the object was there.
+  if (request.method === 'DELETE') {
+    const auth = request.headers.get('Authorization') || ''
+    if (!auth.startsWith('AWS4-HMAC-SHA256 Credential=') || !request.headers.get('x-amz-date')) return s3Error(403, 'AccessDenied')
+    objects.delete(key)
+    return new Response(null, { status: 204 })
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') return s3Error(405, 'MethodNotAllowed')
   // A presigned GET: its X-Amz-* query is ignored.

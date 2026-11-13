@@ -88,7 +88,7 @@ describe('deathwatch.css', () => {
       armouringhall: 'bg-armouring.webp',
       chronicles: 'bg-chronicles.webp',
       hallofrelics: 'bg-relics.webp',
-      manage: 'bg-manage.webp',
+      administratum: 'bg-manage.webp',
     }
     for (const [area, file] of Object.entries(files)) {
       const rule = css.match(new RegExp(`\\.dw\\[data-area='${area}'\\]\\s+\\.dw-backdrop::after\\s*\\{([^}]*)\\}`))?.[1] ?? ''

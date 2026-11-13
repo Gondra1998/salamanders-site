@@ -100,7 +100,7 @@
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1.3rem;
-  color: #1a0d06;
+  color: var(--color-ember-ink);
   background: var(--color-ember);
 }
 

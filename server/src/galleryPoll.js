@@ -3,7 +3,7 @@
  * pass reads the channel past the cursor, copies each attachment into R2, then stores its row; the cursor
  * moves only after a whole batch is stored, so a pass cut short repeats that batch (and 'exists' makes
  * the repeat harmless). Then it removes clips whose message is gone: the newest 50 every pass, all of
- * them once every sweepMs.
+ * them once every sweepMs. Clips still waiting for review are checked the same way.
  *
  * Discord or R2 down (Upstream, R2Error), or Postgres down, ends the pass where it is: last_error says
  * why and the next pass retries. A message the parser cannot read, or a row the store refuses, is
@@ -14,6 +14,9 @@
  * a 408, a CDN 403 (an expired link is re-read fresh next pass; a blocked address must not skip every
  * clip: Ruling 25), and an R2 401/403/404 above all (bad or rotated credentials, a missing bucket), which
  * would otherwise skip every clip. An attachment already held is not downloaded again.
+ * A clip goes in approved or pending as galleryPolicy.js says. A file is copied only while it fits under the cap
+ * that policy sets for it (a #gameplay clip may use the whole store, any other clip only part of it); one that does
+ * not fit is skipped like a refused copy, before a byte is downloaded. A link holds no file and always goes in.
  * runOnce never rejects; two passes never overlap.
  */
 import { parseMessage } from './galleryParse.js'
@@ -21,6 +24,7 @@ import { Upstream } from './discordRoles.js'
 import { DownloadRefused } from './galleryDiscord.js'
 import { R2Error } from './r2.js'
 import { POLL_ACTOR } from './galleryStore.js'
+import { OTHER_CLIPS_CAP_BYTES, capFor, clipStatus, fits } from './galleryPolicy.js'
 
 const BATCH = 100
 const WINDOW = 50
@@ -63,11 +67,18 @@ export function createGalleryPoll({
 
   const stamp = () => new Date(now()).toISOString()
 
-  async function storeRow({ download, ...row }) {
+  async function storeRow({ download, ...parsed }) {
+    const row = { ...parsed, status: clipStatus(parsed) }
     if (!download) return store.insertDiscordItem({ ...row, r2Key: null, contentType: null, bytes: null }, POLL_ACTOR)
     // A batch repeated after a crash: what is already held costs one lookup, not another copy.
     if (await store.hasDiscordItem(row.messageId, row.attachmentId)) return 'exists'
     const { url, size, contentType, ext } = download
+    const cap = capFor({ kind: 'clip', gameplay: row.gameplay })
+    if (!fits(await store.storedBytes(), size, cap)) {
+      throw new CopyRefused(
+        cap === OTHER_CLIPS_CAP_BYTES ? 'past 7 GB stored, only #gameplay clips are copied' : 'the Reliquarium is full, 9 GB stored',
+      )
+    }
     const r2Key = `clips/${row.messageId}/${row.attachmentId}.${ext}`
     // One deadline for the download and the upload it streams into.
     const signal = AbortSignal.timeout(uploadTimeoutMs)
@@ -129,7 +140,7 @@ export function createGalleryPoll({
     // A full window reaches back only so far: a clip older than its oldest message is out of view, not gone.
     const floor = recent.length < WINDOW ? null : recent.reduce((min, m) => (BigInt(m.id) < min ? BigInt(m.id) : min), BigInt(recent[0].id))
     const gone = new Set()
-    for (const { discord_message_id: messageId } of await store.approvedClipIds({ newest: WINDOW })) {
+    for (const { discord_message_id: messageId } of await store.watchedClipIds({ newest: WINDOW })) {
       if (!present.has(messageId) && (floor === null || BigInt(messageId) > floor)) gone.add(messageId)
     }
     for (const messageId of gone) await store.markDiscordDeleted(messageId)
@@ -139,7 +150,7 @@ export function createGalleryPoll({
     const checked = new Set()
     let after = null
     for (;;) {
-      const page = await store.approvedClipMessageIds({ after, limit: SWEEP_PAGE })
+      const page = await store.watchedClipMessageIds({ after, limit: SWEEP_PAGE })
       for (const { discord_message_id: messageId } of page) {
         if (checked.has(messageId)) continue
         checked.add(messageId)

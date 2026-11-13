@@ -4,13 +4,16 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { useDeathwatch } from '../../stores/deathwatch'
+import { useDeathwatchData } from '../../stores/deathwatchData'
 import DeathwatchHub from './DeathwatchHub.vue'
 import source from './DeathwatchHub.vue?raw'
 
-function mountHub({ commander = false } = {}) {
+// `g`: the gates as set in Manage → Access (the cfg document), none by default.
+function mountHub({ commander = false, roles = ['legion', 'deployment', 'command'], g } = {}) {
   const pinia = createPinia()
   setActivePinia(pinia)
-  useDeathwatch().$patch({ status: 'allowed', commander })
+  useDeathwatch().$patch({ status: 'allowed', commander, roles })
+  useDeathwatchData().$patch({ status: 'ready', local: true, cfg: g ? { g } : {} })
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:rest(.*)*', component: { template: '<div />' } }] })
   return mount(DeathwatchHub, { global: { plugins: [pinia, router] } })
 }
@@ -76,13 +79,13 @@ describe('DeathwatchHub', () => {
     expect(mountHub().find('.dw-legal').exists()).toBe(false)
   })
 
-  it('shows the Manage button to the Watch Commander only', () => {
+  it('shows the Administratum button to the Watch Commander only', () => {
     expect(mountHub({ commander: false }).find('a.dw-manage').exists()).toBe(false)
     const manage = mountHub({ commander: true }).find('a.dw-manage')
-    expect(manage.text()).toBe('Manage')
-    expect(manage.attributes('href')).toBe('/deathwatch/manage/enter-mission')
+    expect(manage.text()).toBe('Administratum')
+    expect(manage.attributes('href')).toBe('/deathwatch/administratum/enter-mission')
     expect(manage.find('svg').attributes('aria-hidden')).toBe('true')
-    expect(cards(mountHub({ commander: true })).map((c) => c.title)).not.toContain('Manage')
+    expect(cards(mountHub({ commander: true })).map((c) => c.title)).not.toContain('Administratum')
   })
 })
 
@@ -115,5 +118,75 @@ describe('DeathwatchHub styles', () => {
 
   it('makes the Enlist button a full 44px tap target', () => {
     expect(rule('.dw-call-btn')).toMatch(/min-height:\s*44px/)
+  })
+})
+
+describe('DeathwatchHub, locked cards', () => {
+  const locked = (w) => w.findAll('.dw-card.is-locked').map((c) => c.find('.dw-card-title').text())
+
+  it('locks, on the hub, the card of every area the viewer may not open, and links the rest', () => {
+    const legion = mountHub({ roles: ['legion'] })
+    expect(locked(legion)).toEqual(['Event Tracker', 'Armouring Hall', 'Chronicles of Valor'])
+    expect(cards(legion)).toEqual([{ title: 'Hall of Relics', href: '/deathwatch/hallofrelics/notable-members' }])
+    const deployed = mountHub({ roles: ['legion', 'deployment'] })
+    expect(locked(deployed)).toEqual([])
+    expect(cards(deployed)).toHaveLength(4)
+    expect(locked(mountHub({ roles: ['emissary', 'xenosbane'] }))).toEqual(['Event Tracker', 'Armouring Hall'])
+    // One standing that opens no card at all still gets the hub, every card locked: never a dead end without a word.
+    expect(locked(mountHub({ roles: ['xenosbane'] }))).toEqual(['Event Tracker', 'Armouring Hall', 'Hall of Relics'])
+    expect(locked(mountHub({ roles: ['deployment'] }))).toEqual(['Hall of Relics'])
+    expect(locked(mountHub({ commander: true, roles: [] }))).toEqual([])
+  })
+
+  it('locks the cards as the Watch Commander set them in Access, over the defaults', () => {
+    const g = { eventtracker: ['legion'], hallofrelics: ['deployment'], recruitment: [] }
+    expect(locked(mountHub({ roles: ['legion'], g }))).toEqual(['Armouring Hall', 'Chronicles of Valor', 'Hall of Relics'])
+    const w = mountHub({ roles: ['legion'], g })
+    expect(w.find('.dw-call').classes()).toContain('is-locked') // Recruitment opened to nobody but him
+    expect(locked(mountHub({ commander: true, roles: [], g }))).toEqual([])
+  })
+
+  it('gives a locked card no link and the lock over it, and an open one neither lock nor blur', () => {
+    const w = mountHub({ roles: ['legion'] })
+    const card = w.find('.dw-card.is-locked')
+    expect(card.element.tagName).toBe('DIV')
+    expect(card.attributes('href')).toBeUndefined()
+    expect(card.find('.dw-lock.is-overlay .dw-lock-msg').text()).toBe('Access restricted to Enlisted Brothers Only.') // the Event Tracker keeps its own words
+    expect(card.find('.dw-lock-ghost').exists()).toBe(false)
+    const open = w.find('a.dw-card')
+    expect(open.classes()).not.toContain('is-locked')
+    expect(open.find('.dw-lock').exists()).toBe(false)
+  })
+
+  it('blurs a locked card and hides its arrow', () => {
+    expect(source).toMatch(/\.dw-card\.is-locked \.dw-card-art,\s*\.dw-card\.is-locked \.dw-card-text,[^{]*\{[^}]*filter: blur\(/)
+    expect(source).toMatch(/\.dw-card\.is-locked \.dw-card-go \{\s*visibility: hidden;/)
+  })
+})
+
+describe('DeathwatchHub, the call to enlist', () => {
+  it('opens to the Legion, Emissaries and the Watch Commander, as Recruitment does', () => {
+    for (const opts of [{ roles: ['legion'] }, { roles: ['emissary'] }, { commander: true, roles: [] }]) {
+      const w = mountHub(opts)
+      expect(w.find('.dw-call').classes(), JSON.stringify(opts)).not.toContain('is-locked')
+      expect(w.find('a.dw-call-btn').attributes('href')).toBe('/deathwatch/recruitment/terms-of-service')
+      expect(w.find('.dw-call .dw-lock').exists()).toBe(false)
+    }
+  })
+
+  it('is locked for anyone else, with no link, while the hub and its cards stay', () => {
+    for (const roles of [['deployment'], ['command'], ['xenosbane']]) {
+      const w = mountHub({ roles })
+      const call = w.find('.dw-call')
+      expect(call.classes(), roles[0]).toContain('is-locked')
+      expect(call.find('a').exists()).toBe(false)
+      expect(call.find('.dw-call-btn').text()).toBe('Enlist now')
+      expect(call.find('.dw-lock.is-overlay .dw-lock-msg').text()).toBe('Access restricted.')
+      expect(w.findAll('.dw-card')).toHaveLength(4)
+    }
+  })
+
+  it('blurs a locked call, all but its lock', () => {
+    expect(source).toMatch(/\.dw-call\.is-locked > :not\(\.dw-lock\) \{[^}]*filter: blur\(/)
   })
 })

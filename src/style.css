@@ -24,11 +24,33 @@
   --color-averland: #fdb825;
   --color-ember: #ff6a2b;
   --color-magma: #e0431d;
+  /* The ember gradient's hot top, and the ink that sits on ember (button and tab labels) */
+  --color-ember-light: #ffb066;
+  --color-ember-ink: #1a0d06;
+  /* Reading text on a panel: between bone and smoke */
+  --color-pewter: #c3d0c6;
   --color-cobalt: #6cc4ef;
   --color-violet: #bb82e0;
   /* Roster: the hot end of the rank heat ramp, and a vacant post */
   --color-whitehot: #f2d27a;
   --color-vacant: #ff9a7a;
+
+  /* The type ramp, eight stops. Tailwind's own --text-* names, so text-lg and friends follow it. The hero
+     wordmark and tagline are authored, not stops (DESIGN.md). */
+  --text-xs: 0.72rem; /* label, mono */
+  --text-sm: 0.82rem; /* meta, small controls */
+  --text-md: 0.9rem; /* card body, ledes in cards */
+  --text-base: 1rem;
+  --text-lg: 1.25rem; /* card titles */
+  --text-xl: 1.5rem; /* subheads: class hero, state titles */
+  --text-2xl: clamp(1.8rem, 5vw, 2.8rem); /* section display h2 */
+  --text-display: clamp(2.2rem, 7vw, 3.6rem); /* page title */
+
+  /* Corners: controls, panels and fields, large blocks, chips */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
 
   --ease-forge: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-press: 120ms;
@@ -150,6 +172,7 @@
 
     /* Reduced motion keeps meaning: opacity and colour still change, nothing moves. */
     .rm-fade,
+    .tab-forge,
     .btn-ember,
     .btn-drake,
     .btn-ghost,
@@ -183,7 +206,7 @@
     font-family: var(--font-mono);
     text-transform: uppercase;
     letter-spacing: 0.32em;
-    font-size: 0.72rem;
+    font-size: var(--text-xs);
     color: var(--color-smoke);
   }
 
@@ -224,9 +247,14 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-weight: 700;
-    color: #1a0d06;
-    background: linear-gradient(180deg, #ffb066, var(--color-ember) 55%, var(--color-magma));
-    border: 1px solid rgba(255, 176, 102, 0.6);
+    color: var(--color-ember-ink);
+    background: linear-gradient(
+      180deg,
+      var(--color-ember-light),
+      var(--color-ember) 55%,
+      var(--color-magma)
+    );
+    border: 1px solid color-mix(in srgb, var(--color-ember-light) 60%, transparent);
     box-shadow:
       0 0 0 1px rgba(0, 0, 0, 0.3),
       0 8px 30px -8px rgba(224, 67, 29, 0.7),
@@ -238,7 +266,7 @@
   }
   /* Hover only where a pointer can really hover: a touch screen fakes one on the first tap and keeps it. */
   @media (hover: hover) and (pointer: fine) {
-    .btn-ember:hover {
+    .btn-ember:hover:not(:disabled) {
       transform: translateY(-1px);
       filter: brightness(1.06);
       box-shadow:
@@ -270,7 +298,7 @@
       border-color var(--dur-state) var(--ease-forge);
   }
   @media (hover: hover) and (pointer: fine) {
-    .btn-drake:hover {
+    .btn-drake:hover:not(:disabled) {
       background: rgba(89, 214, 108, 0.12);
       border-color: rgba(89, 214, 108, 0.7);
     }
@@ -298,7 +326,7 @@
       border-color var(--dur-state) var(--ease-forge);
   }
   @media (hover: hover) and (pointer: fine) {
-    .btn-ghost:hover {
+    .btn-ghost:hover:not(:disabled) {
       color: var(--color-bone);
       border-color: var(--color-ash-2);
     }
@@ -307,13 +335,102 @@
     transform: scale(0.97);
   }
 
+  /* The full size: the shape every page's primary action uses. The colours come from .btn-ember, .btn-drake or
+     .btn-ghost. */
+  .btn-md {
+    padding: 0.7rem 1.4rem;
+    border-radius: var(--radius-sm);
+    min-height: var(--tap);
+    cursor: pointer;
+  }
+
   /* The small size, shared by every page that sets buttons in a row or a card */
   .btn-sm {
     padding: 0.5rem 0.85rem;
-    border-radius: 2px;
-    font-size: 0.78rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
     cursor: pointer;
     min-height: var(--tap);
+  }
+
+  /* A button that cannot be pressed: dimmed, no lift on hover (the hover rules above skip :disabled). */
+  .btn-ember:disabled,
+  .btn-drake:disabled,
+  .btn-ghost:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* The one segmented control: Planner class tabs, Armoury category tabs, Builds class chips. On is the ember
+     gradient with ink on it. */
+  .tab-forge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: var(--text-sm);
+    color: var(--color-smoke);
+    background: color-mix(in srgb, var(--color-basalt-2) 50%, transparent);
+    border: 1px solid var(--color-ash);
+    padding: 0.5rem 0.9rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    min-height: var(--tap);
+    transition:
+      color var(--dur-state) var(--ease-forge),
+      background-color var(--dur-state) var(--ease-forge),
+      border-color var(--dur-state) var(--ease-forge),
+      transform var(--dur-press) var(--ease-forge);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .tab-forge:hover {
+      color: var(--color-bone);
+    }
+  }
+  .tab-forge:active {
+    transform: scale(0.97);
+  }
+  /* After the hover rule on purpose: the lit tab keeps its ink when a pointer rests on it. */
+  .tab-forge.on {
+    color: var(--color-ember-ink);
+    background: linear-gradient(180deg, var(--color-ember-light), var(--color-ember));
+    border-color: color-mix(in srgb, var(--color-ember-light) 60%, transparent);
+  }
+
+  /* The one search field: Builds, Armoury, Companies, History. A page sets its width. */
+  .field-forge {
+    padding: 0.6rem 0.9rem;
+    background: color-mix(in srgb, var(--color-basalt-2) 60%, transparent);
+    border: 1px solid var(--color-ash);
+    border-radius: var(--radius-md);
+    color: var(--color-bone);
+    font: inherit;
+    min-height: var(--tap);
+  }
+  .field-forge::placeholder {
+    color: var(--color-faint);
+  }
+
+  /* The stud: category or emphasis colour in a 6px square turned 45 degrees, before a label. It takes the
+     colour of the text beside it (DESIGN.md, The Stud Rule). */
+  .stud {
+    display: inline-block;
+    flex: none;
+    width: 6px;
+    height: 6px;
+    background: currentColor;
+    transform: rotate(45deg);
+  }
+
+  /* The lede under a page title. Global so a view can put a link in the header slot. */
+  .page-lede {
+    color: var(--color-pewter);
+    max-width: 52ch;
+    line-height: 1.6;
+    margin: 0;
   }
 }
 

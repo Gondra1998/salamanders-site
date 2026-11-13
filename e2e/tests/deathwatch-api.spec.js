@@ -25,25 +25,32 @@ test.describe('Deathwatch API', () => {
   test('/me says where each caller stands', async ({ request }) => {
     expect((await request.get(`${API}/deathwatch/me`)).status()).toBe(401)
     const me = async (token) => (await get(request, '/deathwatch/me', token)).json()
-    expect(await me(DEATHWATCH)).toEqual({ access: true, watchCommander: false, deathwatchCommand: false })
+    const out = (access, watchCommander, deathwatchCommand, roles) => ({ access, watchCommander, deathwatchCommand, roles })
+    expect(await me(DEATHWATCH)).toEqual(out(true, false, false, ['deployment']))
     // DEATHWATCH_ROLE_ID lists two roles; a holder of the second one is as welcome as a holder of the first.
-    expect(await me('test-deathwatch-second-token')).toEqual({ access: true, watchCommander: false, deathwatchCommand: false })
-    // The guild owner and an Administrator are let in too, but they are not the Commander or Deathwatch Command.
-    for (const who of ['test-owner-token', 'test-admin-token'])
-      expect(await me(who), who).toEqual({ access: true, watchCommander: false, deathwatchCommand: false })
-    expect(await me(COMMANDER)).toEqual({ access: true, watchCommander: true, deathwatchCommand: false })
-    // DEATHWATCH_COMMAND_ROLE_ID is its own role: it adds the flag for a member, and opens nothing on its own.
-    expect(await me('test-command-token')).toEqual({ access: true, watchCommander: false, deathwatchCommand: true })
-    expect(await me('test-command-only-token')).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
-    // The Legion role alone does not open the area, and neither does holding no role.
-    expect(await me('test-member-token')).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
-    expect(await me('test-norole-token')).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
-    expect((await get(request, '/deathwatch/data', 'test-command-token')).status()).toBe(200)
-    expect((await get(request, '/deathwatch/data', 'test-command-only-token')).status()).toBe(403)
+    expect(await me('test-deathwatch-second-token')).toEqual(out(true, false, false, ['deployment']))
+    // The guild owner and an Administrator are deployed too, but they are not the Commander or Deathwatch Command.
+    for (const who of ['test-owner-token', 'test-admin-token']) expect(await me(who), who).toEqual(out(true, false, false, ['deployment']))
+    expect(await me(COMMANDER)).toEqual(out(true, true, false, []))
+    // DEATHWATCH_COMMAND_ROLE_ID is its own standing, and deploys its holder too, even without a Deathwatch role.
+    expect(await me('test-command-token')).toEqual(out(true, false, true, ['deployment', 'command']))
+    expect(await me('test-command-only-token')).toEqual(out(true, false, true, ['deployment', 'command']))
+    // The Legion role (rosterLadder.js) lets its holder in as legion; holding no role does not.
+    expect(await me('test-member-token')).toEqual(out(true, false, false, ['legion']))
+    expect(await me('test-norole-token')).toEqual(out(false, false, false, []))
+    // The Event Tracker's documents go to deployment only: everyone else let in gets them empty.
+    await send(request, 'POST', '/deathwatch/doc', COMMANDER, DOC)
+    for (const who of ['test-command-token', 'test-command-only-token']) expect((await data(request, who)).teams, who).toHaveProperty(DOC.id)
+    for (const who of ['test-member-token']) {
+      const res = await get(request, '/deathwatch/data', who)
+      expect(res.status(), who).toBe(200)
+      expect((await res.json()).teams, who).toEqual({})
+    }
+    await send(request, 'POST', '/deathwatch/doc', COMMANDER, { col: DOC.col, id: DOC.id, op: 'delete' })
+    expect((await get(request, '/deathwatch/data', 'test-norole-token')).status()).toBe(403)
     // Deathwatch Command is not the Watch Commander: the Commander-only routes stay closed to it.
     expect((await get(request, '/deathwatch/grants', 'test-command-token')).status()).toBe(403)
     expect((await send(request, 'POST', '/deathwatch/doc', 'test-command-token', DOC)).status()).toBe(403)
-    expect((await get(request, '/deathwatch/data', 'test-member-token')).status()).toBe(403)
     for (const who of ['test-owner-token', 'test-admin-token']) {
       expect((await get(request, '/deathwatch/data', who)).status(), who).toBe(200)
       expect((await get(request, '/deathwatch/grants', who)).status(), who).toBe(403)
@@ -115,7 +122,7 @@ test.describe('Deathwatch API', () => {
   test('a grant opens the area for someone outside the guild, and revoking closes it at once', async ({ request }) => {
     // A valid Discord token that is not in the guild and has no grant: refused. That refusal is now cached.
     expect((await get(request, '/deathwatch/data', GRANTED)).status()).toBe(403)
-    expect(await (await get(request, '/deathwatch/me', GRANTED)).json()).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
+    expect(await (await get(request, '/deathwatch/me', GRANTED)).json()).toEqual({ access: false, watchCommander: false, deathwatchCommand: false, roles: [] })
     // Only the Commander manages grants.
     expect((await get(request, '/deathwatch/grants', DEATHWATCH)).status()).toBe(403)
 
@@ -125,7 +132,7 @@ test.describe('Deathwatch API', () => {
 
     // At once, despite the cached refusal; view only, and never Commander.
     expect((await get(request, '/deathwatch/data', GRANTED)).status()).toBe(200)
-    expect(await (await get(request, '/deathwatch/me', GRANTED)).json()).toEqual({ access: true, watchCommander: false, deathwatchCommand: false })
+    expect(await (await get(request, '/deathwatch/me', GRANTED)).json()).toEqual({ access: true, watchCommander: false, deathwatchCommand: false, roles: ['deployment'] })
     expect((await send(request, 'POST', '/deathwatch/doc', GRANTED, DOC)).status()).toBe(403)
     const listed = await (await get(request, '/deathwatch/grants', COMMANDER)).json()
     expect(listed.grants.map((g) => g.discordId)).toContain(GRANTED_ID)

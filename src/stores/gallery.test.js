@@ -9,11 +9,13 @@ import {
   listMine,
   listReview,
   listEvents,
+  listTakedowns,
   submitArt,
   removeItem,
   approve,
   reject,
   hide,
+  eraseFile,
 } from '../lib/gallery/api'
 import { useGallery } from './gallery'
 
@@ -40,6 +42,7 @@ const INITIAL = {
   mine: [],
   review: { items: [], sync: null },
   events: { items: [], next: null },
+  takedowns: [],
   error: '',
 }
 
@@ -649,6 +652,56 @@ describe('gallery store: what an approver does', () => {
     expect(listReview).not.toHaveBeenCalled()
     expect(s.clips.items).toEqual([item(1)])
     expect(s.review.items).toEqual([item(1, { status: 'pending' })])
+  })
+})
+
+describe('gallery store: deleting a taken-down file for good', () => {
+  it('loadTakedowns() fills the list', async () => {
+    listTakedowns.mockResolvedValue({ items: [item(4, { status: 'hidden' })] })
+    await s.loadTakedowns('tok')
+    expect(listTakedowns).toHaveBeenCalledWith('tok')
+    expect(s.takedowns).toEqual([item(4, { status: 'hidden' })])
+  })
+
+  it('loadTakedowns() that fails reports it, rethrows and keeps what was there', async () => {
+    s.$patch({ takedowns: [item(1, { status: 'hidden' })] })
+    listTakedowns.mockRejectedValue(apiError(403, 'Only approvers can do that.'))
+    await expect(s.loadTakedowns('tok')).rejects.toMatchObject({ status: 403 })
+    expect(s.error).toBe('Only approvers can do that.')
+    expect(s.takedowns).toEqual([item(1, { status: 'hidden' })])
+  })
+
+  it('loadTakedowns() leaves a store cleared meanwhile as it is', async () => {
+    const d = deferred()
+    listTakedowns.mockReturnValue(d.promise)
+    const p = s.loadTakedowns('tok')
+    s.reset()
+    d.resolve({ items: [item(1)] })
+    await p
+    expect(s.$state).toEqual(INITIAL)
+  })
+
+  it('eraseFile() deletes it, takes it off the list at once, then asks for the list again', async () => {
+    s.$patch({ takedowns: [item(1, { status: 'hidden' }), item(2, { status: 'removed' })] })
+    eraseFile.mockResolvedValue(null)
+    const d = deferred()
+    listTakedowns.mockReturnValue(d.promise)
+    const p = s.eraseFile('1', 'tok')
+    await tick()
+    expect(eraseFile).toHaveBeenCalledWith('1', 'tok')
+    expect(s.takedowns).toEqual([item(2, { status: 'removed' })])
+    d.resolve({ items: [item(2, { status: 'removed' })] })
+    await p
+    expect(listTakedowns).toHaveBeenCalledWith('tok')
+  })
+
+  it('eraseFile() that is refused reports it, rethrows and keeps the list as it was', async () => {
+    s.$patch({ takedowns: [item(1, { status: 'hidden' })] })
+    eraseFile.mockRejectedValue(apiError(409, 'That item has already moved on.'))
+    await expect(s.eraseFile('1', 'tok')).rejects.toMatchObject({ status: 409 })
+    expect(s.error).toBe('That item has already moved on.')
+    expect(s.takedowns).toEqual([item(1, { status: 'hidden' })])
+    expect(listTakedowns).not.toHaveBeenCalled()
   })
 })
 

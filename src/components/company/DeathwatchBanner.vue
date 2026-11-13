@@ -14,7 +14,10 @@ const router = inject(routerKey, null)
 function go(event) {
   // A click that is not a plain primary one (new tab, new window, a menu) or that something already handled is left to the browser.
   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-  if (auth.signedIn) {
+  // In dev with the Deathwatch fixture (lib/deathwatch/fixture.js) no sign-in is needed: the gate shows the scene.
+  // The literal condition lets the build drop it, as there.
+  const fixture = import.meta.env.DEV && !!import.meta.env.VITE_DEATHWATCH_FIXTURE
+  if (auth.signedIn || fixture) {
     if (!router) return // no router: the link's own navigation does the job
     event.preventDefault()
     router.push('/deathwatch')

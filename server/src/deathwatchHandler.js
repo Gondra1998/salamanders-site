@@ -1,5 +1,7 @@
 /**
  * The Deathwatch routes: who am I, the area's data, document edits, and grants.
+ * Also the Deathwatch Deployment list (who holds the role, from the roster's member cache, roster.js), and the
+ * pictures of the Legion and Emissary members the Event Tracker names who no longer hold it.
  * Modeled on reports.js. Every route asks deathwatchAccess.js for a live
  * verdict and every uncertain path fails closed: 401 (no Discord identity),
  * 403 (not allowed), 503 (Discord unreachable, or the role ids are not set).
@@ -16,6 +18,12 @@ import { readJson as readJsonWithin, reply, send } from './httpReply.js'
 
 const GRANT_ROUTE = /^\/deathwatch\/grants\/([^/]+)$/
 
+/** Who reads the Event Tracker: the cfg document `g`'s list for it (strings only), else Deathwatch Deployment. */
+export function trackerReaders(cfg) {
+  const list = cfg?.g?.eventtracker
+  return Array.isArray(list) ? list.filter((r) => typeof r === 'string') : ['deployment']
+}
+
 /**
  * → { body } parsed from a JSON request, or { status, error } for the reply to give instead.
  * Text that is not JSON leaves `body` undefined, which parseDocWrite and parseGrantBody refuse as malformed.
@@ -23,17 +31,64 @@ const GRANT_ROUTE = /^\/deathwatch\/grants\/([^/]+)$/
 const readJson = (request) =>
   readJsonWithin(request, { maxBytes: MAX_BODY_BYTES, tooLarge: 'The request is too large (2 MB at most).' })
 
-export function createDeathwatchHandler({ access, store }) {
+/**
+ * Who the Event Tracker's documents name, in the live event and every archived one: the Discord ids its Kill Teams
+ * were filled with (a team's `di`, name → id) and the names on their rosters. → { ids, names }, two Sets.
+ */
+export function namedIn(all) {
+  const teams = Object.values(all?.teams ?? {})
+  for (const e of Object.values(all?.archive ?? {})) if (Array.isArray(e?.teams)) teams.push(...e.teams)
+  const ids = new Set()
+  const names = new Set()
+  for (const t of teams) {
+    if (Array.isArray(t?.ro)) for (const n of t.ro) if (typeof n === 'string') names.add(n)
+    if (t?.di !== null && typeof t?.di === 'object') for (const id of Object.values(t.di)) if (isDiscordId(id)) ids.add(id)
+  }
+  return { ids, names }
+}
+
+export function createDeathwatchHandler({ access, store, roster = null, deploymentRoleIds = [], faceRoleIds = [] }) {
   const me = async (_request, verdict) =>
-    reply(200, { access: verdict.access, watchCommander: verdict.watchCommander, deathwatchCommand: verdict.deathwatchCommand })
+    reply(200, {
+      access: verdict.access,
+      watchCommander: verdict.watchCommander,
+      deathwatchCommand: verdict.deathwatchCommand,
+      roles: verdict.roles,
+    })
+
+  // The Event Tracker's documents (the live event and the archive) go only to its readers: the Watch Commander,
+  // and the roles he opened it to in Manage → Access (cfg `g`), else Deathwatch Deployment. Everyone with access
+  // gets cfg, which holds the page texts every part needs and that choice.
+  const readsTracker = (verdict, cfg) => verdict.watchCommander || trackerReaders(cfg).some((r) => verdict.roles.includes(r))
 
   async function data(request, verdict) {
     if (!verdict.access) return reply(403, { error: 'Restricted to the Deathwatch.' })
-    const text = JSON.stringify(await store.readAll())
+    const all = await store.readAll()
+    const tracker = readsTracker(verdict, all.cfg)
+    const text = JSON.stringify(tracker ? all : { teams: {}, cfg: all.cfg, archive: {} })
     const etag = etagOf(text)
     // A bodiless send names no content type of its own; this 304 has always carried the one its 200 does.
     if (ifNoneMatches(request.headers.get('If-None-Match'), etag)) return send(304, null, { 'Content-Type': 'application/json', ETag: etag })
     return send(200, text, { ETag: etag })
+  }
+
+  // The battle-brothers holding Deathwatch Deployment (ids, names and avatars, for Manage's Kill Team slots and the
+  // tracker's names), and the faces: the Legion and Emissary members the tracker names, by id or by name, who are
+  // not among them, so a brother who leaves Deployment keeps his picture in the archive. To the Event Tracker's
+  // readers only, as its data is.
+  async function deployment(_request, verdict) {
+    const all = await store.readAll()
+    if (!verdict.access || !readsTracker(verdict, all.cfg)) return reply(403, { error: 'Restricted to the Event Tracker.' })
+    const members = roster && deploymentRoleIds.length ? await roster.holding(deploymentRoleIds) : null
+    if (!members) return reply(503, { error: 'The member list is not available yet. Try again.' })
+    let faces = []
+    if (faceRoleIds.length) {
+      const listed = new Set(members.map((m) => m.id))
+      const { ids, names } = namedIn(all)
+      const pool = await roster.holding(faceRoleIds)
+      if (pool) faces = pool.filter((m) => !listed.has(m.id) && (ids.has(m.id) || names.has(m.name)))
+    }
+    return reply(200, { members, faces })
   }
 
   async function writeDoc(request, verdict) {
@@ -69,6 +124,7 @@ export function createDeathwatchHandler({ access, store }) {
   function find(method, pathname) {
     if (method === 'GET' && pathname === '/deathwatch/me') return { commander: false, run: me }
     if (method === 'GET' && pathname === '/deathwatch/data') return { commander: false, run: data }
+    if (method === 'GET' && pathname === '/deathwatch/deployment') return { commander: false, run: deployment }
     if (method === 'POST' && pathname === '/deathwatch/doc') return { commander: true, run: writeDoc }
     if (method === 'GET' && pathname === '/deathwatch/grants') return { commander: true, run: listGrants }
     if (method === 'POST' && pathname === '/deathwatch/grants') return { commander: true, run: addGrant }

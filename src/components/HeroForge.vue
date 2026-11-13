@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import FireText from './FireText.vue'
+import ForgeMark from './ForgeMark.vue'
 import { fireTuning } from '../lib/fireTuning'
 import { useAuth } from '../stores/auth'
 
@@ -31,9 +32,7 @@ const isMember = computed(() => auth.member?.isMember === true)
           :base="fireTuning.text.base"
         />
       </h1>
-      <div class="ember-rule" aria-hidden="true">
-        <span /><span /><span />
-      </div>
+      <ForgeMark class="hero-mark" />
       <p class="tagline">Into the fires of battle, unto the anvil of war.</p>
       <div class="cta-row">
         <a class="btn-ember" :href="isMember ? SERVER : INVITE" target="_blank" rel="noopener">
@@ -78,34 +77,23 @@ const isMember = computed(() => auth.member?.isMember === true)
   font-weight: 700;
   line-height: 0.95;
   letter-spacing: 0.02em;
-  /* Capped so 11 glyphs + tracking stay inside .hero-inner at every width. */
+  /* Capped so 11 glyphs + tracking stay inside .hero-inner at every width.
+     Authored, see DESIGN.md Typography. */
   font-size: clamp(2.5rem, 12.5vw, 9.5rem);
   margin: 0.6rem 0 0;
   /* The fill is painted by FireText on a canvas; this element only sets the
      type. drop-shadow (not text-shadow) so the glow follows the fire. */
-  filter: drop-shadow(0 0 30px rgba(255, 106, 43, 0.35));
+  filter: drop-shadow(0 0 30px color-mix(in srgb, var(--color-ember) 35%, transparent));
 }
-.ember-rule {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: center;
-  align-items: center;
-  margin: 1.3rem 0 0.2rem;
-}
-.ember-rule span {
-  width: 8px;
-  height: 8px;
-  transform: rotate(45deg);
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
-  box-shadow: 0 0 12px rgba(255, 106, 43, 0.7);
-}
-.ember-rule span:nth-child(2) {
-  width: 10px;
-  height: 10px;
+/* The divider under the title. It is a block so it centres on its own margins. */
+.hero-mark {
+  display: block;
+  margin: 1.3rem auto 0.2rem;
 }
 .tagline {
   font-family: var(--font-sans);
   color: var(--color-smoke);
+  /* Authored, see DESIGN.md Typography. */
   font-size: clamp(1rem, 2.4vw, 1.3rem);
   max-width: 42ch;
   margin: 1rem auto 0;
@@ -121,8 +109,8 @@ const isMember = computed(() => auth.member?.isMember === true)
 .btn-ember,
 .btn-drake {
   padding: 0.85rem 1.5rem;
-  border-radius: 2px;
-  font-size: 1rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
 }
 /* Stands beside the molten Join button, so it gets a solid obsidian face and
    a drake glow instead of the usual faint outline. */
@@ -130,10 +118,10 @@ const isMember = computed(() => auth.member?.isMember === true)
   background: var(--color-obsidian);
   border-color: var(--color-drake);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.3),
-    0 8px 30px -8px rgba(89, 214, 108, 0.55),
-    inset 0 1px 0 rgba(89, 214, 108, 0.2);
-  text-shadow: 0 0 12px rgba(89, 214, 108, 0.45);
+    0 0 0 1px color-mix(in srgb, var(--color-obsidian) 30%, transparent),
+    0 8px 30px -8px color-mix(in srgb, var(--color-drake) 55%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-drake) 20%, transparent);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--color-drake) 45%, transparent);
   transition:
     transform var(--dur-press) var(--ease-forge),
     box-shadow var(--dur-state) var(--ease-forge),
@@ -144,9 +132,9 @@ const isMember = computed(() => auth.member?.isMember === true)
     transform: translateY(-1px);
     background: var(--color-pitch);
     box-shadow:
-      0 0 0 1px rgba(0, 0, 0, 0.3),
-      0 12px 40px -8px rgba(89, 214, 108, 0.75),
-      inset 0 1px 0 rgba(89, 214, 108, 0.3);
+      0 0 0 1px color-mix(in srgb, var(--color-obsidian) 30%, transparent),
+      0 12px 40px -8px color-mix(in srgb, var(--color-drake) 75%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-drake) 30%, transparent);
   }
 }
 .btn-planner:active {

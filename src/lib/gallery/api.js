@@ -31,6 +31,9 @@ export const listReview = (token) => get('/gallery/review', token)
 /** Approvers only. → { events, next } */
 export const listEvents = (token, before) => get(paged('/gallery/events', before), token)
 
+/** Approvers only. → { items }: taken-down pieces whose file can still be deleted for good, newest first. */
+export const listTakedowns = (token) => get('/gallery/takedowns', token)
+
 /**
  * Uploads one piece of art for review. → { item }. The form is built here and sent without a Content-Type: the
  * browser adds the multipart boundary itself, and a type set by hand would leave it out.
@@ -53,7 +56,7 @@ export async function submitArt({ file, title, note }, token) {
   return res.json()
 }
 
-/** The item's owner only. → null */
+/** The item's owner only, and for good: the piece, its file and its history all go. → null */
 export const removeItem = (id, token) => request(item(id), { method: 'DELETE', token, cache: 'no-store' })
 
 /** Approvers only. → { item } */
@@ -61,6 +64,9 @@ export const approve = (id, token) => post(`${item(id)}/approve`, token)
 
 /** Approvers only. The reason is required. → { item } */
 export const reject = (id, reason, token) => post(`${item(id)}/reject`, token, { reason })
+
+/** Approvers only. Deletes a taken-down piece's file for good; the piece's record stays. → null */
+export const eraseFile = (id, token) => post(`${item(id)}/erase`, token)
 
 /** Approvers only. The note is optional, and with none the request has no body (the server reads that as no note). → { item } */
 export const hide = (id, note, token) => post(`${item(id)}/hide`, token, note ? { note } : undefined)

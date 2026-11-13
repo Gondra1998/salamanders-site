@@ -79,13 +79,19 @@ describe('the verdict', () => {
       access: true,
       watchCommander: true,
       deathwatchCommand: false,
+      roles: [],
     })
   })
 
-  it('gives the Deathwatch role access without Commander status', async () => {
+  it('gives the Deathwatch role access and deployment, without Commander status', async () => {
     const { access } = setup()
     const v = await access.resolve(req('watcher'))
-    expect([v.access, v.watchCommander]).toEqual([true, false])
+    expect([v.access, v.watchCommander, v.roles]).toEqual([true, false, ['deployment']])
+  })
+
+  it('gives a grant deployment', async () => {
+    const { access } = setup({ granted: [USERS.plain.id] })
+    expect((await access.resolve(req('plain'))).roles).toEqual(['deployment'])
   })
 
   it('gives both roles together both', async () => {
@@ -100,7 +106,7 @@ describe('the verdict', () => {
     expect([v.access, v.watchCommander]).toEqual([true, false])
   })
 
-  it('denies the Legion role alone and a user with no roles', async () => {
+  it('denies the Legion role alone while no Legion role id is given, and a user with no roles', async () => {
     const { access } = setup()
     for (const who of ['legion', 'plain']) {
       const v = await access.resolve(req(who))
@@ -152,9 +158,9 @@ describe('the Deathwatch Command role', () => {
     expect(standing(await verdictHolding({ held: [LEGION, CMD, DW] }))).toEqual([true, false, true])
   })
 
-  it('opens nothing by itself: a holder with no other way in has no access and no standing', async () => {
-    expect(standing(await verdictHolding({ held: [CMD] }))).toEqual([false, false, false])
-    expect(standing(await verdictHolding({ held: [LEGION, CMD] }))).toEqual([false, false, false])
+  it('lets its holder in by itself, as command and as deployment, without asking for a grant', async () => {
+    const v = await verdictHolding({ held: [CMD] })
+    expect([...standing(v), v.roles]).toEqual([true, false, true, ['deployment', 'command']])
   })
 
   it('stands beside a grant, which supplies the access', async () => {
@@ -496,6 +502,7 @@ describe('administrators and the guild owner', () => {
       deathwatchRoleId,
       commanderRoleId: WC,
       deathwatchCommandRoleId: CMD,
+      legionRoleId: LEGION,
     })
     return access.resolve(req('any'))
   }
@@ -547,23 +554,113 @@ describe('administrators and the guild owner', () => {
     }
   })
 
-  it('gives the Deathwatch Command standing to its holders alone, however else they got in', async () => {
+  it('gives the Deathwatch Command standing to its holders alone, and deployment to them and the other ways in', async () => {
     const ways = ['owner', 'admin', 'reader', 'commander', 'granted', 'command']
-    const admits = ways.filter((w) => w !== 'command')
     for (let mask = 0; mask < 1 << ways.length; mask++) {
       const has = Object.fromEntries(ways.map((w, i) => [w, Boolean(mask & (1 << i))]))
       const held = [has.admin && ADMIN_ROLE, has.reader && DW, has.commander && WC, has.command && CMD].filter(Boolean)
       const v = await verdictFor({ owner: has.owner ? ME : OWNER, held, granted: has.granted })
-      const admitted = admits.some((w) => has[w])
-      expect(v.deathwatchCommand, JSON.stringify(has)).toBe(has.command && admitted)
-      expect(standing(v), JSON.stringify(has)).toEqual([admitted, has.commander])
+      // The Watch Commander opens everything, so nobody asks the grants table or the guild about them.
+      const deployment = has.reader || has.command || (!has.commander && (has.owner || has.admin || has.granted))
+      expect(v.deathwatchCommand, JSON.stringify(has)).toBe(has.command)
+      expect(v.roles, JSON.stringify(has)).toEqual([deployment && 'deployment', has.command && 'command'].filter(Boolean))
+      expect(standing(v), JSON.stringify(has)).toEqual([ways.some((w) => has[w]), has.commander])
     }
   })
 
-  it('answers the Deathwatch Command standing without the guild lookup once something else admits, and fails closed otherwise', async () => {
+  it('keeps another standing, without deployment, while the guild lookup is down, and fails closed with none', async () => {
     const down = { guildStatus: 500 }
-    expect((await verdictFor({ ...down, held: [DW, CMD] })).deathwatchCommand).toBe(true)
-    expect((await verdictFor({ ...down, held: [], granted: true })).deathwatchCommand).toBe(false)
-    await expect(verdictFor({ guildStatus: 500, held: [CMD] })).rejects.toBeInstanceOf(Upstream)
+    expect((await verdictFor({ ...down, held: [DW, CMD] })).roles).toEqual(['deployment', 'command'])
+    expect((await verdictFor({ ...down, held: [], granted: true })).roles).toEqual(['deployment'])
+    expect((await verdictFor({ ...down, held: [CMD] })).roles).toEqual(['deployment', 'command'])
+    const v = await verdictFor({ ...down, held: [LEGION] })
+    expect([v.access, v.roles]).toEqual([true, ['legion']])
+    await expect(verdictFor({ ...down, held: [PLAIN_ROLE] })).rejects.toBeInstanceOf(Upstream)
+  })
+
+  it('lets an error that is not Upstream through, whatever else is held', async () => {
+    const access = createDeathwatchAccess({
+      roles: {
+        identify: async () => ({ id: ME, username: 'me' }),
+        rolesOf: async () => [LEGION],
+        isAdmin: async () => {
+          throw new TypeError('bug')
+        },
+      },
+      store: { isGranted: async () => false },
+      deathwatchRoleId: DW,
+      commanderRoleId: WC,
+      deathwatchCommandRoleId: CMD,
+      legionRoleId: LEGION,
+    })
+    await expect(access.resolve(req('any'))).rejects.toBeInstanceOf(TypeError)
+  })
+})
+
+describe('the Legion, Emissary and award standings', () => {
+  const EMI = '200000000000000120'
+  const XEN = '200000000000000121' // award roles, invented
+  const VIG = '200000000000000122'
+  const KIL = '200000000000000123'
+  const ME = '300000000000000031'
+  const verdictHolding = (held, opts = {}) =>
+    createDeathwatchAccess({
+      roles: { identify: async () => ({ id: ME, username: 'me' }), rolesOf: async () => held, isAdmin: async () => false },
+      store: { isGranted: async () => false },
+      deathwatchRoleId: DW,
+      commanderRoleId: WC,
+      deathwatchCommandRoleId: CMD,
+      legionRoleId: LEGION,
+      emissaryRoleId: EMI,
+      xenosbaneRoleId: XEN,
+      vigiliaRoleId: VIG,
+      killMarineRoleId: KIL,
+      ...opts,
+    }).resolve(req('any'))
+
+  it('names each standing its role gives, in a fixed order, and lets each one in by itself', async () => {
+    const cases = [
+      [[LEGION], ['legion']],
+      [[EMI], ['emissary']],
+      [[XEN], ['xenosbane']],
+      [[VIG], ['vigilia']],
+      [[KIL], ['killmarine']],
+      [[KIL, XEN, VIG], ['xenosbane', 'vigilia', 'killmarine']],
+      [[KIL, VIG, CMD, DW, EMI, LEGION], ['legion', 'emissary', 'deployment', 'command', 'vigilia', 'killmarine']],
+    ]
+    for (const [held, roles] of cases) {
+      const v = await verdictHolding(held)
+      expect([v.access, v.watchCommander, v.roles], held.join()).toEqual([true, false, roles])
+    }
+  })
+
+  it('gives none of them to the Watch Commander unless the role is held, yet lets them in', async () => {
+    const v = await verdictHolding([WC])
+    expect([v.access, v.watchCommander, v.roles]).toEqual([true, true, []])
+    expect((await verdictHolding([WC, LEGION])).roles).toEqual(['legion'])
+  })
+
+  it('switches each one off when its id is unset or malformed, even for a holder of that very string', async () => {
+    for (const bad of [undefined, null, '', 'abc', ` ${LEGION}`, '1'.repeat(16), 7]) {
+      const held = [LEGION, EMI, XEN, VIG, KIL, ...(typeof bad === 'string' ? [bad] : [])]
+      const v = await verdictHolding(held, { legionRoleId: bad, emissaryRoleId: bad, xenosbaneRoleId: bad, vigiliaRoleId: bad, killMarineRoleId: bad })
+      expect([v.access, v.roles], String(bad)).toEqual([false, []])
+    }
+  })
+
+  it('takes one id per award, never a list', async () => {
+    expect((await verdictHolding([XEN], { xenosbaneRoleId: `${XEN},${VIG}` })).roles).toEqual([])
+  })
+
+  it('does not take a stray entry in the role list for a standing that is not set', async () => {
+    const held = [undefined, null, '', 'undefined', 'null']
+    const v = await verdictHolding(held, { legionRoleId: undefined, emissaryRoleId: null, xenosbaneRoleId: undefined, vigiliaRoleId: null, killMarineRoleId: '' })
+    expect(v.access).toBe(false)
+  })
+
+  it('neither configures the area nor is needed to', () => {
+    const configured = (opts) => createDeathwatchAccess({ roles: {}, store: {}, ...opts }).configured
+    expect(configured({ commanderRoleId: WC, legionRoleId: LEGION, emissaryRoleId: EMI, xenosbaneRoleId: XEN })).toBe(false)
+    expect(configured({ deathwatchRoleId: DW, commanderRoleId: WC, legionRoleId: 'x' })).toBe(true)
   })
 })

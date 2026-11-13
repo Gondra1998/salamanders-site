@@ -79,7 +79,8 @@ test.describe('Reliquarium API', () => {
 
   test('the poll started from the newest message, then copies a new clip into R2', async ({ request }) => {
     const title = `E2E clip ${RUN}`
-    clipMessageId = await postInChannel(request, title, ['clip.mp4'])
+    // Tagged, so it goes straight on the site; the tag is taken out of the title.
+    clipMessageId = await postInChannel(request, `#gameplay ${title}`, ['clip.mp4'])
     await expect.poll(async () => (await titled(request, '/gallery/clips', title)).length, { timeout: 10_000 }).toBe(1)
     ;[clip] = await titled(request, '/gallery/clips', title)
     expect(clip).toMatchObject({ kind: 'clip', source: 'discord', media: 'video', status: 'approved', contentType: 'video/mp4', bytes: MP4.length })
@@ -104,10 +105,33 @@ test.describe('Reliquarium API', () => {
   test('a Medal link in a message becomes an embed under its canonical address', async ({ request }) => {
     const slug = `e2eMedal${RUN}`
     const title = `E2E medal ${RUN} https://medal.tv/games/space-marine-2/clips/${slug}?invite=e2e`
-    await postInChannel(request, title)
+    await postInChannel(request, `#gameplay ${title}`)
     await expect.poll(async () => (await titled(request, '/gallery/clips', title)).length, { timeout: 10_000 }).toBe(1)
     const [embed] = await titled(request, '/gallery/clips', title)
     expect(embed).toMatchObject({ media: 'embed', url: `https://medal.tv/clips/${slug}`, contentType: null, bytes: null })
+  })
+
+  test('an untagged clip and any YouTube link are copied but wait for review, off the site', async ({ request }) => {
+    const untagged = `E2E untagged ${RUN}`
+    const linked = `E2E youtube ${RUN} https://youtu.be/e2eYouTub${RUN.slice(-2).padStart(2, '0')}`
+    const untaggedId = await postInChannel(request, untagged, ['clip.mp4'])
+    await postInChannel(request, `#gameplay ${linked}`)
+    const queue = async () => (await (await get(request, '/gallery/review', CURATOR)).json()).items
+    await expect.poll(async () => (await queue()).filter((i) => i.title === untagged || i.title === linked).length, { timeout: 10_000 }).toBe(2)
+    const waiting = (await queue()).filter((i) => i.title === untagged || i.title === linked)
+    expect(waiting.map((i) => [i.title, i.media, i.status]).sort()).toEqual([
+      [untagged, 'video', 'pending'],
+      [linked, 'embed', 'pending'],
+    ].sort())
+    expect(await titled(request, '/gallery/clips', untagged)).toEqual([])
+    expect(await titled(request, '/gallery/clips', linked)).toEqual([])
+    // The file was copied all the same, so an approver can watch it before deciding.
+    const file = await request.get(waiting.find((i) => i.title === untagged).url)
+    expect(file.status()).toBe(200)
+
+    // Deleted in Discord while it waits: it leaves the queue too.
+    await request.post(`${MOCK}/__test/channel/delete/${untaggedId}`)
+    await expect.poll(async () => (await queue()).filter((i) => i.title === untagged).length, { timeout: 10_000 }).toBe(0)
   })
 
   test('deleting the message in Discord takes its clip off the site, on the record', async ({ request }) => {
@@ -173,16 +197,41 @@ test.describe('Reliquarium API', () => {
     expect((await post(request, `/gallery/items/${item.id}/approve`, CURATOR)).status()).toBe(409)
   })
 
-  test('the artist removes their own piece, and only theirs', async ({ request }) => {
+  test('the artist removes their own piece, and only theirs, and nothing of it stays', async ({ request }) => {
     const item = await submitted(request, `E2E to remove ${RUN}`)
+    expect((await request.get(item.url)).status()).toBe(200)
     // Someone else's piece is not found, even by another member.
     expect((await del(request, `/gallery/items/${item.id}`, CAPTAIN)).status()).toBe(404)
     expect((await del(request, `/gallery/items/${item.id}`, MEMBER)).status()).toBe(204)
-    // Gone already: the second removal finds nothing left to remove.
-    expect((await del(request, `/gallery/items/${item.id}`, MEMBER)).status()).toBe(409)
+    // Gone for good: the second removal finds nothing, the file is out of R2, and neither the artist's list, the
+    // review queue nor the trail knows of it.
+    expect((await del(request, `/gallery/items/${item.id}`, MEMBER)).status()).toBe(404)
     expect((await del(request, '/gallery/items/999999999', MEMBER)).status()).toBe(404)
-    const [mine] = await titled(request, '/gallery/mine', item.title)
-    expect(mine.status).toBe('removed')
+    expect((await request.get(item.url)).status()).toBe(404)
+    expect(await titled(request, '/gallery/mine', item.title)).toEqual([])
+    const queue = (await (await get(request, '/gallery/review', CURATOR)).json()).items
+    expect(queue.filter((i) => i.id === item.id)).toEqual([])
+    expect(await eventsFor(request, item.id)).toEqual([])
+  })
+
+  test('an approver deletes a taken-down file for good; the record of it stays', async ({ request }) => {
+    const item = await submitted(request, `E2E to erase ${RUN}`)
+    // Live or waiting, it is not on the list and cannot be erased: it must be taken down first.
+    expect((await post(request, `/gallery/items/${item.id}/erase`, CURATOR)).status()).toBe(409)
+    expect((await post(request, `/gallery/items/${item.id}/hide`, CAPTAIN, { note: 'e2e erase' })).status()).toBe(200)
+    const takedowns = async () => (await (await get(request, '/gallery/takedowns', CURATOR)).json()).items.filter((i) => i.id === item.id)
+    expect((await takedowns()).map((i) => i.status)).toEqual(['hidden'])
+    expect((await get(request, '/gallery/takedowns', MEMBER)).status()).toBe(403)
+    expect((await post(request, `/gallery/items/${item.id}/erase`, MEMBER)).status()).toBe(403)
+
+    expect((await post(request, `/gallery/items/${item.id}/erase`, CURATOR)).status()).toBe(204)
+    expect((await request.get(item.url)).status()).toBe(404)
+    expect(await takedowns()).toEqual([])
+    expect((await post(request, `/gallery/items/${item.id}/erase`, CURATOR)).status()).toBe(409)
+    // The trail keeps why it went, and who deleted the file.
+    const actions = (await eventsFor(request, item.id)).map((e) => [e.action, e.note])
+    expect(actions).toContainEqual(['hidden', 'e2e erase'])
+    expect(actions).toContainEqual(['file_purged', 'deleted for good'])
   })
 
   test('a member cannot approve, and two approvers at once make one approval', async ({ request }) => {

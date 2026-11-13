@@ -102,6 +102,7 @@ Any Discord failure answers 503: the area fails closed.
 |---|---|---|
 | `GET /deathwatch/me` | any signed-in user | `{ access, watchCommander, deathwatchCommand }`; never 403 |
 | `GET /deathwatch/data` | access | `{ teams, cfg, archive }`; `ETag`, 304 on `If-None-Match`; 403 without access |
+| `GET /deathwatch/deployment` | Event Tracker readers | `{ members: [{ id, name, avatar }] }`: who holds `DEATHWATCH_ROLE_ID`, from the roster's member cache (no extra Discord calls); 503 until that has loaded |
 | `POST /deathwatch/doc` | Watch Commander | `{ col, id, op: 'set' \| 'delete', doc }`; JSON content type required |
 | `GET /deathwatch/grants` | Watch Commander | active grants |
 | `POST /deathwatch/grants` | Watch Commander | `{ discordId }`; 201 new, 200 if already active, 409 at 200 active |
@@ -116,9 +117,20 @@ transaction as the change.
 
 | Variable | Value |
 |---|---|
-| `DEATHWATCH_ROLE_ID` | the Deathwatch role id, or several separated by commas with no spaces (a holder of any one gets in) — no default, required |
-| `WATCH_COMMANDER_ROLE_ID` | the Watch Commander role id — no default, required |
-| `DEATHWATCH_COMMAND_ROLE_ID` | the Deathwatch Command role id (one id, not the Watch Commander's) — optional. Its holders who also have access get `deathwatchCommand: true` from `/deathwatch/me`; it opens no route. Unset or not a single id, nobody holds it and nothing else changes |
+| `DEATHWATCH_ROLE_ID` | the Deathwatch Deployment role id, or several separated by commas with no spaces (a holder of any one is `deployment`, as is Deathwatch Command, a grant, the guild owner or an Administrator) — no default, required |
+| `WATCH_COMMANDER_ROLE_ID` | the Watch Commander role id: opens everything — no default, required |
+| `DEATHWATCH_COMMAND_ROLE_ID` | the Deathwatch Command role id (one id, not the Watch Commander's) — optional. Its holders are `command` and `deployment` (and `deathwatchCommand: true`). Unset or not a single id, nobody holds it and nothing else changes |
+| `EMISSARY_ROLE_ID` | the Emissary role id (one id) — optional; its holders are `emissary`. The Legion role (`rosterLadder.js`) gives `legion` |
+| `XENOSBANE_SIGIL_ROLE_ID` | the Xenosbane Sigil award role id — optional; its holders are `xenosbane` |
+| `VIGILIA_MORTIS_ROLE_ID` | the Vigilia Mortis in Aeternum award role id — optional; its holders are `vigilia` |
+| `KILL_MARINE_ROLE_ID` | the Deathwatch Kill-Marine award role id — optional; its holders are `killmarine` |
+
+`GET /deathwatch/me` answers `roles`: the standings the caller holds (`legion`, `emissary`, `deployment`,
+`command`, `xenosbane`, `vigilia`, `killmarine`). Any standing, or the Watch Commander role, lets them into the
+area; which parts open to which standings the Watch Commander sets in Manage → Access (the cfg document `g`,
+area → standings), else the defaults in the site's `src/lib/deathwatch/areas.js`. `GET /deathwatch/data` sends
+the Event Tracker's documents (`teams`, `archive`) only to the Watch Commander and the standings `g.eventtracker`
+lists (by default `deployment`); everyone else gets them empty.
 
 Until **both** are set every `/deathwatch/*` route answers 503 "not configured". The role
 ids are supplied at deploy time and never committed. To deploy: set both in `server/.env`,
@@ -148,12 +160,14 @@ upload and removal checks Discord afresh. Any Discord failure answers 503.
 | `GET /gallery/art?before=<id>` | member | the same for art |
 | `GET /gallery/mine` | member | `{ items }`: the caller's own items in every status |
 | `POST /gallery/art` | member | multipart form: `file`, `title`, optional `note`; 201 `{ item }`, pending review |
-| `DELETE /gallery/items/:id` | the item's owner | 204; 404 if not theirs, 409 if already hidden or removed |
+| `DELETE /gallery/items/:id` | the item's owner | for good: the row, its trail and its file go (R2 now, the backup tonight); 204; 404 if not theirs or gone, 409 if hidden or removed |
 | `GET /gallery/review` | approver | `{ items, sync }`: the pending queue and the clips poll's `lastRunAt`, `lastOkAt`, `lastError` |
 | `POST /gallery/items/:id/approve` | approver | from pending or rejected; `{ item }` |
 | `POST /gallery/items/:id/reject` | approver | JSON `{ reason }`, required; from pending; `{ item }` |
 | `POST /gallery/items/:id/hide` | approver | optional JSON `{ note }`; from pending, approved or rejected; `{ item }` |
 | `GET /gallery/events?before=<id>` | approver | 100 audit rows, newest first: `{ events, next }` |
+| `GET /gallery/takedowns` | approver | `{ items }`: rejected, hidden or removed pieces whose file R2 or the backup still holds |
+| `POST /gallery/items/:id/erase` | approver | Delete for good: the file leaves R2 now and the backup tonight; the row and trail stay; 204; 409 if live or erased already |
 
 An item carries `url`: a presigned R2 link valid 15 minutes for a stored file, or the
 Medal / YouTube / Twitch link for an embed. The bucket is private; that link is the
@@ -161,18 +175,34 @@ only way to a file. A status change the item does not allow answers 409, an unkn
 
 Limits: an upload is one JPEG, PNG, WebP or GIF of at most 10 MB, checked by its
 bytes, not its name or declared type; a title is 1 to 120 characters and a note at
-most 500; a rejection reason 1 to 500. A JSON body is at most 16 KB. Nothing is ever
-deleted: every change writes a `gallery_events` row in the same transaction, and a
-rejected, hidden or removed item keeps its file in R2.
+most 500; a rejection reason 1 to 500. A JSON body is at most 16 KB. No row is ever
+deleted: every change writes a `gallery_events` row in the same transaction.
+
+**Storage** (`galleryPolicy.js`). R2's free tier is 10 GB, so the store holds at most 9 GB,
+counted from the rows' own sizes. Past 7 GB only `#gameplay` clips are copied; past 9 GB
+nothing is, and an art upload answers 507. A clip that does not fit is skipped before it is
+downloaded and named on the Review tab's poll line. A link holds no file and always goes in.
+A file whose item has been rejected, hidden or removed for 30 days leaves R2 once the nightly
+backup holds it (`galleryPurge.js`, run by `backup/salamanders-r2-backup`): the row and its
+trail stay, `file_purged_at` is set, a `file_purged` event names the storage purge, and the
+item can no longer be approved. The backup copy goes 60 days after the takedown. A member's own
+removal, an approver's Delete for good and the owner's `salamanders-r2-backup --erase-item <id>` /
+`--erase-member <discord id>` do not wait: the key goes into `gallery_erasures` (nothing else is
+kept there), the file leaves R2 at once and the backup that night, and the note is dropped once
+both are gone. A member's removal and the owner command also delete the row and its trail.
 
 **The clips channel.** Posting in it is the publish step: the poll (every 2 minutes)
-copies each video or image attachment into R2 and stores it approved, and records
-Medal / YouTube / Twitch links as embeds. Attachments over 100 MB are skipped. An
+copies each video or image attachment into R2, and records Medal / YouTube / Twitch links
+as embeds. A message tagged `#gameplay` (anywhere in its text, outside its links; the tag
+is taken out of the title) goes straight on the site, files and Medal links alike. Anything
+untagged, and every YouTube or Twitch link whatever its tag (nothing says the poster made
+the video), waits in the review queue, its file already copied so an approver can watch
+it. Attachments over 100 MB are skipped. An
 attachment that cannot be copied (a dead Discord link, a file R2 refuses, a copy that cannot
 finish in two minutes) is skipped too and named on the Review tab's poll line; the
 back-catalogue job can pick it up later. Deleting
-the message in Discord removes the clip from the site (the newest 50 are checked every
-pass, all of them hourly); an approver can also hide one. The first pass only notes the
+the message in Discord removes the clip from the site, or from the review queue (the newest
+50 are checked every pass, all of them hourly); an approver can also hide one. The first pass only notes the
 newest message: clips posted before launch are not imported.
 
 | Variable | Value |
@@ -199,11 +229,13 @@ Rollout:
    scoped to that bucket alone. Put the R2 values, `GALLERY_CHANNEL_ID` and (if wanted)
    `GALLERY_CURATOR_ROLE_ID` in `server/.env`.
 2. Apply `schema.sql` (idempotent, command in the reports section above), then start the
-   new API image.
+   new API image. The storage purge (2026-11-07) added `gallery_items.file_purged_at` and the
+   `file_purged` event: apply `schema.sql` **before** starting an image that has it, since
+   every approval reads that column.
 3. Grant the bot the permissions above. The first pass seeds the cursor; watch the
    Review tab's poll status for `lastOkAt` and an empty `lastError`.
 4. Merge the site; the Reliquarium nav entry appears for members only.
-5. Back the bucket up: a nightly `rclone sync` of it into the Vulkan share that is
-   already backed up.
+5. Back the bucket up and run the purge: `backup/salamanders-r2-backup` nightly (see
+   `backup/README.md`). It copies, never syncs: the backup keeps the files the purge takes out.
 
 The one-time import of the channel's back catalogue is a separate job.

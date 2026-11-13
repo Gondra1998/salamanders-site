@@ -157,6 +157,7 @@ function toggle(p) {
 
     <div v-if="inspected" class="wdetail" :data-q="slug(inspected.quality)">
       <div class="wdetail-top">
+        <span class="stud wdetail-stud" aria-hidden="true"></span>
         <span class="wdetail-q">{{ inspected.quality }}</span>
         <strong class="wdetail-name">{{ inspected.name }}</strong>
         <span
@@ -187,6 +188,7 @@ function toggle(p) {
 
     <div v-if="adding && canEdit" class="wdetail" :data-q="slug(adding)">
       <div class="wdetail-top">
+        <span class="stud wdetail-stud" aria-hidden="true"></span>
         <span class="wdetail-q">{{ adding }}</span>
         <strong class="wdetail-name">Add a perk</strong>
       </div>
@@ -210,37 +212,38 @@ function toggle(p) {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.6rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .wtree-budget input {
   width: 4rem;
-  background: rgba(5, 10, 8, 0.7);
+  background: color-mix(in srgb, var(--color-obsidian) 70%, transparent);
   border: 1px solid var(--color-ash);
   color: var(--color-bone);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.35rem 0.5rem;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
 .wtree-pts {
   font-family: var(--font-display);
   font-weight: 700;
   color: var(--color-gold);
-  font-size: 0.95rem;
+  font-size: var(--text-md);
 }
 .wtree-pts.full {
   color: var(--color-ember);
 }
 .wtree-reset {
   margin-left: auto;
+  min-height: var(--tap);
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
   background: transparent;
   border: 1px solid var(--color-ash);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.4rem 0.7rem;
   cursor: pointer;
   transition: transform var(--dur-press) var(--ease-forge);
@@ -258,8 +261,8 @@ function toggle(p) {
 .wtree-scroll {
   overflow-x: auto;
   border: 1px solid var(--color-ash);
-  border-radius: 8px;
-  background: rgba(7, 17, 13, 0.4);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-pitch) 40%, transparent);
   padding: 1rem;
 }
 .wtree-grid {
@@ -275,18 +278,18 @@ function toggle(p) {
   text-transform: uppercase;
   font-weight: 800;
   letter-spacing: 0.08em;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   padding: 0.35rem;
   margin-bottom: 0.6rem;
-  border-radius: 3px;
-  color: #0a1410;
+  border-radius: var(--radius-md);
+  color: var(--color-basalt);
 }
 .wtier-add {
   margin-left: 0.4rem;
   border: 0;
-  background: rgba(10, 20, 16, 0.35);
+  background: color-mix(in srgb, var(--color-basalt) 35%, transparent);
   color: inherit;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   width: 1.2rem;
   cursor: pointer;
   font-weight: 800;
@@ -296,7 +299,7 @@ function toggle(p) {
   transform: scale(0.97);
 }
 .wtier[data-q='standard'] .wtier-head {
-  background: #9aa8a0;
+  background: var(--color-smoke);
 }
 .wtier[data-q='master-crafted'] .wtier-head {
   background: var(--color-drake);
@@ -322,10 +325,10 @@ function toggle(p) {
   text-align: left;
   padding: 0.55rem 0.6rem;
   border: 1px solid var(--color-ash);
-  border-radius: 5px;
-  background: rgba(14, 28, 22, 0.5);
-  color: #c3d0c6;
-  font-size: 0.78rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-basalt-2) 50%, transparent);
+  color: var(--color-pewter);
+  font-size: var(--text-sm);
   line-height: 1.2;
   cursor: pointer;
   transition:
@@ -350,10 +353,10 @@ function toggle(p) {
   width: 10px;
   height: 10px;
   transform: rotate(45deg);
-  background: #3a5246;
+  background: var(--color-ash-2);
 }
 .wtier[data-q='standard'] .wnode-dot {
-  background: #9aa8a0;
+  background: var(--color-smoke);
 }
 .wtier[data-q='master-crafted'] .wnode-dot {
   background: var(--color-drake);
@@ -370,8 +373,8 @@ function toggle(p) {
 .wnode.on {
   color: var(--color-bone);
   border-color: var(--color-ember);
-  background: rgba(255, 106, 43, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(255, 106, 43, 0.35);
+  background: color-mix(in srgb, var(--color-ember) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ember) 35%, transparent);
 }
 .wnode.dim {
   opacity: 0.4;
@@ -382,24 +385,29 @@ function toggle(p) {
   margin-top: 1rem;
   padding: 0.9rem 1rem;
   border: 1px solid var(--color-ash);
-  border-left: 3px solid var(--color-ash-2);
-  border-radius: 6px;
-  background: rgba(14, 28, 22, 0.4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-basalt-2) 40%, transparent);
 }
-.wdetail[data-q='standard'] {
-  border-left-color: #9aa8a0;
+/* The quality sits in the stud before its label, not in a side border. */
+.wdetail-stud {
+  position: relative;
+  top: -1px; /* baseline nudge: sits the diamond on the label's caps */
+  color: var(--color-ash-2);
 }
-.wdetail[data-q='master-crafted'] {
-  border-left-color: var(--color-drake);
+.wdetail[data-q='standard'] .wdetail-stud {
+  color: var(--color-smoke);
 }
-.wdetail[data-q='artificer'] {
-  border-left-color: var(--color-cobalt);
+.wdetail[data-q='master-crafted'] .wdetail-stud {
+  color: var(--color-drake);
 }
-.wdetail[data-q='relic'] {
-  border-left-color: var(--color-violet);
+.wdetail[data-q='artificer'] .wdetail-stud {
+  color: var(--color-cobalt);
 }
-.wdetail[data-q='heroic'] {
-  border-left-color: var(--color-gold);
+.wdetail[data-q='relic'] .wdetail-stud {
+  color: var(--color-violet);
+}
+.wdetail[data-q='heroic'] .wdetail-stud {
+  color: var(--color-gold);
 }
 .wdetail-top {
   display: flex;
@@ -411,18 +419,18 @@ function toggle(p) {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: max(0.6rem, var(--text-floor));
-  color: var(--color-gold);
+  font-size: max(var(--text-xs), var(--text-floor));
+  color: var(--color-pewter);
 }
 .wdetail-name {
   font-family: var(--font-display);
   text-transform: uppercase;
   color: var(--color-bone);
-  font-size: 1.05rem;
+  font-size: var(--text-base);
 }
 .wdetail-desc {
-  color: #c3d0c6;
-  font-size: 0.85rem;
+  color: var(--color-pewter);
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 .corrected-tag {
@@ -430,10 +438,10 @@ function toggle(p) {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.58rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-gold);
-  border: 1px solid rgba(214, 170, 72, 0.45);
-  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-gold) 45%, transparent);
+  border-radius: var(--radius-sm);
   padding: 0.1rem 0.35rem;
 }
 .wdetail-close {
@@ -442,9 +450,11 @@ function toggle(p) {
   border: 1px solid var(--color-ash);
   background: transparent;
   color: var(--color-smoke);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   width: 1.4rem;
   height: 1.4rem;
+  min-width: var(--tap);
+  min-height: var(--tap);
   line-height: 1;
   cursor: pointer;
   transition: transform var(--dur-press) var(--ease-forge);
@@ -463,7 +473,7 @@ function toggle(p) {
 }
 .wdetail-dup {
   margin-top: 0.7rem;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--color-smoke);
 }
 .wnode-fix {

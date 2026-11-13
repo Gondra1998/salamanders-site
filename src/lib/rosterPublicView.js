@@ -10,9 +10,13 @@
  * carry a local key `pub-…` in place of a Discord id: the server sends none, and
  * the chips only need something to key on.
  */
-import { SIGILS, heatAt } from './rosterView'
+import { SIGILS, heatOf } from './rosterView'
 
 const HONOURED = 'Honoured Dreadnoughts'
+
+// A post's rank (a head, a High Command seat) by the fields the page shows, as the server projects it: an
+// allowlist, like the people's, so a field a later server change adds to a rank never reaches the view model.
+const postRank = ({ key, label, tier }) => ({ key, label, tier })
 
 const peopleOf = (scope, rankKey, members) =>
   members.map((m, i) => ({ id: `pub-${scope}-${rankKey}-${i}`, name: m.name, ...(m.acting ? { acting: true } : {}) }))
@@ -26,17 +30,16 @@ function shapeOf(aside, rows) {
   const n = Math.max(1, raw.filter((item) => !item.aside && !item.lateral).length)
   let order = 0
   return raw.map((item, s) => {
-    if (item.aside || item.lateral) {
-      return { ...item, s, heat: { h: heatAt((order + 0.5) / n), hp: heatAt(order / n), hn: heatAt(Math.min(1, (order + 1) / n)) } }
-    }
+    if (item.aside || item.lateral) return { ...item, s, heat: heatOf(order, n, true) }
     order++
-    return { ...item, s, heat: { h: heatAt(order / n), hp: heatAt((order - 1) / n), hn: heatAt(Math.min(1, (order + 1) / n)) } }
+    return { ...item, s, heat: heatOf(order, n) }
   })
 }
 
 function branchOf(b) {
   const members = peopleOf(b.key, b.head.rank.key, b.head.members)
-  const extraHeads = !b.head.vacant && members.length > 2 ? { rank: b.head.rank, members: members.slice(2) } : null
+  const rank = postRank(b.head.rank)
+  const extraHeads = !b.head.vacant && members.length > 2 ? { rank, members: members.slice(2) } : null
   const shape = shapeOf(b.aside, b.rows)
   return {
     key: b.key,
@@ -47,7 +50,7 @@ function branchOf(b) {
     // the same sum buildRosterView makes
     count: (b.head.vacant ? 0 : members.length) + b.aside + b.rows.reduce((n, r) => n + r.count, 0),
     openable: shape.length > 0 || extraHeads !== null,
-    head: { rank: b.head.rank, vacant: b.head.vacant, members, shown: members.slice(0, 2), more: Math.max(0, members.length - 2) },
+    head: { rank, vacant: b.head.vacant, members, shown: members.slice(0, 2), more: Math.max(0, members.length - 2) },
     ladder: [],
     shape,
     extraHeads,
@@ -59,9 +62,10 @@ function bannerOf(highCommand) {
   if (!first) return { hero: null, court: [] }
   const named = (r) => peopleOf('high-command', r.rank.key, r.members)
   const [hero, ...others] = named(first)
+  const lead = postRank(first.rank)
   return {
-    hero: { rank: first.rank, member: hero },
-    court: [...(others.length ? [{ rank: first.rank, members: others }] : []), ...rest.map((r) => ({ rank: r.rank, members: named(r) }))],
+    hero: { rank: lead, member: hero },
+    court: [...(others.length ? [{ rank: lead, members: others }] : []), ...rest.map((r) => ({ rank: postRank(r.rank), members: named(r) }))],
   }
 }
 

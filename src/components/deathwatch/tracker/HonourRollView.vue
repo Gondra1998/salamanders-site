@@ -24,7 +24,7 @@ const H = computed(() => honours(props.R))
       <span class="dw-tile-who">
         <template v-if="a.best">
           <small v-if="a.best.who.length > 1" class="dw-tile-note">Tied ({{ a.best.who.length }}) </small>
-          <template v-for="(p, i) in a.best.who" :key="p.n"><template v-if="i">, </template><PlayerName :name="p.n" :R="R" :to="to.player(p.n)" /></template>
+          <template v-for="(p, i) in a.best.who" :key="p.n"><template v-if="i"> </template><PlayerName :name="p.n" :R="R" :to="to.player(p.n)" /></template>
         </template>
         <template v-else>no data yet</template>
       </span>

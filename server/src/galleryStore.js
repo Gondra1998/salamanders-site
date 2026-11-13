@@ -1,23 +1,40 @@
 /**
  * Postgres side of the Reliquarium (members-only art and clips galleries): the only module that talks to
- * the gallery tables, which are in schema.sql. Nothing here deletes a row. Every status change commits
- * together with its gallery_events row, so the trail cannot miss a change.
+ * the gallery tables, which are in schema.sql. Every status change commits together with its gallery_events row,
+ * so the trail cannot miss a change. A file can leave R2 (purgeFile) once its item has been out of sight long enough
+ * (galleryPolicy.js); the row and its trail stay, with file_purged_at set.
+ *
+ * Rows are deleted in one case only: a piece taken down by its own member (eraseByOwner), or by the owner's erase
+ * command (eraseItem), goes with its whole trail. Its file key is noted in gallery_erasures, which holds nothing
+ * else, so the nightly backup run can take the file out of R2 and out of the backup.
  *
  * Every caller value goes in as a $n parameter. The only text built into a statement is a fixed
  * fragment or a gallery_sync column name taken from SYNC_COLUMNS.
  */
 import { createInTx } from './inTx.js'
 import { PAGE_SIZE } from './galleryValidate.js'
+import { BACKUP_KEEP_DAYS, PURGEABLE, PURGE_AFTER_DAYS } from './galleryPolicy.js'
 
 /** Who the audit trail names for what the clips-channel poll does by itself (no Discord call needed). */
 export const POLL_ACTOR = Object.freeze({ id: 'clips-poll', username: 'Clips channel poll' })
+/** Who the trail names for a file the nightly storage purge took out of R2. */
+export const PURGE_ACTOR = Object.freeze({ id: 'storage-purge', username: 'Storage purge' })
 
 const EVENTS_PAGE = 100
-// A member can take down their own piece until a moderator has hidden it or it is already removed.
+// A member can take down their own piece, for good, until a moderator has hidden it or it is already removed.
 const OWNER_REMOVABLE = ['pending', 'approved', 'rejected']
 // setSync accepts exactly these keys; they are the only column names that ever reach its statement.
 const SYNC_COLUMNS = ['last_message_id', 'last_run_at', 'last_ok_at', 'last_error']
-const LIVE_CLIPS = "where kind = 'clip' and source = 'discord' and status = 'approved'"
+// The polled clips whose Discord message the poll keeps checking: a deleted message takes them off the site, or out
+// of the review queue.
+const WATCHED_CLIPS = "where kind = 'clip' and source = 'discord' and status in ('approved', 'pending')"
+const POLLED_STATUSES = ['approved', 'pending']
+// A file R2 still holds for a row: it has a key, and the purge has not taken it.
+const FILE_KEPT = "r2_key is not null and r2_key <> '' and file_purged_at is null"
+const PURGE_DUE = `status = any($2::text[]) and ${FILE_KEPT} and updated_at < now() - make_interval(days => $3)`
+// Taken down, with a file R2 or the backup still holds (BACKUP_KEEP_DAYS), and not erased already.
+const NOT_ERASED = 'not exists (select 1 from gallery_erasures e where e.r2_key = gallery_items.r2_key)'
+const HAS_FILE = "r2_key is not null and r2_key <> ''"
 
 /**
  * A guard for the values a statement's match depends on: a null or empty one would fall out of a predicate
@@ -46,59 +63,56 @@ export function createGalleryStore(pool) {
       note ?? '',
     ])
 
+  /** 'conflict' when the item exists (in a state that cannot do what was asked), else 'missing'. */
+  const conflictOrMissing = async (q, id) => ((await q.query('select 1 from gallery_items where id = $1', [id])).rows.length ? 'conflict' : 'missing')
+
   /**
-   * Move an item from one of the `from` statuses to `to`, with its event. With `owner`, only that author's item
-   * moves. With `review` (the default) the reviewer columns record `actor` and `note`; an owner's own removal is
-   * not a review, so it passes `review: false` and leaves them alone (the event names who did it).
-   * → { item }, 'conflict' (the item is there, in a status that cannot make this move) or 'missing'
-   * (no item with this id, or, with `owner`, none of theirs: the caller does not learn which).
+   * Move an item from one of the `from` statuses to `to`, with its event; the reviewer columns record `actor` and
+   * `note`. → { item }, 'conflict' (the item is there, in a status that cannot make this move) or 'missing'.
    */
-  const move = (id, { from, to, action, actor, note }, { owner = null, review = true } = {}) =>
+  const move = (id, { from, to, action, actor, note }) =>
     inTx(async (q) => {
-      const params = [id, from, to]
-      let set = 'status = $3'
-      if (review) {
-        params.push(actor.id, actor.username, note ?? null)
-        set += ', reviewed_by = $4, reviewed_by_username = $5, review_note = $6'
-      }
-      let byOwner = ''
-      if (owner) {
-        params.push(owner)
-        byOwner = ` and author_discord_id = $${params.length}`
-      }
       const { rows } = await q.query(
         `update gallery_items
-            set ${set}, updated_at = now()
-          where id = $1 and status = any($2::text[])${byOwner}
+            set status = $3, reviewed_by = $4, reviewed_by_username = $5, review_note = $6, updated_at = now()
+          where id = $1 and status = any($2::text[]) and ($3 <> 'approved' or file_purged_at is null)
           returning *`,
-        params,
+        [id, from, to, actor.id, actor.username, note ?? null],
       )
-      if (!rows.length) {
-        const seen = owner
-          ? await q.query('select 1 from gallery_items where id = $1 and author_discord_id = $2', [id, owner])
-          : await q.query('select 1 from gallery_items where id = $1', [id])
-        return seen.rows.length ? 'conflict' : 'missing'
-      }
+      if (!rows.length) return conflictOrMissing(q, id)
       await event(q, rows[0].id, action, actor, note)
       return { item: rows[0] }
     })
 
+  /** Delete an item and its trail, noting its file key first if it has one. → the key, or null. */
+  async function wipe(q, id, key) {
+    const hasKey = typeof key === 'string' && key !== ''
+    if (hasKey) await q.query('insert into gallery_erasures (r2_key) values ($1) on conflict do nothing', [key])
+    await q.query('delete from gallery_events where item_id = $1', [id])
+    await q.query('delete from gallery_items where id = $1', [id])
+    return hasKey ? key : null
+  }
+
   return {
     /**
-     * A clip the poll found, stored approved. `row` is a parsed Candidate plus r2Key, contentType and bytes
-     * (all null for an embed). → { id }, or 'exists' when the message and attachment are already held.
-     * A TypeError, before any query, unless both Discord ids are non-empty strings: a null attachment id
-     * would slip past the unique index and a re-poll would store the clip again.
+     * A clip the poll found. `row` is a parsed Candidate plus r2Key, contentType and bytes (all null for an
+     * embed) and status, approved or pending (galleryPolicy.js clipStatus). → { id }, or 'exists' when the
+     * message and attachment are already held. A TypeError, before any query, unless both Discord ids are
+     * non-empty strings (a null attachment id would slip past the unique index and a re-poll would store the
+     * clip again) and the status is one of those two.
      */
     insertDiscordItem: async (row, actor) => {
       needId(row.messageId, 'messageId')
       needId(row.attachmentId, 'attachmentId')
+      if (!POLLED_STATUSES.includes(row.status)) {
+        throw new TypeError(`insertDiscordItem: a polled clip goes in approved or pending, not ${String(row.status)}`)
+      }
       return inTx(async (q) => {
         const { rows } = await q.query(
           `insert into gallery_items
              (kind, source, status, discord_message_id, discord_attachment_id, author_discord_id, author_username,
               title, note, media, r2_key, embed_url, content_type, bytes, posted_at)
-           values ('clip', 'discord', 'approved', $1, $2, $3, $4, $5, '', $6, $7, $8, $9, $10, $11)
+           values ('clip', 'discord', $12, $1, $2, $3, $4, $5, '', $6, $7, $8, $9, $10, $11)
            on conflict (discord_message_id, discord_attachment_id) where discord_message_id is not null do nothing
            returning id`,
           [
@@ -113,6 +127,7 @@ export function createGalleryStore(pool) {
             row.contentType ?? null,
             row.bytes ?? null,
             row.postedAt,
+            row.status,
           ],
         )
         if (!rows.length) return 'exists'
@@ -161,13 +176,91 @@ export function createGalleryStore(pool) {
     transition: (id, opts) => move(id, opts),
 
     /**
-     * A member takes down their own piece. → { item } | 'missing' | 'conflict' (see move). A TypeError, before
-     * any query, unless the user has a non-empty id: move would otherwise drop the owner check and let
-     * anyone's piece be removed.
+     * A member takes their own piece down for good: the row and its trail are deleted and its file key noted for
+     * the nightly run. → { key } (null for a piece with no file), 'missing' (no such item, or not theirs: the
+     * caller does not learn which) or 'conflict' (theirs, but hidden or removed already). A TypeError, before
+     * any query, unless the user has a non-empty id, so the owner check can never be dropped.
      */
-    removeByOwner: async (id, user) => {
+    eraseByOwner: async (id, user) => {
       needId(user?.id, 'user.id')
-      return move(id, { from: OWNER_REMOVABLE, to: 'removed', action: 'removed', actor: user }, { owner: user.id, review: false })
+      return inTx(async (q) => {
+        const { rows } = await q.query('select status, r2_key from gallery_items where id = $1 and author_discord_id = $2 for update', [
+          id,
+          user.id,
+        ])
+        if (!rows.length) return 'missing'
+        if (!OWNER_REMOVABLE.includes(rows[0].status)) return 'conflict'
+        return { key: await wipe(q, id, rows[0].r2_key) }
+      })
+    },
+
+    /** The owner's erase command: as eraseByOwner, for any item in any status. → { key } | 'missing'. */
+    eraseItem: async (id) => {
+      needId(id, 'id')
+      return inTx(async (q) => {
+        const { rows } = await q.query('select r2_key from gallery_items where id = $1 for update', [id])
+        if (!rows.length) return 'missing'
+        return { key: await wipe(q, id, rows[0].r2_key) }
+      })
+    },
+
+    /** Every item one member posted, by id, oldest first: what the erase command takes for a member. */
+    async itemIdsBy(authorId) {
+      needId(authorId, 'authorId')
+      const { rows } = await pool.query('select id from gallery_items where author_discord_id = $1 order by id', [authorId])
+      return rows.map((r) => String(r.id))
+    },
+
+    /**
+     * An approver deletes a taken-down piece's file for good: its key is noted for the nightly run (which takes it
+     * out of the backup, and out of R2 if still there), the file is marked gone from R2 and the trail records who
+     * did it. The row stays. → { key, inR2 } (whether R2 still held it, so the caller removes it at once),
+     * 'conflict' (live, no file, erased already, or past BACKUP_KEEP_DAYS) or 'missing'.
+     */
+    eraseFile: async (id, actor) => {
+      needId(id, 'id')
+      return inTx(async (q) => {
+        const { rows } = await q.query(
+          `select r2_key, file_purged_at from gallery_items where id = $1 and status = any($2::text[]) and ${HAS_FILE} and updated_at > now() - make_interval(days => $3) and ${NOT_ERASED} for update`,
+          [id, [...PURGEABLE], BACKUP_KEEP_DAYS],
+        )
+        if (!rows.length) return conflictOrMissing(q, id)
+        const { r2_key: key, file_purged_at: purgedAt } = rows[0]
+        await q.query('insert into gallery_erasures (r2_key) values ($1) on conflict do nothing', [key])
+        if (purgedAt === null) await q.query('update gallery_items set file_purged_at = now() where id = $1', [id])
+        await event(q, id, 'file_purged', actor, 'deleted for good')
+        return { key, inR2: purgedAt === null }
+      })
+    },
+
+    /** What an approver can still delete for good (see eraseFile), newest first. */
+    async takedowns() {
+      const { rows } = await pool.query(
+        `select * from gallery_items where status = any($1::text[]) and ${HAS_FILE} and updated_at > now() - make_interval(days => $2) and ${NOT_ERASED} order by id desc`,
+        [[...PURGEABLE], BACKUP_KEEP_DAYS],
+      )
+      return rows
+    },
+
+    /** Every noted file key: the nightly run takes each out of R2 and the backup, then drops the note. */
+    async erasures() {
+      const { rows } = await pool.query('select r2_key from gallery_erasures order by r2_key')
+      return rows.map((r) => r.r2_key)
+    },
+
+    /** Drop one note, once neither R2 nor the backup holds the file. */
+    async dropErasure(key) {
+      needId(key, 'key')
+      await pool.query('delete from gallery_erasures where r2_key = $1', [key])
+    },
+
+    /** The files of items taken down BACKUP_KEEP_DAYS ago or more and already out of R2: the backup lets them go. */
+    async expiredKeys() {
+      const { rows } = await pool.query(
+        `select r2_key from gallery_items where status = any($1::text[]) and file_purged_at is not null and ${HAS_FILE} and updated_at < now() - make_interval(days => $2) order by id`,
+        [[...PURGEABLE], BACKUP_KEEP_DAYS],
+      )
+      return rows.map((r) => r.r2_key)
     },
 
     /** One page of a gallery, newest first. → { rows, next }: next is the cursor for `before`, or null on the last page. */
@@ -235,17 +328,17 @@ export function createGalleryStore(pool) {
       )
     },
 
-    /** The newest approved polled clips, for the poll to check against Discord. → [{ id, discord_message_id }]. */
-    async approvedClipIds({ newest = 50 } = {}) {
+    /** The newest approved or pending polled clips, for the poll to check against Discord. → [{ id, discord_message_id }]. */
+    async watchedClipIds({ newest = 50 } = {}) {
       const { rows } = await pool.query(
-        `select id, discord_message_id from gallery_items ${LIVE_CLIPS} order by id desc limit $1`,
+        `select id, discord_message_id from gallery_items ${WATCHED_CLIPS} order by id desc limit $1`,
         [newest],
       )
       return rows
     },
 
-    /** Approved polled clips oldest first, to sweep them all: page on with `after` = the last id seen. */
-    async approvedClipMessageIds({ after = null, limit = 100 } = {}) {
+    /** Approved or pending polled clips oldest first, to sweep them all: page on with `after` = the last id seen. */
+    async watchedClipMessageIds({ after = null, limit = 100 } = {}) {
       const params = []
       let more = ''
       if (after) {
@@ -254,21 +347,64 @@ export function createGalleryStore(pool) {
       }
       params.push(limit)
       const { rows } = await pool.query(
-        `select id, discord_message_id from gallery_items ${LIVE_CLIPS}${more} order by id asc limit $${params.length}`,
+        `select id, discord_message_id from gallery_items ${WATCHED_CLIPS}${more} order by id asc limit $${params.length}`,
         params,
       )
       return rows
     },
 
-    /** Discord no longer has this message: every approved row of it is removed, each with an event. → the count. */
+    /** Discord no longer has this message: every approved or pending row of it is removed, each with an event. → the count. */
     markDiscordDeleted: (messageId) =>
       inTx(async (q) => {
         const { rows } = await q.query(
-          "update gallery_items set status = 'removed', updated_at = now() where discord_message_id = $1 and status = 'approved' returning id",
+          "update gallery_items set status = 'removed', updated_at = now() where discord_message_id = $1 and status in ('approved', 'pending') returning id",
           [messageId],
         )
         for (const r of rows) await event(q, r.id, 'discord_deleted', POLL_ACTOR, '')
         return rows.length
       }),
+
+    /**
+     * The bytes of every file R2 still holds, by the rows' own sizes: what the caps in galleryPolicy.js are checked
+     * against. An Error, not a number, if Postgres answers anything but a count, so no cap check runs on NaN.
+     */
+    async storedBytes() {
+      const { rows } = await pool.query(`select coalesce(sum(bytes), 0)::text as n from gallery_items where ${FILE_KEPT}`)
+      const n = Number(rows[0]?.n ?? NaN)
+      if (!Number.isFinite(n) || n < 0) throw new Error('storedBytes: Postgres did not answer a byte count')
+      return n
+    },
+
+    /** The kept files of items purgeable for `days` (galleryPolicy.js), oldest first. → [{ id, r2_key, bytes }]. */
+    async purgeCandidates({ days }) {
+      if (!Number.isInteger(days) || days < 1) throw new TypeError('purgeCandidates: days must be a whole number above 0')
+      const { rows } = await pool.query(
+        `select id, r2_key, bytes from gallery_items where status = any($1::text[]) and ${FILE_KEPT} and updated_at < now() - make_interval(days => $2) order by id`,
+        [[...PURGEABLE], days],
+      )
+      return rows
+    },
+
+    /**
+     * Take one item's file out of R2: lock the row, check it still qualifies (nobody approved it meanwhile; an
+     * approval waits on the lock and then finds the file gone), await remove(key), then mark it purged with its
+     * event, all in one transaction. The file goes first: a mark that then fails leaves a row naming a file R2 no
+     * longer bills for, and the next run marks it. → true, or false when the item no longer qualifies.
+     */
+    purgeFile: async (id, remove) => {
+      needId(id, 'id')
+      return inTx(async (q) => {
+        const { rows } = await q.query(`select id, r2_key from gallery_items where id = $1 and ${PURGE_DUE} for update`, [
+          id,
+          [...PURGEABLE],
+          PURGE_AFTER_DAYS,
+        ])
+        if (!rows.length) return false
+        await remove(rows[0].r2_key)
+        await q.query('update gallery_items set file_purged_at = now() where id = $1', [id])
+        await event(q, id, 'file_purged', PURGE_ACTOR, '')
+        return true
+      })
+    },
   }
 }

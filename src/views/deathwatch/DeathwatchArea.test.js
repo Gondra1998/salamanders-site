@@ -31,12 +31,15 @@ async function settle() {
 }
 
 // The area route as production declares it (router.js): the view as the component, and the same global guard.
-async function mountAt(path, { commander = false, command = commander } = {}) {
+// Every standing by default, so a test sees each area; the locks have tests of their own.
+const ALL = ['legion', 'emissary', 'deployment', 'command', 'xenosbane', 'vigilia', 'killmarine']
+// `g`: the gates as set in Manage → Access (the cfg document), none by default.
+async function mountAt(path, { commander = false, command = commander, roles = command ? ALL : ALL.filter((r) => r !== 'command'), g } = {}) {
   const pinia = createPinia()
   setActivePinia(pinia)
-  useDeathwatch().$patch({ status: 'allowed', commander, command })
+  useDeathwatch().$patch({ status: 'allowed', commander, command, roles })
   // The ported views read the area's data: an empty event, already loaded, so none of them asks a server.
-  useDeathwatchData().$patch({ status: 'ready', local: true })
+  useDeathwatchData().$patch({ status: 'ready', local: true, cfg: g ? { g } : {} })
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -71,10 +74,10 @@ describe('DeathwatchArea', () => {
   it('shows the area, the current view and the list of views', async () => {
     const { w } = await mountAt('/deathwatch/eventtracker/players')
     expect(w.find('h1').text()).toBe('Event Tracker')
-    expect(w.find('h2').text()).toBe('Players')
+    expect(w.find('h2').text()).toBe('Operatives')
     expect(w.find('.dw-area-sheet .dw-page').exists()).toBe(true)
     const current = w.find('nav [aria-current="page"]')
-    expect(current.text()).toBe('Players')
+    expect(current.text()).toBe('Operatives')
   })
 
   it('draws the view inside the framed panel, and the rail beside it', async () => {
@@ -109,7 +112,7 @@ describe('DeathwatchArea', () => {
     await router.push('/deathwatch/eventtracker/players')
     await settle()
     expect(w.find('.dw-page').element).not.toBe(before)
-    expect(w.find('.dw-page h2').text()).toBe('Players')
+    expect(w.find('.dw-page h2').text()).toBe('Operatives')
   })
 
   it('caps the sticky rail to the screen and lets it scroll, so its last links are reachable on a short window', () => {
@@ -130,7 +133,7 @@ describe('DeathwatchArea', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {}) // Vue logs a failed lazy view; that is expected here
     const { w } = await mountAt('/deathwatch/eventtracker/players')
     expect(w.find('.dw-area-sheet [role="alert"]').text()).toBe('This view could not be loaded. Try again.')
-    expect(w.find('aside nav [aria-current="page"]').text()).toBe('Players')
+    expect(w.find('aside nav [aria-current="page"]').text()).toBe('Operatives')
   })
 
   // From 900px the hall has no rail, so where no view heads it the area does (review of #53: no dead end).
@@ -141,7 +144,7 @@ describe('DeathwatchArea', () => {
       const { w } = await mountAt('/deathwatch/armouringhall/watch-command', { commander: false })
       expect(head(w).find('a.hh-back').attributes('href')).toBe('/deathwatch')
       expect(head(w).findAll('a.hh-tab').map((a) => a.text())).toEqual(['Standard', 'Specialist', 'Restricted Wargear'])
-      expect(w.find('.dw-area-sheet .dw-area-restricted').text()).toBe('Reserved for the Deathwatch Command.')
+      expect(w.find('.dw-area-sheet .dw-lock-msg').text()).toBe('Reserved for the Deathwatch Command.')
     })
 
     it('over the error when its view cannot be loaded, and nowhere else', async () => {
@@ -150,7 +153,7 @@ describe('DeathwatchArea', () => {
       const hall = (await mountAt('/deathwatch/armouringhall/specialist')).w
       expect(head(hall).find('[aria-current="page"]').text()).toBe('Specialist')
       expect(hall.find('.dw-area-sheet [role="alert"]').exists()).toBe(true)
-      const tracker = (await mountAt('/deathwatch/eventtracker/players')).w
+      const tracker = (await mountAt('/deathwatch/chronicles/player-profiles')).w
       expect(tracker.find('.dw-area-sheet [role="alert"]').exists()).toBe(true)
       expect(head(tracker).exists()).toBe(false)
     })
@@ -160,7 +163,7 @@ describe('DeathwatchArea', () => {
       vi.useFakeTimers()
       try {
         const hall = (await mountAt('/deathwatch/armouringhall/standard')).w
-        const tracker = (await mountAt('/deathwatch/eventtracker/players')).w
+        const tracker = (await mountAt('/deathwatch/chronicles/player-profiles')).w
         await vi.advanceTimersByTimeAsync(250) // past the loading view's delay
         expect(hall.find('.dw-area-sheet [role="status"]').text()).toBe('Loading…')
         expect(head(hall).exists()).toBe(true)
@@ -210,8 +213,8 @@ describe('DeathwatchArea', () => {
   })
 
   it('shows Manage to the Watch Commander as any other area', async () => {
-    const { w } = await mountAt('/deathwatch/manage', { commander: true })
-    expect(w.find('h1').text()).toBe('Manage')
+    const { w } = await mountAt('/deathwatch/administratum', { commander: true })
+    expect(w.find('h1').text()).toBe('Administratum')
     expect(w.find('h2').text()).toBe('Enter mission')
     expect(w.find('nav').exists()).toBe(true)
   })
@@ -249,9 +252,9 @@ describe('DeathwatchArea', () => {
     const { w } = await mountAt('/deathwatch/eventtracker/players')
     const bar = w.find('button.dw-areabar')
     expect(bar.text()).toContain('Event Tracker')
-    expect(bar.text()).toContain('Players')
-    expect(w.findAll('nav')).toHaveLength(2) // the sidebar and the sheet's copy: the stylesheet shows one of them
-    expect(w.find('dialog nav [aria-current="page"]').text()).toBe('Players')
+    expect(bar.text()).toContain('Operatives')
+    expect(w.findAll('aside nav, dialog nav')).toHaveLength(2) // the sidebar and the sheet's copy (the view's HallHead has its own)
+    expect(w.find('dialog nav [aria-current="page"]').text()).toBe('Operatives')
     expect(HTMLDialogElement.prototype.showModal).not.toHaveBeenCalled()
     expect(bar.attributes('aria-expanded')).toBe('false')
 
@@ -272,7 +275,7 @@ describe('DeathwatchArea', () => {
 
   it('shows the Watch Command tab to Deathwatch Command only, and anyone else a notice in its place', async () => {
     const other = (await mountAt('/deathwatch/armouringhall/watch-command', { commander: false })).w
-    expect(other.find('.dw-area-sheet .dw-area-restricted').text()).toBe('Reserved for the Deathwatch Command.')
+    expect(other.find('.dw-area-sheet .dw-lock-msg').text()).toBe('Reserved for the Deathwatch Command.')
     expect(other.find('nav').text()).not.toContain('Watch Command')
     expect(other.find('nav').text()).toContain('Specialist')
     const command = (await mountAt('/deathwatch/armouringhall/watch-command', { command: true })).w
@@ -280,14 +283,55 @@ describe('DeathwatchArea', () => {
     expect(command.find('nav').text()).toContain('Watch Command')
   })
 
+  it('locks a whole area away from a role it does not open to, with no way into its views', async () => {
+    // The Event Tracker and the Armouring Hall keep their own words; the others say the lock's.
+    const ENLISTED = 'Access restricted to Enlisted Brothers Only.'
+    const cases = [
+      ['/deathwatch/eventtracker/players', ['legion', 'emissary', 'xenosbane'], ENLISTED],
+      ['/deathwatch/armouringhall/standard', ['legion', 'emissary', 'vigilia'], ENLISTED],
+      ['/deathwatch/chronicles/in-memoriam', ['legion', 'emissary', 'killmarine'], 'Access restricted.'],
+      ['/deathwatch/hallofrelics/fortress-lore', ['deployment', 'command', 'killmarine'], 'Access restricted.'],
+      ['/deathwatch/recruitment/requirements', ['deployment', 'command', 'xenosbane'], 'Access restricted.'],
+    ]
+    for (const [path, roles, text] of cases) {
+      const { w } = await mountAt(path, { roles, command: roles.includes('command') })
+      expect(w.find('.dw-lock-msg').text(), path).toBe(text)
+      expect(w.find('nav').exists(), path).toBe(false)
+      expect(w.find('.dw-area-sheet').exists(), path).toBe(false)
+    }
+  })
+
+  it('opens each area to one role it lists, alone', async () => {
+    const cases = [
+      ['/deathwatch/eventtracker/players', 'deployment'],
+      ['/deathwatch/armouringhall/standard', 'command'],
+      ['/deathwatch/chronicles/in-memoriam', 'vigilia'],
+      ['/deathwatch/hallofrelics/fortress-lore', 'emissary'],
+      ['/deathwatch/recruitment/requirements', 'legion'],
+    ]
+    for (const [path, role] of cases) {
+      const { w } = await mountAt(path, { roles: [role], command: role === 'command' })
+      expect(w.find('.dw-lock').exists(), path).toBe(false)
+      expect(w.find('.dw-area-sheet').exists(), path).toBe(true)
+    }
+  })
+
+  it('gates an area as the Watch Commander set it in Access, and opens it to him whatever he set', async () => {
+    const g = { chronicles: ['legion'], eventtracker: [] }
+    expect((await mountAt('/deathwatch/chronicles/in-memoriam', { roles: ['legion'], g })).w.find('.dw-lock').exists()).toBe(false)
+    expect((await mountAt('/deathwatch/chronicles/in-memoriam', { roles: ['xenosbane'], g })).w.find('.dw-lock').exists()).toBe(true)
+    expect((await mountAt('/deathwatch/eventtracker/players', { roles: ALL, g })).w.find('.dw-lock').exists()).toBe(true)
+    expect((await mountAt('/deathwatch/eventtracker/players', { commander: true, g })).w.find('.dw-lock').exists()).toBe(false)
+  })
+
   it('keeps Manage restricted for Deathwatch Command, who is not the Watch Commander', async () => {
-    const { w } = await mountAt('/deathwatch/manage/checks', { commander: false, command: true })
+    const { w } = await mountAt('/deathwatch/administratum/checks', { commander: false, command: true })
     expect(w.text()).toContain('Restricted to the Watch Commander.')
     expect(w.find('nav').exists()).toBe(false)
   })
 
   it('shows anyone else a notice in place of the Manage area, with no way into its views', async () => {
-    const { w } = await mountAt('/deathwatch/manage/checks', { commander: false })
+    const { w } = await mountAt('/deathwatch/administratum/checks', { commander: false })
     expect(w.text()).toContain('Restricted to the Watch Commander.')
     expect(w.find('nav').exists()).toBe(false)
     expect(w.text()).not.toContain('This view is being rebuilt.')

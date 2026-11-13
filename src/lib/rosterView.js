@@ -28,6 +28,17 @@ export function heatAt(t) {
   return heatAt(1)
 }
 
+/**
+ * The heat colours of a ladder item, `order` steps down a ladder of `n`: `h` for its node, `hp` and `hn` for the
+ * spine running to it and on from it. Step i of n sits at i/n along the ramp; an item between steps (Dreadnoughts
+ * aside, a lateral rank) sits half a step below step `order`. heatAt clamps, so the foot of the spine stays cold.
+ */
+export function heatOf(order, n, between = false) {
+  return between
+    ? { h: heatAt((order + 0.5) / n), hp: heatAt(order / n), hn: heatAt((order + 1) / n) }
+    : { h: heatAt(order / n), hp: heatAt((order - 1) / n), hn: heatAt((order + 1) / n) }
+}
+
 // The same text sigils the Companies page uses (the Forge is its "Armoury", M).
 // Kept as a constant, not an import of companies.json: that file is large prose.
 // rosterView.test.js checks the shared ones against it.
@@ -66,12 +77,9 @@ function ladderOf(rows, aside, lead = null) {
   return raw.map((item, s) => {
     if (item.type === 'group') {
       order++
-      return {
-        type: 'group', s, tier: item.tier, rows: item.rows, last: s === raw.length - 1,
-        heat: { h: heatAt(order / n), hp: heatAt((order - 1) / n), hn: heatAt(Math.min(1, (order + 1) / n)) },
-      }
+      return { type: 'group', s, tier: item.tier, rows: item.rows, last: s === raw.length - 1, heat: heatOf(order, n) }
     }
-    const heat = { h: heatAt((order + 0.5) / n), hp: heatAt(order / n), hn: heatAt(Math.min(1, (order + 1) / n)) }
+    const heat = heatOf(order, n, true)
     return item.type === 'aside' ? { type: 'aside', s, heat, members: item.members } : { type: 'lateral', s, heat, row: item.row }
   })
 }

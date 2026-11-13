@@ -119,11 +119,12 @@ describe('MineList: Remove', () => {
   it('asks first, in the row, and removes nothing yet', async () => {
     const w = await mineWith(pending())
     await button(rows(w)[0], 'Remove').trigger('click')
-    expect(rows(w)[0].text()).toContain('Remove?')
+    expect(rows(w)[0].text()).toContain('Remove for good?')
+    expect(rows(w)[0].text()).toContain('It goes from the Reliquarium entirely, file and all.')
     expect(button(rows(w)[0], 'Yes')).toBeTruthy()
     expect(button(rows(w)[0], 'No')).toBeTruthy()
     expect(button(rows(w)[0], 'Remove')).toBeUndefined()
-    expect(rows(w)[1].text()).not.toContain('Remove?')
+    expect(rows(w)[1].text()).not.toContain('Remove for good?')
     expect(removeItem).not.toHaveBeenCalled()
   })
 
@@ -132,7 +133,7 @@ describe('MineList: Remove', () => {
     await button(rows(w)[0], 'Remove').trigger('click')
     await button(rows(w)[0], 'No').trigger('click')
     expect(button(rows(w)[0], 'Remove')).toBeTruthy()
-    expect(rows(w)[0].text()).not.toContain('Remove?')
+    expect(rows(w)[0].text()).not.toContain('Remove for good?')
     expect(removeItem).not.toHaveBeenCalled()
   })
 
@@ -146,7 +147,7 @@ describe('MineList: Remove', () => {
     expect(removeItem).toHaveBeenCalledWith('20', 'tok')
     expect(rows(w)[0].find('.rq-chip').text()).toBe('Removed')
     expect(button(rows(w)[0], 'Remove')).toBeUndefined()
-    expect(rows(w)[0].text()).not.toContain('Remove?')
+    expect(rows(w)[0].text()).not.toContain('Remove for good?')
   })
 
   it('says what went wrong, keeps the item, and closes the question', async () => {

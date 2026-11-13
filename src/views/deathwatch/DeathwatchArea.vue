@@ -6,17 +6,20 @@
 // (redirect.js) sees to that.
 import { computed, defineAsyncComponent, h, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { AREAS, resolveArea } from '../../lib/deathwatch/areas'
+import { AREAS, LOCK_TEXT, mayOpen, resolveArea } from '../../lib/deathwatch/areas'
+import { useGates } from '../../lib/deathwatch/useGates'
 import { pageLoader } from '../../lib/deathwatch/pages'
 import { pageTexts } from '../../lib/deathwatch/pageTexts'
 import { useDeathwatch } from '../../stores/deathwatch'
 import crest from '../../components/deathwatch/img/crest.webp'
 import crestGold from '../../components/deathwatch/img/crest-gold.webp'
 import crestArmour from '../../components/deathwatch/img/crest-armouringhall.png'
+import DeathwatchLock from '../../components/deathwatch/DeathwatchLock.vue'
 import DeathwatchAreaBar from '../../components/deathwatch/DeathwatchAreaBar.vue'
 import DeathwatchNav from '../../components/deathwatch/DeathwatchNav.vue'
 import DeathwatchNavSheet from '../../components/deathwatch/DeathwatchNavSheet.vue'
 import PageEditor from '../../components/deathwatch/PageEditor.vue'
+import ManageBar from '../../components/deathwatch/ManageBar.vue'
 import HallHead from '../../components/deathwatch/armour/HallHead.vue'
 import { SkNote } from '../../components/deathwatch/skeleton'
 
@@ -27,19 +30,28 @@ const sheetOpen = ref(false)
 
 const page = computed(() => resolveArea(route.params))
 const area = computed(() => AREAS[page.value.area])
-// Manage is the Watch Commander's dashboard. Hiding it here only spares others a dead end: the server refuses them anyway.
-const restricted = computed(() => page.value.area === 'manage' && !store.commander)
+// Each area opens to the roles it is given (Manage → Access, else areas.js); anyone else gets the lock in place of
+// the whole area. Manage stays the Watch Commander's. Hidden only: the server refuses them its writes, and the Event
+// Tracker's data, anyway.
+const gates = useGates()
+const who = computed(() => ({ commander: store.commander, held: store.roles }))
+const restricted = computed(() => !mayOpen(gates.value[page.value.area] ?? [], who.value))
+const restrictedText = computed(() => (page.value.area === 'administratum' ? 'Restricted to the Watch Commander.' : LOCK_TEXT[page.value.area]))
 const currentTab = computed(() => area.value.tabs.find((t) => t.slug === page.value.tab))
 const tabLabel = computed(() => currentTab.value.label)
-// A single tab may be Deathwatch Command's (Watch Command): the rest of the area stays open. Hidden only, as above.
-const locked = computed(() => currentTab.value.command === true && !store.command)
+// A single tab may list its own (Watch Command): the rest of the area stays open. Hidden only, as above.
+const locked = computed(() => !!currentTab.value.roles && !mayOpen(currentTab.value.roles, who.value))
 // The texts the open view reads, which the Watch Commander can edit in place ("Edit page"). Hidden only, as above.
 const texts = computed(() => (store.commander ? pageTexts(page.value.area, page.value.tab, page.value.sub) : []))
 
 // While a view's chunk is on its way (after a short delay, so a fast one never flashes it), and if it fails.
 // From 900px the Armouring Hall has no rail (.solo): its views head themselves (HallHead). Where no view does (still
 // loading, failed, or locked, below), its head is drawn here instead, so the hall never loses its way out.
-const hallHead = () => (page.value.area === 'armouringhall' ? h(HallHead, { tab: page.value.tab }) : null)
+// Recruitment and the Event Tracker head themselves the same way (HallHead with their area). Manage's views do not:
+// its head (ManageBar) is drawn here, above whichever view is open, so it is there while one loads, fails or is a skeleton.
+const solo = computed(() => ['armouringhall', 'recruitment', 'eventtracker', 'administratum'].includes(page.value.area))
+const headHere = computed(() => page.value.area === 'administratum')
+const hallHead = () => (solo.value && !headHere.value ? h(HallHead, { tab: page.value.tab, area: page.value.area }) : null)
 const Loading = { render: () => [hallHead(), h('p', { class: 'dw-area-loading', role: 'status' }, 'Loading…')] }
 // `error` is what defineAsyncComponent hands it: taken as a prop, so it does not fall on the fragment as an attribute.
 const Failed = { props: ['error'], render: () => [hallHead(), h('p', { class: 'dw-area-error', role: 'alert' }, 'This view could not be loaded. Try again.')] }
@@ -74,8 +86,8 @@ watch(viewKey, async (key) => {
 </script>
 
 <template>
-  <section v-if="page" class="dw-area" :class="{ solo: page.area === 'armouringhall' }">
-    <p v-if="restricted" class="dw-area-restricted dw-panel" role="status">Restricted to the Watch Commander.</p>
+  <section v-if="page" class="dw-area" :class="{ solo }">
+    <DeathwatchLock v-if="restricted" class="dw-area-restricted dw-panel" :message="restrictedText" />
     <template v-else>
       <!-- The rail. On a phone only its head shows (the crest and the area's name); from 900px the list of views joins it. -->
       <aside class="dw-area-side dw-panel">
@@ -99,9 +111,10 @@ watch(viewKey, async (key) => {
       <div class="dw-area-main">
         <!-- Keyed on the view, so the whole framed sheet opens again (deathwatch.css) when the tab changes. -->
         <div :key="viewKey" ref="sheet" class="dw-area-sheet dw-panel">
+          <ManageBar v-if="headHere" :tab="page.tab" />
           <template v-if="locked">
-            <HallHead v-if="page.area === 'armouringhall'" :tab="page.tab" />
-            <p class="dw-area-restricted" role="status">Reserved for the Deathwatch Command.</p>
+            <HallHead v-if="solo && !headHere" :tab="page.tab" :area="page.area" />
+            <DeathwatchLock class="dw-area-restricted" message="Reserved for the Deathwatch Command." />
           </template>
           <component :is="view" v-else :key="viewKey" />
         </div>
@@ -187,10 +200,6 @@ watch(viewKey, async (key) => {
 }
 .dw-area-restricted {
   grid-column: 1 / -1;
-  margin: 0;
-  padding: 2rem 1.4rem;
-  text-align: center;
-  color: var(--dw-silver);
 }
 .dw-area-loading,
 .dw-area-error {
@@ -222,7 +231,7 @@ watch(viewKey, async (key) => {
     border-image: var(--dw-frame) 30 / 30px stretch;
     background-image:
       var(--dw-scan), var(--dw-grain),
-      linear-gradient(180deg, rgb(8 13 8 / 0.9), rgb(3 6 3 / 0.94));
+      linear-gradient(180deg, rgb(8 13 8 / 0.8), rgb(3 6 3 / 0.8));
     background-color: transparent;
     backdrop-filter: none;
     clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 14px, 100% calc(100% - 14px), calc(100% - 14px) 100%, 14px 100%, 0 calc(100% - 14px), 0 14px);

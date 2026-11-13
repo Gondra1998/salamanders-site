@@ -10,6 +10,7 @@ import { perkStateKey } from '../lib/perkStateKey'
 import WeaponSlot from '../components/WeaponSlot.vue'
 import PerkEditPanel from '../components/PerkEditPanel.vue'
 import StaleNotice from '../components/StaleNotice.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const planner = usePlanner()
 const auth = useAuth()
@@ -224,17 +225,14 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="planner">
-    <header class="p-head">
-      <p class="eyebrow">Doctrine</p>
-      <h1 class="p-title">Perk Builder</h1>
-    </header>
+    <PageHeader eyebrow="Doctrine" title="Perk Builder" />
 
     <!-- Class selector -->
     <div class="classbar" role="tablist" aria-label="Classes">
       <button
         v-for="name in CLASS_NAMES"
         :key="name"
-        class="class-tab rm-fade"
+        class="class-tab tab-forge rm-fade"
         :class="{ on: planner.activeClass === name }"
         role="tab"
         :aria-selected="planner.activeClass === name"
@@ -560,14 +558,6 @@ onBeforeUnmount(() => {
   margin: 0 auto;
   padding: 4rem 1.5rem 2rem;
 }
-.p-title {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  font-weight: 700;
-  font-size: clamp(2.2rem, 7vw, 3.6rem);
-  color: var(--color-bone);
-  margin: 0.4rem 0 0;
-}
 
 /* class selector */
 .classbar {
@@ -576,45 +566,14 @@ onBeforeUnmount(() => {
   gap: 0.4rem;
   margin: 1.6rem 0 1.4rem;
 }
-.class-tab {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 0.9rem;
-  color: var(--color-smoke);
-  background: rgba(14, 28, 22, 0.5);
-  border: 1px solid var(--color-ash);
-  padding: 0.55rem 1rem;
-  border-radius: 2px;
-  cursor: pointer;
-  min-height: var(--tap);
-  transition:
-    color var(--dur-state) var(--ease-forge),
-    background-color var(--dur-state) var(--ease-forge),
-    border-color var(--dur-state) var(--ease-forge),
-    transform var(--dur-press) var(--ease-forge);
-}
-@media (hover: hover) and (pointer: fine) {
-  .class-tab:hover {
-    color: var(--color-bone);
-  }
-}
-.class-tab:active {
-  transform: scale(0.97);
-}
-.class-tab.on {
-  color: #1a0d06;
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
-  border-color: rgba(255, 176, 102, 0.6);
-}
 
 /* class hero */
 .hero-card {
   display: inline-flex;
   max-width: 100%;
   border: 1px solid var(--color-ash);
-  border-radius: 8px;
-  background: rgba(7, 17, 13, 0.5);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-pitch) 50%, transparent);
   padding: 1.4rem;
 }
 .hero-id {
@@ -631,30 +590,30 @@ onBeforeUnmount(() => {
   font-family: var(--font-display);
   font-weight: 700;
   color: var(--color-drake);
-  background: rgba(89, 214, 108, 0.08);
-  border: 1px solid rgba(89, 214, 108, 0.3);
+  background: color-mix(in srgb, var(--color-drake) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-drake) 30%, transparent);
   clip-path: polygon(15% 0, 85% 0, 100% 50%, 85% 100%, 15% 100%, 0 50%);
 }
 .hero-name {
   font-family: var(--font-display);
   text-transform: uppercase;
   font-weight: 700;
-  font-size: 1.5rem;
+  font-size: var(--text-xl);
   color: var(--color-bone);
 }
 .hero-ability {
   font-family: var(--font-sans);
   text-transform: none;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   color: var(--color-gold);
   font-weight: 500;
 }
 .hero-desc {
-  color: #c3d0c6;
+  color: var(--color-pewter);
   line-height: 1.55;
   margin-top: 0.3rem;
   max-width: 44ch;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
 /* layout */
 .layout {
@@ -679,8 +638,8 @@ onBeforeUnmount(() => {
 .tree-scroll {
   overflow-x: auto;
   border: 1px solid var(--color-ash);
-  border-radius: 8px;
-  background: rgba(7, 17, 13, 0.4);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-pitch) 40%, transparent);
   padding: 1.2rem 1rem 0.5rem;
 }
 .perk-grid {
@@ -696,7 +655,7 @@ onBeforeUnmount(() => {
   position: relative;
   text-align: center;
   font-family: var(--font-display);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   font-weight: 800;
   letter-spacing: 0.1em;
   color: var(--color-cobalt);
@@ -712,7 +671,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--color-ember), transparent);
-  box-shadow: 0 0 8px rgba(255, 106, 43, 0.7);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-ember) 70%, transparent);
 }
 .perk-col[data-cat='team'] .perk-col-head {
   color: var(--color-drake);
@@ -731,7 +690,7 @@ onBeforeUnmount(() => {
 .perk {
   position: relative;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: transparent;
   min-height: 118px;
   padding: 0.5rem 0.25rem;
@@ -751,7 +710,7 @@ onBeforeUnmount(() => {
 @media (hover: hover) and (pointer: fine) {
   .perk:hover:not(:disabled) {
     border-color: var(--color-ash-2);
-    background: rgba(255, 255, 255, 0.02);
+    background: color-mix(in srgb, var(--color-bone) 2%, transparent);
   }
 }
 .perk:active:not(:disabled) {
@@ -769,38 +728,54 @@ onBeforeUnmount(() => {
   place-items: center;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 0.9rem;
-  color: #dfeee2;
+  font-size: var(--text-md);
+  color: var(--color-bone);
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-  background: linear-gradient(145deg, #2a4a8a, #14213f);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-cobalt) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-cobalt) 22%, var(--color-obsidian))
+  );
 }
 .perk[data-cat='team'] .perk-icon {
-  background: linear-gradient(145deg, #2b6b60, #12362f);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-drake) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-drake) 22%, var(--color-obsidian))
+  );
 }
 .perk[data-cat='gear'] .perk-icon {
-  background: linear-gradient(145deg, #72581f, #35280c);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-gold) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-gold) 22%, var(--color-obsidian))
+  );
 }
 .perk[data-cat='signature'] .perk-icon {
-  background: linear-gradient(145deg, #5b376f, #281733);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-violet) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-violet) 22%, var(--color-obsidian))
+  );
 }
 /* Selected reads as forged: lit card, ember ring, gold name, diamond marker. */
 .perk.selected {
   border-color: var(--color-ember);
-  background: rgba(255, 106, 43, 0.12);
+  background: color-mix(in srgb, var(--color-ember) 12%, transparent);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 106, 43, 0.35),
-    0 0 22px -6px rgba(255, 106, 43, 0.55);
+    inset 0 0 0 1px color-mix(in srgb, var(--color-ember) 35%, transparent),
+    0 0 22px -6px color-mix(in srgb, var(--color-ember) 55%, transparent);
 }
 @media (hover: hover) and (pointer: fine) {
   .perk.selected:hover:not(:disabled) {
     border-color: var(--color-ember);
-    background: rgba(255, 106, 43, 0.16);
+    background: color-mix(in srgb, var(--color-ember) 16%, transparent);
   }
 }
 /* clip-path clips box-shadow away, which is why the old ember ring never showed.
    drop-shadow follows the clipped hex silhouette. */
 .perk.selected .perk-icon {
-  filter: drop-shadow(0 0 7px rgba(255, 106, 43, 0.85));
+  filter: drop-shadow(0 0 7px color-mix(in srgb, var(--color-ember) 85%, transparent));
 }
 .pick-mark {
   position: absolute;
@@ -809,14 +784,14 @@ onBeforeUnmount(() => {
   width: 9px;
   height: 9px;
   transform: rotate(45deg);
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
-  box-shadow: 0 0 10px rgba(255, 106, 43, 0.8);
+  background: linear-gradient(180deg, var(--color-ember-light), var(--color-ember));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-ember) 80%, transparent);
 }
 .perk-name {
   display: block;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   line-height: 1.2;
-  color: #c3d0c6;
+  color: var(--color-pewter);
 }
 .perk.selected .perk-name {
   color: var(--color-gold);
@@ -827,10 +802,10 @@ onBeforeUnmount(() => {
   top: 4px;
   right: 4px;
   font-family: var(--font-mono);
-  font-size: max(0.55rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-gold);
-  border: 1px solid rgba(223, 184, 91, 0.4);
-  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-gold) 40%, transparent);
+  border-radius: var(--radius-sm);
   padding: 0 3px;
 }
 /* perk authoring — the dead space under the tree becomes a workspace for
@@ -841,18 +816,8 @@ onBeforeUnmount(() => {
   margin-top: 0.9rem;
   padding: 0.9rem 1rem;
   border: 1px solid var(--color-ash);
-  border-left: 3px solid var(--color-cobalt);
-  border-radius: 6px;
-  background: rgba(14, 28, 22, 0.4);
-}
-.perk-author[data-cat='team'] {
-  border-left-color: var(--color-drake);
-}
-.perk-author[data-cat='gear'] {
-  border-left-color: var(--color-gold);
-}
-.perk-author[data-cat='signature'] {
-  border-left-color: var(--color-violet);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-basalt-2) 40%, transparent);
 }
 .pa-icon {
   flex: none;
@@ -862,9 +827,34 @@ onBeforeUnmount(() => {
   place-items: center;
   font-family: var(--font-display);
   font-weight: 700;
-  color: #dfeee2;
+  color: var(--color-bone);
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-  background: linear-gradient(145deg, #2a4a8a, #14213f);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-cobalt) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-cobalt) 22%, var(--color-obsidian))
+  );
+}
+.perk-author[data-cat='team'] .pa-icon {
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-drake) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-drake) 22%, var(--color-obsidian))
+  );
+}
+.perk-author[data-cat='gear'] .pa-icon {
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-gold) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-gold) 22%, var(--color-obsidian))
+  );
+}
+.perk-author[data-cat='signature'] .pa-icon {
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-violet) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-violet) 22%, var(--color-obsidian))
+  );
 }
 .pa-body {
   flex: 1;
@@ -875,13 +865,13 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
   font-weight: 700;
   color: var(--color-bone);
-  font-size: 1.05rem;
+  font-size: var(--text-base);
 }
 .pa-meta {
   font-family: var(--font-mono);
   text-transform: none;
   font-weight: 400;
-  font-size: max(0.68rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   letter-spacing: 0.06em;
   color: var(--color-gold);
 }
@@ -890,18 +880,18 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: max(0.56rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
   margin: 0.5rem 0 0.3rem;
 }
 .pa-field {
   width: 100%;
-  background: rgba(5, 10, 8, 0.7);
+  background: color-mix(in srgb, var(--color-obsidian) 70%, transparent);
   border: 1px solid var(--color-ash);
   color: var(--color-bone);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.6rem;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   font-family: var(--font-sans);
   line-height: 1.4;
   resize: vertical;
@@ -913,10 +903,10 @@ onBeforeUnmount(() => {
   margin-top: 0.9rem;
   padding: 0.9rem 1rem;
   border: 1px dashed var(--color-ash);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   text-align: center;
   color: var(--color-smoke);
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
 }
 
 /* floating popout — read-only preview, anchored to the hovered/focused hex */
@@ -929,9 +919,9 @@ onBeforeUnmount(() => {
   padding: 0.8rem 0.9rem;
   border: 1px solid var(--color-ash-2);
   border-top: 2px solid var(--color-cobalt);
-  border-radius: 6px;
-  background: rgba(6, 12, 10, 0.96);
-  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.85);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-obsidian) 96%, transparent);
+  box-shadow: 0 16px 40px -12px color-mix(in srgb, var(--color-obsidian) 85%, transparent);
 }
 .perk-popout[data-cat='team'] {
   border-top-color: var(--color-drake);
@@ -953,7 +943,7 @@ onBeforeUnmount(() => {
   width: 9px;
   height: 9px;
   transform: translateX(-50%) rotate(45deg);
-  background: rgba(6, 12, 10, 0.96);
+  background: color-mix(in srgb, var(--color-obsidian) 96%, transparent);
   border-right: 1px solid var(--color-ash-2);
   border-bottom: 1px solid var(--color-ash-2);
 }
@@ -970,11 +960,11 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
   font-weight: 700;
   color: var(--color-bone);
-  font-size: 1rem;
+  font-size: var(--text-base);
 }
 .pp-meta {
   font-family: var(--font-mono);
-  font-size: max(0.64rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-gold);
   margin: 0.15rem 0 0.4rem;
 }
@@ -982,13 +972,13 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.58rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-gold);
   margin: 0.2rem 0 0.3rem;
 }
 .pp-desc {
   color: var(--color-smoke);
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   line-height: 1.4;
 }
 .pp-empty {
@@ -997,30 +987,28 @@ onBeforeUnmount(() => {
 .pp-why {
   margin-top: 0.6rem;
   padding-top: 0.5rem;
-  padding-left: 0.6rem;
   border-top: 1px solid var(--color-ash);
-  border-left: 2px solid var(--color-ember);
 }
 .pp-why-label {
   display: block;
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.56rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-ember);
   margin-bottom: 0.2rem;
 }
 .pp-why p {
-  color: #dfeee2;
-  font-size: 0.82rem;
+  color: var(--color-bone);
+  font-size: var(--text-sm);
   line-height: 1.4;
 }
 
 /* build panel */
 .build {
   border: 1px solid var(--color-ash);
-  border-radius: 8px;
-  background: rgba(7, 17, 13, 0.6);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-pitch) 60%, transparent);
   padding: 1.2rem;
   position: sticky;
   top: 5rem;
@@ -1040,7 +1028,7 @@ onBeforeUnmount(() => {
 .build-count {
   font-family: var(--font-mono);
   color: var(--color-gold);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 .build-list {
   display: flex;
@@ -1060,28 +1048,44 @@ onBeforeUnmount(() => {
   place-items: center;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 0.7rem;
-  color: #dfeee2;
+  font-size: var(--text-xs);
+  color: var(--color-bone);
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
-  background: linear-gradient(145deg, #2a4a8a, #14213f);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-cobalt) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-cobalt) 22%, var(--color-obsidian))
+  );
 }
 .build-row[data-cat='team'] .mini {
-  background: linear-gradient(145deg, #2b6b60, #12362f);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-drake) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-drake) 22%, var(--color-obsidian))
+  );
 }
 .build-row[data-cat='gear'] .mini {
-  background: linear-gradient(145deg, #72581f, #35280c);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-gold) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-gold) 22%, var(--color-obsidian))
+  );
 }
 .build-row[data-cat='signature'] .mini {
-  background: linear-gradient(145deg, #5b376f, #281733);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--color-violet) 45%, var(--color-obsidian)),
+    color-mix(in srgb, var(--color-violet) 22%, var(--color-obsidian))
+  );
 }
 .build-label {
   font-family: var(--font-mono);
-  font-size: max(0.56rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   letter-spacing: 0.12em;
   color: var(--color-smoke);
 }
 .build-name {
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   color: var(--color-bone);
 }
 .build-name.empty {
@@ -1093,7 +1097,7 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--color-ash);
 }
 .bs-line {
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: var(--color-smoke);
   line-height: 1.5;
 }
@@ -1102,7 +1106,7 @@ onBeforeUnmount(() => {
 }
 .bs-picks {
   color: var(--color-gold);
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
 }
 .build-gear {
   margin-top: 0.8rem;
@@ -1119,16 +1123,16 @@ onBeforeUnmount(() => {
 }
 .bg-slot {
   flex: none;
-  width: 4.6rem;
+  width: 5rem;
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.54rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .bg-name {
   flex: 1;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: var(--color-bone);
   line-height: 1.3;
 }
@@ -1138,10 +1142,10 @@ onBeforeUnmount(() => {
 .bg-pts {
   flex: none;
   font-family: var(--font-mono);
-  font-size: max(0.58rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-ember);
-  border: 1px solid rgba(255, 106, 43, 0.4);
-  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-ember) 40%, transparent);
+  border-radius: var(--radius-sm);
   padding: 1px 4px;
 }
 .save {
@@ -1155,7 +1159,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  font-size: max(0.54rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .save-more {
@@ -1163,7 +1167,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.56rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-drake);
   background: transparent;
   border: 0;
@@ -1188,7 +1192,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
 }
 .save-needs p {
@@ -1196,11 +1200,11 @@ onBeforeUnmount(() => {
 }
 .save-needs-pick {
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-ember);
   background: transparent;
   border: 1px solid var(--color-ember);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.2rem 0.45rem;
   cursor: pointer;
   min-height: var(--tap);
@@ -1211,12 +1215,12 @@ onBeforeUnmount(() => {
 }
 .save .fld {
   width: 100%;
-  background: rgba(5, 10, 8, 0.7);
+  background: color-mix(in srgb, var(--color-obsidian) 70%, transparent);
   border: 1px solid var(--color-ash);
   color: var(--color-bone);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.6rem;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   font-family: var(--font-sans);
   min-height: var(--tap);
   resize: vertical;
@@ -1251,14 +1255,14 @@ onBeforeUnmount(() => {
   font-family: var(--font-display);
   text-transform: uppercase;
   font-weight: 700;
-  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  font-size: var(--text-xl);
   color: var(--color-bone);
   margin-top: 0.3rem;
 }
 .lo-note {
   max-width: 38ch;
   color: var(--color-smoke);
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
@@ -1274,7 +1278,7 @@ onBeforeUnmount(() => {
 .pr-count {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: var(--text-base);
   color: var(--color-gold);
 }
 .pr-count.full {
@@ -1283,7 +1287,7 @@ onBeforeUnmount(() => {
 .pr-note {
   max-width: 34ch;
   color: var(--color-smoke);
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   line-height: 1.5;
   margin-top: 0.2rem;
 }
@@ -1303,15 +1307,15 @@ onBeforeUnmount(() => {
   gap: 0.7rem;
   padding: 0.8rem 0.9rem;
   border: 1px solid var(--color-ash);
-  border-radius: 5px;
-  background: rgba(7, 17, 13, 0.5);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-pitch) 50%, transparent);
 }
 .pr-rank.locked {
   opacity: 0.45;
 }
 .pr-rank.filled {
-  border-color: rgba(255, 106, 43, 0.55);
-  background: rgba(255, 106, 43, 0.08);
+  border-color: color-mix(in srgb, var(--color-ember) 55%, transparent);
+  background: color-mix(in srgb, var(--color-ember) 8%, transparent);
 }
 .pr-rank-body {
   min-width: 0;
@@ -1320,14 +1324,14 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  font-size: max(0.54rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .pr-rank-perk {
   font-family: var(--font-display);
   text-transform: uppercase;
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: var(--text-md);
   color: var(--color-gold);
   line-height: 1.15;
   margin-top: 0.15rem;
@@ -1336,7 +1340,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-sans);
   text-transform: none;
   font-weight: 400;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: var(--color-faint);
 }
 .pr-rank-clear {
@@ -1344,12 +1348,17 @@ onBeforeUnmount(() => {
   flex: none;
   width: 1.4rem;
   height: 1.4rem;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
-  font-size: 1rem;
+  font-size: var(--text-base);
   color: var(--color-smoke);
   background: transparent;
   border: 1px solid var(--color-ash);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: transform var(--dur-press) var(--ease-forge);
 }
@@ -1366,7 +1375,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  font-size: max(0.58rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
   margin-bottom: 0.6rem;
 }
@@ -1379,11 +1388,11 @@ onBeforeUnmount(() => {
   font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: 0.08em;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   color: var(--color-gold);
-  border: 1px solid rgba(223, 184, 91, 0.45);
+  border: 1px solid color-mix(in srgb, var(--color-gold) 45%, transparent);
   clip-path: polygon(15% 0, 85% 0, 100% 50%, 85% 100%, 15% 100%, 0 50%);
-  background: rgba(223, 184, 91, 0.1);
+  background: color-mix(in srgb, var(--color-gold) 10%, transparent);
 }
 .pr-rank.locked .pr-rank-mark {
   color: var(--color-smoke);
@@ -1392,8 +1401,8 @@ onBeforeUnmount(() => {
 }
 .pr-rank.filled .pr-rank-mark {
   color: var(--color-ember);
-  border-color: rgba(255, 106, 43, 0.5);
-  background: rgba(255, 106, 43, 0.12);
+  border-color: color-mix(in srgb, var(--color-ember) 50%, transparent);
+  background: color-mix(in srgb, var(--color-ember) 12%, transparent);
 }
 .pr-grid {
   display: grid;
@@ -1403,9 +1412,8 @@ onBeforeUnmount(() => {
 .pr-card {
   position: relative;
   border: 1px solid var(--color-ash);
-  border-left: 2px solid var(--color-gold);
-  border-radius: 4px;
-  background: rgba(7, 17, 13, 0.5);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-pitch) 50%, transparent);
   padding: 0.9rem 1rem;
   text-align: left;
   font: inherit;
@@ -1420,8 +1428,7 @@ onBeforeUnmount(() => {
 @media (hover: hover) and (pointer: fine) {
   .pr-card:hover:not(:disabled) {
     border-color: var(--color-ash-2);
-    border-left-color: var(--color-gold);
-    background: rgba(14, 28, 22, 0.7);
+    background: color-mix(in srgb, var(--color-basalt-2) 70%, transparent);
   }
 }
 .pr-card:active:not(:disabled) {
@@ -1433,11 +1440,10 @@ onBeforeUnmount(() => {
 }
 .pr-card.picked {
   border-color: var(--color-ember);
-  border-left-color: var(--color-ember);
-  background: rgba(255, 106, 43, 0.12);
+  background: color-mix(in srgb, var(--color-ember) 12%, transparent);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 106, 43, 0.35),
-    0 0 22px -6px rgba(255, 106, 43, 0.55);
+    inset 0 0 0 1px color-mix(in srgb, var(--color-ember) 35%, transparent),
+    0 0 22px -6px color-mix(in srgb, var(--color-ember) 55%, transparent);
   opacity: 1;
 }
 .pr-card.picked .pr-name {
@@ -1450,20 +1456,20 @@ onBeforeUnmount(() => {
   width: 9px;
   height: 9px;
   transform: rotate(45deg);
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
-  box-shadow: 0 0 10px rgba(255, 106, 43, 0.8);
+  background: linear-gradient(180deg, var(--color-ember-light), var(--color-ember));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-ember) 80%, transparent);
 }
 .pr-name {
   font-family: var(--font-display);
   text-transform: uppercase;
   font-weight: 700;
-  font-size: 1rem;
+  font-size: var(--text-base);
   color: var(--color-bone);
   margin-bottom: 0.3rem;
 }
 .pr-desc {
-  color: #c3d0c6;
-  font-size: 0.83rem;
+  color: var(--color-pewter);
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
@@ -1474,13 +1480,13 @@ onBeforeUnmount(() => {
   left: 50%;
   transform: translateX(-50%);
   z-index: 80;
-  background: rgba(5, 10, 8, 0.92);
+  background: color-mix(in srgb, var(--color-obsidian) 92%, transparent);
   border: 1px solid var(--color-drake);
   color: var(--color-bone);
   padding: 0.6rem 1.1rem;
-  border-radius: 3px;
-  font-size: 0.85rem;
-  box-shadow: 0 10px 40px -8px rgba(0, 0, 0, 0.8);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  box-shadow: 0 10px 40px -8px color-mix(in srgb, var(--color-obsidian) 85%, transparent);
   display: flex;
   align-items: center;
   gap: 0.9rem;
@@ -1496,7 +1502,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   cursor: pointer;
   transition: transform var(--dur-press) var(--ease-forge);
 }

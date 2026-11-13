@@ -4,6 +4,8 @@ import { useAuth } from '../stores/auth'
 import { usePerkCorrections } from '../stores/perkCorrections'
 import * as api from '../lib/perksApi'
 import { historyLabel } from '../lib/historyLabels'
+import PageHeader from '../components/PageHeader.vue'
+import StatePanel from '../components/StatePanel.vue'
 
 // Version History: every perk correction, soft-deleted build and privilege
 // change, newest first. The server decides who sees it; this page only
@@ -88,32 +90,27 @@ const when = (d) => new Date(d).toLocaleString()
 
 <template>
   <section class="hist">
-    <header class="hist-head">
-      <p class="eyebrow">The Forge</p>
-      <h1 class="hist-title">Version History</h1>
-      <p class="hist-intro">Every perk correction, deleted build and privilege change. Nothing here is ever removed.</p>
-    </header>
+    <PageHeader eyebrow="The Forge" title="Version History" lede="Every perk correction, deleted build and privilege change. Nothing here is ever removed." />
 
-    <div v-if="!auth.signedIn" class="hist-empty">
-      <p>Sign in with Discord to view the history.</p>
-      <button type="button" class="btn-ember btn-sm" @click="auth.signIn()">Sign in with Discord</button>
-    </div>
+    <StatePanel v-if="!auth.signedIn" kind="gate" class="hist-empty" body="Sign in with Discord to view the history.">
+      <button type="button" class="btn-ember btn-md" @click="auth.signIn()">Sign in with Discord</button>
+    </StatePanel>
     <template v-else>
       <div class="hist-tools">
-        <button v-for="f in FILTERS" :key="f.label" type="button" class="hist-filter" :class="{ on: subject === f.key }" @click="subject = f.key">
+        <button v-for="f in FILTERS" :key="f.label" type="button" class="hist-filter tab-forge rm-fade" :class="{ on: subject === f.key }" @click="subject = f.key">
           {{ f.label }}
         </button>
-        <input v-model="q" type="search" class="hist-search" maxlength="80" placeholder="Weapon, class, perk or build…" aria-label="Search history" />
+        <input v-model="q" type="search" class="hist-search field-forge" maxlength="80" placeholder="Weapon, class, perk or build…" aria-label="Search history" />
       </div>
 
-      <p v-if="error" class="hist-error" role="alert">{{ error }}</p>
+      <StatePanel v-if="error" kind="error" class="hist-error" :body="error" />
 
       <section v-if="canRevoke && revocations.length" class="hist-revoked">
         <h2>Revoked privileges</h2>
         <ul>
           <li v-for="r in revocations" :key="r.id">
             <strong>{{ r.username }}</strong> — {{ r.reason }} <span class="hist-meta">by {{ r.revokedBy.username }}, {{ when(r.createdAt) }}</span>
-            <button type="button" :disabled="busy" @click="reinstate(r)">Reinstate</button>
+            <button type="button" class="btn-ghost btn-sm" :disabled="busy" @click="reinstate(r)">Reinstate</button>
           </li>
         </ul>
       </section>
@@ -121,6 +118,7 @@ const when = (d) => new Date(d).toLocaleString()
       <ol class="hist-list">
         <li v-for="e in events" :key="e.id" class="hist-item" :data-subject="e.subject">
           <button type="button" class="hist-line" :aria-expanded="openId === e.id" @click="openId = openId === e.id ? null : e.id">
+            <span class="stud hist-stud" aria-hidden="true"></span>
             <span class="hist-when">{{ when(e.createdAt) }}</span>
             <span class="hist-what">{{ historyLabel(e) }}</span>
           </button>
@@ -132,20 +130,20 @@ const when = (d) => new Date(d).toLocaleString()
             </div>
             <pre class="hist-snap">{{ JSON.stringify(e.snapshot, null, 2) }}</pre>
             <div class="hist-actions">
-              <button v-if="e.subject === 'perk_correction' && e.action === 'created'" type="button" :disabled="busy" @click="revert(e)">Revert</button>
-              <button v-if="canRevoke && e.actor.id !== me && e.actor.id !== '0'" type="button" @click="revoking = e">Revoke {{ e.actor.username }}</button>
+              <button v-if="e.subject === 'perk_correction' && e.action === 'created'" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="revert(e)">Revert</button>
+              <button v-if="canRevoke && e.actor.id !== me && e.actor.id !== '0'" type="button" class="btn-ghost btn-sm" @click="revoking = e">Revoke {{ e.actor.username }}</button>
             </div>
             <form v-if="revoking?.id === e.id" class="hist-revoke" @submit.prevent="revoke">
               <label :for="`reason-${e.id}`">Reason (required)</label>
-              <input :id="`reason-${e.id}`" v-model="reason" maxlength="200" required />
-              <button type="submit" :disabled="busy || !reason.trim()">Confirm revoke</button>
-              <button type="button" @click="revoking = null">Cancel</button>
+              <input :id="`reason-${e.id}`" v-model="reason" class="field-forge" maxlength="200" required />
+              <button type="submit" class="btn-ghost btn-sm" :disabled="busy || !reason.trim()">Confirm revoke</button>
+              <button type="button" class="btn-ghost btn-sm" @click="revoking = null">Cancel</button>
             </form>
           </div>
         </li>
       </ol>
-      <p v-if="!events.length && !error" class="hist-empty">Nothing yet.</p>
-      <button v-if="next" type="button" class="hist-more" :disabled="loading" @click="load(true)">Older</button>
+      <StatePanel v-if="!events.length && !error && !loading" kind="empty" class="hist-empty" body="Nothing yet." />
+      <button v-if="next" type="button" class="hist-more btn-ghost btn-sm" :disabled="loading" @click="load(true)">Older</button>
     </template>
   </section>
 </template>
@@ -156,118 +154,105 @@ const when = (d) => new Date(d).toLocaleString()
   margin: 0 auto;
   padding: 2rem 1rem 4rem;
 }
-.hist-title {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  color: var(--color-bone);
-  font-size: 2rem;
-}
-.hist-intro,
-.hist-empty,
 .hist-meta {
   color: var(--color-smoke);
 }
-.hist-empty > p {
-  margin: 0 0 0.8rem;
+.is-gate.hist-empty {
+  margin-top: 2rem;
+}
+.hist-error {
+  margin-bottom: 1.2rem;
 }
 .hist-tools {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin: 1.2rem 0;
-}
-.hist-filter,
-.hist button {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 0.7rem;
-  color: var(--color-bone);
-  background: transparent;
-  border: 1px solid var(--color-ash);
-  border-radius: 2px;
-  padding: 0.35rem 0.7rem;
-  cursor: pointer;
-}
-.hist-filter.on {
-  border-color: var(--color-ember);
-  color: var(--color-ember);
-}
-/* Every button squeezes when pressed except the full-width event row (.hist-line), which is a list row. */
-.hist-filter,
-.hist-actions button,
-.hist-revoke button,
-.hist-revoked button,
-.hist-more {
-  transition: transform var(--dur-press) var(--ease-forge);
-}
-.hist-filter:active,
-.hist-actions button:active,
-.hist-revoke button:active,
-.hist-revoked button:active,
-.hist-more:active {
-  transform: scale(0.97);
+  margin: 2rem 0 1.2rem;
 }
 .hist-search,
 .hist-revoke input {
   flex: 1;
   min-width: 12rem;
-  background: rgba(5, 10, 8, 0.7);
-  border: 1px solid var(--color-ash);
-  color: var(--color-bone);
-  border-radius: 2px;
-  padding: 0.4rem 0.6rem;
 }
-.hist-error {
-  color: var(--color-ember);
-}
+
+/* The list is a dated record. The category colour is the stud before the date; the row is a list row, so it
+   takes no press squeeze. */
 .hist-list {
-  list-style: none;
-  padding: 0;
   display: grid;
   gap: 0.4rem;
 }
 .hist-item {
   border: 1px solid var(--color-ash);
-  border-left: 3px solid var(--color-ash-2);
-  border-radius: 5px;
-  background: rgba(14, 28, 22, 0.4);
+  border-radius: var(--radius-md);
+  /* Mirrors .surface without the blur; long list on phones. */
+  background: color-mix(in srgb, var(--color-basalt-2) 86%, transparent);
 }
-.hist-item[data-subject='perk_correction'] {
-  border-left-color: var(--color-gold);
+.hist-stud {
+  align-self: flex-start;
+  margin-top: calc(0.7em - 3px);
+  color: var(--color-ash-2);
 }
-.hist-item[data-subject='build'] {
-  border-left-color: var(--color-drake);
+.hist-item[data-subject='perk_correction'] .hist-stud {
+  color: var(--color-gold);
 }
-.hist-item[data-subject='privilege'] {
-  border-left-color: var(--color-ember);
+.hist-item[data-subject='build'] .hist-stud {
+  color: var(--color-drake);
 }
-.hist .hist-line {
+.hist-item[data-subject='privilege'] .hist-stud {
+  color: var(--color-ember);
+}
+.hist-line {
   display: flex;
+  align-items: baseline;
   gap: 1rem;
   width: 100%;
+  min-height: var(--tap);
+  padding: 0.75rem 0.8rem;
   text-align: left;
-  border: 0;
-  text-transform: none;
-  letter-spacing: 0;
   font-family: inherit;
-  font-size: 0.85rem;
-  padding: 0.6rem 0.8rem;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--color-bone);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
 }
 .hist-when {
   flex: none;
   color: var(--color-smoke);
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
 }
+.hist-what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* On a phone the date and the stud share a line and the sentence takes the line under it. */
+@media (max-width: 600px) {
+  .hist-line {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.7rem;
+    row-gap: 0.15rem;
+  }
+  .hist-when,
+  .hist-what {
+    grid-column: 2;
+  }
+}
+
 .hist-detail {
   padding: 0 0.8rem 0.8rem;
+}
+.hist-note {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 .hist-change {
   display: grid;
   gap: 0.3rem;
   margin: 0 0 0.6rem;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 .hist-change p {
   margin: 0;
@@ -280,11 +265,11 @@ const when = (d) => new Date(d).toLocaleString()
 .hist-snap {
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 0.72rem;
-  color: #c3d0c6;
-  background: rgba(5, 10, 8, 0.6);
+  font-size: var(--text-xs);
+  color: var(--color-pewter);
+  background: color-mix(in srgb, var(--color-obsidian) 60%, transparent);
   padding: 0.6rem;
-  border-radius: 3px;
+  border-radius: var(--radius-md);
   max-height: 20rem;
   overflow: auto;
 }
@@ -296,17 +281,24 @@ const when = (d) => new Date(d).toLocaleString()
   align-items: center;
   margin-top: 0.5rem;
 }
+
 .hist-revoked {
   margin-bottom: 1.2rem;
   padding: 0.8rem;
   border: 1px solid var(--color-ember);
-  border-radius: 5px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-basalt-2) 86%, transparent);
 }
 .hist-revoked ul {
-  list-style: none;
-  padding: 0;
   display: grid;
   gap: 0.4rem;
+}
+.hist-revoked li {
+  overflow-wrap: anywhere;
+}
+.hist-revoked li button {
+  display: flex;
+  margin-top: 0.5rem;
 }
 .hist-more {
   margin-top: 1rem;

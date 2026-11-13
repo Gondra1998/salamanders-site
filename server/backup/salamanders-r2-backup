@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# salamanders-r2-backup: nightly backup of the Reliquarium's R2 bucket, then the storage purge.
+#
+# 1. Copies into DEST every object in the bucket that DEST does not hold yet (rclone copy --ignore-existing:
+#    an object is written once under its own key and never changed, so nothing is sent twice). It copies, never
+#    syncs: R2 losing a file never takes it out of DEST. Files leave DEST only in step 4, by name.
+# 2. Checks, one way, that every object in R2 is in DEST at the same size and MD5 (rclone check).
+# 3. Lists both sides into a manifest and hands it to the API's purge (server/src/galleryPurgeRun.js), which
+#    takes out of R2 the files of items rejected, hidden or removed for 30 days, and only those DEST holds, and
+#    the files deleted for good (a member's own takedown, an approver's Delete for good). The purge runs only
+#    after 1 and 2 passed.
+# 4. Deletes from DEST the files the purge names (`expire<TAB>key`): those deleted for good, and those of items
+#    taken down 60 days ago. Each key must be a storage key in exactly the shape the API makes; one that is not
+#    stops the run before anything is deleted. A dry run deletes nothing.
+#
+# The owner's erase command runs first when asked, under the same lock, for a "please forget me" request:
+#   salamanders-r2-backup --erase-item <item id>        one item, any status
+#   salamanders-r2-backup --erase-member <discord id>   everything one member posted
+# The items, their history and their files go from the database and R2 (server/src/galleryEraseRun.js), then this
+# run takes the files out of the backup.
+#
+# The R2 values are read from COMPOSE_DIR/.env (never sourced: only the four R2_ lines are read) and reach
+# rclone as environment variables passed by name, so the secret is never on a command line.
+#
+# Configuration (environment; the defaults are the production values):
+#   COMPOSE_DIR    the server folder: .env and docker-compose.yml   ($HOME/Documents/salamanders-site/server)
+#   API_SERVICE    compose service that runs the purge             (api)
+#   DEST           backup directory                                (/mnt/bretpc/salamanders-r2-backup)
+#   REQUIRE_MOUNT  DEST must live on this mounted filesystem; empty disables (/mnt/bretpc)
+#   PURGE          1 = purge after a clean backup, dry = only report what it would purge, 0 = no purge (1)
+#   RCLONE_IMAGE   rclone image, pinned by digest                  (rclone/rclone:1.76.0@sha256:...)
+#   STATE_DIR      status file + log                               (~/.local/state/salamanders-r2-backup)
+#
+# Exit codes: 0 ok | 2 bad config or arguments | 3 backup drive not mounted/usable | 4 R2 settings missing or
+# malformed | 5 copy failed | 6 the backup does not match R2 | 7 listing failed | 8 purge failed, or it named a
+# file that is not a storage key | 9 another run in progress | 10 the erase failed. STATE_DIR/last-run always
+# holds the latest result.
+
+set -uo pipefail
+umask 077
+PATH="$PATH:/usr/local/bin:/usr/bin:/bin"
+
+# "-" not ":-": a variable that is set but empty is a mistake to reject, never a fall back to the default.
+COMPOSE_DIR=${COMPOSE_DIR-$HOME/Documents/salamanders-site/server}
+API_SERVICE=${API_SERVICE-api}
+DEST=${DEST-/mnt/bretpc/salamanders-r2-backup}
+REQUIRE_MOUNT=${REQUIRE_MOUNT-/mnt/bretpc}
+PURGE=${PURGE-1}
+RCLONE_IMAGE=${RCLONE_IMAGE-rclone/rclone:1.76.0@sha256:7cbeec24a44f206067597c0368be4de90ae19a64d5113c7d1938bd737a81e466}
+STATE_DIR=${STATE_DIR:-$HOME/.local/state/salamanders-r2-backup}
+
+REASON="unknown"
+SUMMARY=""
+NO_STATUS=0
+MANIFEST=""
+
+mkdir -p -m 700 "$STATE_DIR" 2>/dev/null || { echo "cannot create $STATE_DIR" >&2; exit 2; }
+
+log() { printf '%s\n' "$*"; printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> "$STATE_DIR/backup.log" 2>/dev/null; return 0; }
+
+cleanup() {
+  local code=$?
+  if [ -n "$MANIFEST" ]; then rm -f -- "$MANIFEST"; fi
+  if [ "$NO_STATUS" != 1 ]; then
+    local line
+    if [ "$code" -eq 0 ]; then line="OK $SUMMARY"; else line="FAILED exit=$code reason=$REASON"; fi
+    printf '%s %s\n' "$(date -u +%FT%TZ)" "$line" > "$STATE_DIR/last-run"
+    log "$line"
+  fi
+}
+trap cleanup EXIT
+
+fail() { local code=$1; shift; REASON="$*"; exit "$code"; }
+
+# One run at a time. First, so a losing run touches nothing, not even the status file.
+exec 9> "$STATE_DIR/lock"
+flock -n 9 || { NO_STATUS=1; echo "another R2 backup run is in progress" >&2; exit 9; }
+
+# ---- validate at the boundary: nothing below runs on bad configuration -------------------------
+ERASE=()
+case "$#:${1:-}" in
+  0:) ;;
+  2:--erase-item) [[ $2 =~ ^[0-9]{1,15}$ ]] || fail 2 "--erase-item takes an item id"; ERASE=(--item "$2") ;;
+  2:--erase-member) [[ $2 =~ ^[0-9]{17,20}$ ]] || fail 2 "--erase-member takes a Discord user id"; ERASE=(--member "$2") ;;
+  *) fail 2 "usage: salamanders-r2-backup [--erase-item <id> | --erase-member <discord id>]" ;;
+esac
+[[ $PURGE =~ ^(0|1|dry)$ ]] || fail 2 "PURGE must be 0, 1 or dry (got '$PURGE')"
+[ ${#ERASE[@]} -eq 0 ] || [ "$PURGE" = 1 ] || fail 2 "an erase needs PURGE=1: the backup copy goes in the purge step"
+[[ $API_SERVICE =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || fail 2 "API_SERVICE must be a plain name (got '$API_SERVICE')"
+[[ $RCLONE_IMAGE =~ ^[a-z0-9./_-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || fail 2 "RCLONE_IMAGE must be pinned as name:tag@sha256:<digest>"
+[ -n "$COMPOSE_DIR" ] || fail 2 "COMPOSE_DIR is empty"
+[ -n "$DEST" ] || fail 2 "DEST is empty"
+DEST_REAL=$(realpath -m -- "$DEST") || fail 2 "cannot resolve DEST"
+if [ -n "$REQUIRE_MOUNT" ]; then
+  mount_real=$(realpath -m -- "$REQUIRE_MOUNT") || fail 2 "cannot resolve REQUIRE_MOUNT"
+  mount_base=${mount_real%/}   # "" for a root mount
+  case "$DEST_REAL/" in
+    "$mount_base"/*) ;;
+    *) fail 2 "DEST ($DEST_REAL) is not inside REQUIRE_MOUNT ($mount_real)" ;;
+  esac
+  mountpoint -q -- "$mount_real" || fail 3 "$mount_real is not a mounted filesystem; refusing to write onto the system disk"
+fi
+mkdir -p -m 700 -- "$DEST_REAL" 2>/dev/null || fail 3 "cannot create $DEST_REAL"
+
+# ---- the R2 values: read, not sourced, and checked ---------------------------------------------
+ENV_FILE="$COMPOSE_DIR/.env"
+[ -r "$ENV_FILE" ] || fail 4 "cannot read $ENV_FILE"
+setting() { sed -n "s/^$1=//p" -- "$ENV_FILE" | tail -n 1; }
+R2_ACCOUNT_ID=$(setting R2_ACCOUNT_ID)
+R2_BUCKET=$(setting R2_BUCKET)
+R2_ACCESS_KEY_ID=$(setting R2_ACCESS_KEY_ID)
+R2_SECRET_ACCESS_KEY=$(setting R2_SECRET_ACCESS_KEY)
+[ -z "$(setting R2_ENDPOINT)" ] || fail 4 "R2_ENDPOINT is set: this backs up Cloudflare R2, not a mock"
+[[ $R2_ACCOUNT_ID =~ ^[0-9a-f]{32}$ ]] || fail 4 "R2_ACCOUNT_ID is missing or not 32 hex characters"
+[[ $R2_BUCKET =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || fail 4 "R2_BUCKET is missing or not a bucket name"
+# Never echoed: a malformed key is named, not shown.
+[[ $R2_ACCESS_KEY_ID =~ ^[A-Za-z0-9]{16,128}$ ]] || fail 4 "R2_ACCESS_KEY_ID is missing or malformed"
+[[ $R2_SECRET_ACCESS_KEY =~ ^[A-Za-z0-9]{16,128}$ ]] || fail 4 "R2_SECRET_ACCESS_KEY is missing or malformed"
+
+export RCLONE_CONFIG_R2_TYPE=s3 RCLONE_CONFIG_R2_PROVIDER=Cloudflare RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+export RCLONE_CONFIG_R2_ENDPOINT="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+unset R2_SECRET_ACCESS_KEY
+
+rclone() {
+  docker run --rm --user "$(id -u):$(id -g)" \
+    -e RCLONE_CONFIG_R2_TYPE -e RCLONE_CONFIG_R2_PROVIDER -e RCLONE_CONFIG_R2_NO_CHECK_BUCKET \
+    -e RCLONE_CONFIG_R2_ENDPOINT -e RCLONE_CONFIG_R2_ACCESS_KEY_ID -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY \
+    -v "$DEST_REAL:/backup" "$RCLONE_IMAGE" --config /dev/null "$@"
+}
+held() { find "$DEST_REAL" -type f | wc -l; }
+api() { docker compose -f "$COMPOSE_DIR/docker-compose.yml" exec -T "$API_SERVICE" bun run "$@"; }
+
+# ---- 0. the owner's erase, when asked: before the copy, so the night ends with the files gone -----
+ERASED=""
+if [ ${#ERASE[@]} -gt 0 ]; then
+  erase_out=$(api src/galleryEraseRun.js "${ERASE[@]}" 2>&1)
+  erase_code=$?
+  log "$erase_out"
+  [ "$erase_code" -eq 0 ] || fail 10 "the erase failed: $(printf '%s\n' "$erase_out" | tail -n 1)"
+  ERASED=" erase: $(printf '%s\n' "$erase_out" | head -n 1)"
+fi
+
+# ---- 1. copy what is new; 2. prove the backup holds everything R2 holds --------------------------
+before=$(held)
+rclone copy "r2:$R2_BUCKET" /backup --ignore-existing --fast-list >> "$STATE_DIR/backup.log" 2>&1 || fail 5 "rclone copy failed (see backup.log)"
+copied=$(( $(held) - before ))
+rclone check "r2:$R2_BUCKET" /backup --one-way --fast-list >> "$STATE_DIR/backup.log" 2>&1 || fail 6 "the backup does not match R2 (see backup.log); nothing was purged"
+
+# ---- 3. the manifest, then the purge -----------------------------------------------------------
+MANIFEST=$(mktemp "$STATE_DIR/manifest.XXXXXX") || fail 7 "cannot create the manifest"
+listing=$(rclone lsf "r2:$R2_BUCKET" -R --files-only --fast-list --format sp --separator $'\t' 2>> "$STATE_DIR/backup.log") || fail 7 "rclone could not list R2"
+if [ -n "$listing" ]; then printf '%s\n' "$listing" | sed 's/^/r2\t/' > "$MANIFEST" || fail 7 "cannot write the manifest"; fi
+find "$DEST_REAL" -type f -printf 'backup\t%s\t%P\n' >> "$MANIFEST" || fail 7 "cannot list the backup"
+in_r2=$(grep -c '^r2	' "$MANIFEST")
+in_backup=$(grep -c '^backup	' "$MANIFEST")
+SUMMARY="r2=$in_r2 backup=$in_backup copied=$copied"
+
+if [ "$PURGE" = 0 ]; then
+  SUMMARY="$SUMMARY purge=off"
+  exit 0
+fi
+args=()
+[ "$PURGE" = dry ] && args=(--dry-run)
+out=$(api src/galleryPurgeRun.js "${args[@]}" < "$MANIFEST" 2>&1)
+code=$?
+# The keys stay out of the log: they say which files went, and that is no business of a log file.
+log "$(printf '%s\n' "$out" | grep -v '^expire	')"
+[ "$code" -eq 0 ] || fail 8 "the purge failed: $(printf '%s\n' "$out" | tail -n 1)"
+SUMMARY="$SUMMARY $(printf '%s\n' "$out" | head -n 1)"
+
+# ---- 4. the backup lets go of what the purge names: every key checked before any file goes -------
+mapfile -t expire < <(printf '%s\n' "$out" | sed -n 's/^expire	//p')
+for key in "${expire[@]}"; do
+  [[ $key =~ ^(art/[0-9]{1,20}|clips/[0-9]{1,20}/[0-9]{1,20})\.(jpg|png|gif|webp|mp4|mov|webm)$ ]] || fail 8 "the purge named a file that is not a storage key; nothing was deleted from the backup"
+done
+expired=0
+if [ "$PURGE" = 1 ]; then
+  for key in "${expire[@]}"; do
+    [ -e "$DEST_REAL/$key" ] || continue
+    rm -f -- "$DEST_REAL/$key" || fail 8 "could not delete a file from the backup"
+    expired=$((expired + 1))
+  done
+  find "$DEST_REAL" -mindepth 1 -type d -empty -delete 2>/dev/null
+fi
+SUMMARY="$SUMMARY expired=$expired$ERASED"
+exit 0

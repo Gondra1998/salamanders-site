@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createDeathwatchHandler } from './deathwatchHandler'
+import { createDeathwatchHandler, namedIn, trackerReaders } from './deathwatchHandler'
 import { createDeathwatchAccess } from './deathwatchAccess'
 import { Upstream } from './discordRoles'
 import { MAX_ACTIVE_GRANTS, MAX_BODY_BYTES } from './deathwatchValidate'
@@ -14,10 +14,10 @@ const USERS = {
   commander: { id: '300000000000000001', roles: [WC] },
   watcher: { id: '300000000000000002', roles: [DW] },
   command: { id: '300000000000000007', roles: [DW, CMD] }, // Deathwatch Command, never the Watch Commander
-  commandOnly: { id: '300000000000000008', roles: [CMD] }, // the role without the Deathwatch one: no way in
+  commandOnly: { id: '300000000000000008', roles: [CMD] }, // the role without the Deathwatch one: deployed all the same
   granted: { id: '300000000000000003', roles: null }, // not in the guild; gets a grant in some tests
   plain: { id: '300000000000000004', roles: [] },
-  legion: { id: '300000000000000005', roles: [LEGION] },
+  legion: { id: '300000000000000005', roles: [LEGION] }, // in, but no Event Tracker
   stranger: { id: '300000000000000006', roles: null }, // not in the guild, never granted
 }
 const OTHER = '300000000000000099'
@@ -67,7 +67,8 @@ function memStore() {
   }
 }
 
-function setup({ configured = true } = {}) {
+// `roster`: the roster cache's holding() (roster.js), absent by default.
+function setup({ configured = true, roster = null, deploymentRoleIds = [DW], faceRoleIds } = {}) {
   const users = structuredClone(USERS)
   const fail = { discord: false }
   const byToken = (request) => users[(request.headers.get('Authorization') || '').slice(7)]
@@ -87,8 +88,10 @@ function setup({ configured = true } = {}) {
     deathwatchRoleId: configured ? DW : undefined,
     commanderRoleId: configured ? WC : undefined,
     deathwatchCommandRoleId: CMD, // set even when the area is not: it must not configure anything
+    legionRoleId: LEGION,
   })
-  const handle = createDeathwatchHandler({ access, store })
+  // deploymentRoleIds: null leaves it out, as a server with no Deployment role set does.
+  const handle = createDeathwatchHandler({ access, store, roster, ...(deploymentRoleIds ? { deploymentRoleIds } : {}), ...(faceRoleIds ? { faceRoleIds } : {}) })
 
   // body: an object (sent as JSON), or `raw` for a literal body; `headers` override the defaults.
   async function call(who, method, path, body, { raw, headers = {} } = {}) {
@@ -108,6 +111,7 @@ function setup({ configured = true } = {}) {
 const ROUTES = [
   ['GET', '/deathwatch/me'],
   ['GET', '/deathwatch/data'],
+  ['GET', '/deathwatch/deployment'],
   ['POST', '/deathwatch/doc', DOC],
   ['GET', '/deathwatch/grants'],
   ['POST', '/deathwatch/grants', { discordId: OTHER }],
@@ -129,6 +133,7 @@ describe('routing and the common failures', () => {
       ['POST', '/deathwatch/me'],
       ['GET', '/deathwatch/doc'],
       ['POST', '/deathwatch/data'],
+      ['POST', '/deathwatch/deployment'],
       ['GET', `/deathwatch/grants/${OTHER}`],
       ['POST', `/deathwatch/grants/${OTHER}`],
       ['PUT', '/deathwatch/grants'],
@@ -194,27 +199,28 @@ describe('GET /deathwatch/me', () => {
     const { call, store } = setup()
     store.grants.set(USERS.granted.id, { active: true, by: 'x' })
     const me = async (who) => (await call(who, 'GET', '/deathwatch/me')).body
-    expect(await me('commander')).toEqual({ access: true, watchCommander: true, deathwatchCommand: false })
-    expect(await me('watcher')).toEqual({ access: true, watchCommander: false, deathwatchCommand: false })
-    expect(await me('command')).toEqual({ access: true, watchCommander: false, deathwatchCommand: true })
-    expect(await me('commandOnly')).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
-    expect(await me('granted')).toEqual({ access: true, watchCommander: false, deathwatchCommand: false }) // not in the guild
-    expect(await me('plain')).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
-    expect(await me('legion')).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
-    expect(await me('stranger')).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
+    const out = (access, watchCommander, deathwatchCommand, roles) => ({ access, watchCommander, deathwatchCommand, roles })
+    expect(await me('commander')).toEqual(out(true, true, false, []))
+    expect(await me('watcher')).toEqual(out(true, false, false, ['deployment']))
+    expect(await me('command')).toEqual(out(true, false, true, ['deployment', 'command']))
+    expect(await me('commandOnly')).toEqual(out(true, false, true, ['deployment', 'command']))
+    expect(await me('granted')).toEqual(out(true, false, false, ['deployment'])) // not in the guild
+    expect(await me('plain')).toEqual(out(false, false, false, []))
+    expect(await me('legion')).toEqual(out(true, false, false, ['legion']))
+    expect(await me('stranger')).toEqual(out(false, false, false, []))
   })
 
-  it('sends nothing but the three flags', async () => {
+  it('sends nothing but the three flags and the standings', async () => {
     const { call } = setup()
-    expect(Object.keys((await call('command', 'GET', '/deathwatch/me')).body).sort()).toEqual(['access', 'deathwatchCommand', 'watchCommander'])
+    expect(Object.keys((await call('command', 'GET', '/deathwatch/me')).body).sort()).toEqual(['access', 'deathwatchCommand', 'roles', 'watchCommander'])
   })
 
-  it('tells a Deathwatch Command member who is only granted access in, and not before', async () => {
+  it('adds deployment for a Legion member once granted, and not before', async () => {
     const { call, store, access } = setup()
-    expect((await call('commandOnly', 'GET', '/deathwatch/me')).body).toEqual({ access: false, watchCommander: false, deathwatchCommand: false })
-    store.grants.set(USERS.commandOnly.id, { active: true, by: 'x' })
-    access.forget() // as the grant route does, so the earlier refusal is not served from the cache
-    expect((await call('commandOnly', 'GET', '/deathwatch/me')).body).toEqual({ access: true, watchCommander: false, deathwatchCommand: true })
+    expect((await call('legion', 'GET', '/deathwatch/me')).body.roles).toEqual(['legion'])
+    store.grants.set(USERS.legion.id, { active: true, by: 'x' })
+    access.forget() // as the grant route does, so the earlier verdict is not served from the cache
+    expect((await call('legion', 'GET', '/deathwatch/me')).body.roles).toEqual(['legion', 'deployment'])
   })
 
   it('is never a 403', async () => {
@@ -245,17 +251,17 @@ describe('the Deathwatch Command role and the Watch Commander routes', () => {
     expect(store.revoke).not.toHaveBeenCalled()
   })
 
-  it('reads the area like any other member, and only with access', async () => {
-    const { call } = setup()
-    expect((await call('command', 'GET', '/deathwatch/data')).status).toBe(200)
-    expect((await call('commandOnly', 'GET', '/deathwatch/data')).status).toBe(403)
+  it('reads the Event Tracker as Deployment does, even without the Deathwatch role', async () => {
+    const { call, store } = setup()
+    store.docs.teams.set('alpha', { n: 1 })
+    expect((await call('commandOnly', 'GET', '/deathwatch/data')).body.teams).toEqual({ alpha: { n: 1 } })
   })
 })
 
 describe('GET /deathwatch/data', () => {
   it('refuses a user without access and never reads the store', async () => {
     const { call, store } = setup()
-    for (const who of ['plain', 'legion', 'stranger']) {
+    for (const who of ['plain', 'stranger']) {
       const res = await call(who, 'GET', '/deathwatch/data')
       expect(res.status).toBe(403)
       expect(res.body.error).toBeTruthy()
@@ -306,7 +312,7 @@ describe('GET /deathwatch/data', () => {
   it('never answers 304 to a user without access, even with a valid tag', async () => {
     const { call } = setup()
     const tag = (await call('watcher', 'GET', '/deathwatch/data')).headers.get('ETag')
-    const res = await call('legion', 'GET', '/deathwatch/data', undefined, { headers: { 'If-None-Match': tag } })
+    const res = await call('plain', 'GET', '/deathwatch/data', undefined, { headers: { 'If-None-Match': tag } })
     expect(res.status).toBe(403)
     expect(res.text).not.toBe('')
   })
@@ -321,11 +327,136 @@ describe('GET /deathwatch/data', () => {
     expect(res.headers.get('ETag')).not.toBe(old)
   })
 
+  it('gives someone without deployment the page texts, but the live event and the archive empty, with their own tag', async () => {
+    const { call, store } = setup()
+    store.docs.teams.set('alpha', { n: 1 })
+    store.docs.cfg.set('tx', { a: 'b' })
+    store.docs.archive.set('t1', { n: 2 })
+    const full = await call('watcher', 'GET', '/deathwatch/data')
+    expect(full.body).toEqual({ teams: { alpha: { n: 1 } }, cfg: { tx: { a: 'b' } }, archive: { t1: { n: 2 } } })
+    expect((await call('commander', 'GET', '/deathwatch/data')).body).toEqual(full.body)
+    for (const who of ['legion']) {
+      const res = await call(who, 'GET', '/deathwatch/data', undefined, { headers: { 'If-None-Match': full.headers.get('ETag') } })
+      expect([who, res.status, res.body]).toEqual([who, 200, { teams: {}, cfg: { tx: { a: 'b' } }, archive: {} }])
+      expect(res.headers.get('ETag')).toBe(etagOf(res.text))
+    }
+  })
+
+  it('gives the live event to the roles the Watch Commander opened the Event Tracker to, and no longer to Deployment', async () => {
+    const { call, store } = setup()
+    store.docs.teams.set('alpha', { n: 1 })
+    store.docs.cfg.set('g', { eventtracker: ['legion'] })
+    expect((await call('legion', 'GET', '/deathwatch/data')).body.teams).toEqual({ alpha: { n: 1 } })
+    expect((await call('watcher', 'GET', '/deathwatch/data')).body.teams).toEqual({})
+    expect((await call('commander', 'GET', '/deathwatch/data')).body.teams).toEqual({ alpha: { n: 1 } })
+  })
+
+  it('reads the Event Tracker list from cfg g, keeping strings only, else Deployment', () => {
+    expect(trackerReaders(undefined)).toEqual(['deployment'])
+    expect(trackerReaders({})).toEqual(['deployment'])
+    expect(trackerReaders({ g: { eventtracker: 'legion' } })).toEqual(['deployment'])
+    expect(trackerReaders({ g: { eventtracker: ['legion', 7, null, 'vigilia'] } })).toEqual(['legion', 'vigilia'])
+    expect(trackerReaders({ g: { eventtracker: [] } })).toEqual([])
+  })
+
   it('uses the cached verdict for repeated reads', async () => {
     const { call, roles } = setup()
     await call('watcher', 'GET', '/deathwatch/data')
     await call('watcher', 'GET', '/deathwatch/data')
     expect(roles.rolesOf).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('GET /deathwatch/deployment', () => {
+  const MEMBERS = [{ id: '300000000000000011', name: 'Brother Orrin', avatar: null }]
+  const roster = () => ({ holding: vi.fn(async () => MEMBERS) })
+
+  it('lists the role holders to the Event Tracker readers, asking the roster for the Deployment role', async () => {
+    const r = roster()
+    const { call } = setup({ roster: r })
+    for (const who of ['commander', 'watcher', 'commandOnly']) {
+      const res = await call(who, 'GET', '/deathwatch/deployment')
+      expect([res.status, res.body], who).toEqual([200, { members: MEMBERS, faces: [] }])
+    }
+    expect(r.holding).toHaveBeenCalledWith([DW])
+  })
+
+  it('refuses anyone the Event Tracker is closed to, without asking the roster', async () => {
+    const r = roster()
+    const { call } = setup({ roster: r })
+    for (const who of ['legion', 'plain']) {
+      const res = await call(who, 'GET', '/deathwatch/deployment')
+      expect([res.status, res.body], who).toEqual([403, { error: 'Restricted to the Event Tracker.' }])
+    }
+    expect(r.holding).not.toHaveBeenCalled()
+  })
+
+  it('follows the Event Tracker as opened in Manage > Access', async () => {
+    const { call, store } = setup({ roster: roster() })
+    store.docs.cfg.set('g', { eventtracker: ['legion'] })
+    expect((await call('legion', 'GET', '/deathwatch/deployment')).status).toBe(200)
+    expect((await call('watcher', 'GET', '/deathwatch/deployment')).status).toBe(403)
+    // Any one of the roles it is opened to is enough.
+    store.docs.cfg.set('g', { eventtracker: ['legion', 'deployment'] })
+    expect((await call('legion', 'GET', '/deathwatch/deployment')).status).toBe(200)
+  })
+
+  it('answers 503 with no roster, with no Deployment role set, or before the roster has loaded', async () => {
+    const NOT_YET = [503, { error: 'The member list is not available yet. Try again.' }]
+    const res = async (opts) => {
+      const r = await setup(opts).call('watcher', 'GET', '/deathwatch/deployment')
+      return [r.status, r.body]
+    }
+    expect(await res()).toEqual(NOT_YET)
+    expect(await res({ roster: roster(), deploymentRoleIds: null })).toEqual(NOT_YET)
+    expect(await res({ roster: { holding: async () => null } })).toEqual(NOT_YET)
+  })
+})
+
+describe('the faces in GET /deathwatch/deployment', () => {
+  // Invented values only. The Legion and Emissary members, of whom the tracker names some.
+  const MEMBERS = [{ id: '300000000000000011', name: 'Brother Orrin', avatar: null }]
+  const FACES = [
+    { id: '300000000000000011', name: 'Brother Orrin', avatar: null }, // deployed: listed once, as a member
+    { id: '300000000000000021', name: 'Brother Named', avatar: null }, // on a live roster by name
+    { id: '300000000000000022', name: 'Brother Renamed', avatar: null }, // entered by id, renamed since
+    { id: '300000000000000023', name: 'Brother Archived', avatar: null }, // on an archived roster
+    { id: '300000000000000024', name: 'Brother Stranger', avatar: null }, // never entered
+  ]
+  const holding = (faces = FACES) => vi.fn(async (ids) => (ids.includes(DW) ? MEMBERS : faces))
+  const fill = (store) => {
+    store.docs.teams.set('1', { ro: ['Brother Named', 'Brother Old Name', 'Brother Orrin'], di: { 'Brother Old Name': '300000000000000022' } })
+    store.docs.archive.set('e1', { teams: [{ ro: ['Brother Archived'] }] })
+  }
+
+  it('adds the Legion and Emissary members the tracker names, by id or by name, who are not deployed', async () => {
+    const r = { holding: holding() }
+    const { call, store } = setup({ roster: r, faceRoleIds: [LEGION, 'EMISSARY'] })
+    fill(store)
+    const res = await call('watcher', 'GET', '/deathwatch/deployment')
+    expect(res.body).toEqual({ members: MEMBERS, faces: FACES.slice(1, 4) })
+    expect(r.holding).toHaveBeenCalledWith([LEGION, 'EMISSARY'])
+  })
+
+  it('has none with no face roles set, and none while that list cannot be had', async () => {
+    const plain = setup({ roster: { holding: holding() } })
+    fill(plain.store)
+    expect((await plain.call('watcher', 'GET', '/deathwatch/deployment')).body.faces).toEqual([])
+    const late = setup({ roster: { holding: holding(null) }, faceRoleIds: [LEGION] })
+    fill(late.store)
+    expect((await late.call('watcher', 'GET', '/deathwatch/deployment')).body).toEqual({ members: MEMBERS, faces: [] })
+  })
+
+  it('reads the names and ids from any document, skipping what is not a roster or not an id', () => {
+    const all = {
+      teams: { a: { ro: ['A', 7], di: { A: '300000000000000031', B: 'not an id', C: 5 } }, b: { ro: 'A', di: null }, c: null, d: { di: ['300000000000000032'] } },
+      archive: { e: { teams: [{ ro: ['E'] }, null] }, f: { teams: 'none' }, g: null },
+    }
+    const { ids, names } = namedIn(all)
+    expect([...names].sort()).toEqual(['A', 'E'])
+    expect([...ids]).toEqual(['300000000000000031', '300000000000000032'])
+    expect(namedIn(undefined)).toEqual({ ids: new Set(), names: new Set() })
+    expect(namedIn({})).toEqual({ ids: new Set(), names: new Set() })
   })
 })
 
@@ -498,6 +629,6 @@ describe('grants', () => {
     expect((await call('granted', 'GET', '/deathwatch/data')).status).toBe(403) // refusal now cached
     await call('commander', 'POST', '/deathwatch/grants', { discordId: USERS.granted.id })
     expect((await call('granted', 'GET', '/deathwatch/data')).status).toBe(200)
-    expect((await call('granted', 'GET', '/deathwatch/me')).body).toEqual({ access: true, watchCommander: false, deathwatchCommand: false })
+    expect((await call('granted', 'GET', '/deathwatch/me')).body).toEqual({ access: true, watchCommander: false, deathwatchCommand: false, roles: ['deployment'] })
   })
 })

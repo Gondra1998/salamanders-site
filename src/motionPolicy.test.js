@@ -38,6 +38,8 @@ const AUTHORED_DURATION_FILES = [
   'components/roster/RosterBranch.vue',
   'components/roster/RosterMember.vue',
   'components/deathwatch/armour/ArmourView.vue',
+  // the slow fade from the Deathwatch boot screen onto the page
+  'components/deathwatch/DeathwatchBoot.vue',
 ]
 // The only animations allowed to loop forever: the Deathwatch drift and flicker, the Archive gate's unsealing
 // glow, and a spinner. A line that says `infinite` must name one of them (so dw-pulse and dw-gate-pulse, which
@@ -286,7 +288,7 @@ describe('the motion rules check', () => {
     const everything = walk(srcDir).filter((f) => !SKIPPED.includes(f)).sort()
     expect(expand(SWEPT)).toEqual(everything)
     // and the depth is real: the app shell, a deep page, and the skeleton components are all in
-    for (const f of ['App.vue', 'views/deathwatch/pages/manage/checks.vue', 'components/deathwatch/skeleton/SkTable.vue']) {
+    for (const f of ['App.vue', 'views/deathwatch/pages/administratum/checks.vue', 'components/deathwatch/skeleton/SkTable.vue']) {
       expect(everything).toContain(f)
     }
   })

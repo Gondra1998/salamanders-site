@@ -146,8 +146,8 @@ function cancel() {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.8rem;
-  color: #c3d0c6;
+  font-size: var(--text-sm);
+  color: var(--color-pewter);
 }
 .pe-form {
   display: grid;
@@ -157,28 +157,33 @@ function cancel() {
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.58rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .pe input,
 .pe textarea {
-  background: rgba(5, 10, 8, 0.7);
+  background: color-mix(in srgb, var(--color-obsidian) 70%, transparent);
   border: 1px solid var(--color-ash);
   color: var(--color-bone);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.4rem 0.5rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 .pe button {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: max(0.68rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-bone);
   background: transparent;
   border: 1px solid var(--color-ash-2);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.35rem 0.6rem;
   cursor: pointer;
   transition: transform var(--dur-press) var(--ease-forge);
@@ -199,6 +204,6 @@ function cancel() {
 .pe-error {
   margin-top: 0.4rem;
   color: var(--color-ember);
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
 }
 </style>

@@ -139,7 +139,7 @@ describe('Companies with the roster: everyone else', () => {
     expect(auth.signIn).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the stories and chips, with no bars and no error, when the public roster is unavailable (Review Focus 4)', async () => {
+  it('keeps the stories and chips, with no bars and no error, when the public roster is unavailable', async () => {
     api.getPublicRoster.mockRejectedValue(apiError(503, 'The roster is not available yet. Try again.'))
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const w = await render()

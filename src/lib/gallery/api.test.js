@@ -7,11 +7,13 @@ import {
   listMine,
   listReview,
   listEvents,
+  listTakedowns,
   submitArt,
   removeItem,
   approve,
   reject,
   hide,
+  eraseFile,
 } from './api'
 
 const TOKEN = 'tok-invented-1'
@@ -39,6 +41,7 @@ describe('the reads', () => {
     ['listMine', () => listMine(TOKEN), '/gallery/mine'],
     ['listReview', () => listReview(TOKEN), '/gallery/review'],
     ['listEvents', () => listEvents(TOKEN), '/gallery/events'],
+    ['listTakedowns', () => listTakedowns(TOKEN), '/gallery/takedowns'],
   ])('%s: GETs its route with the token in a header, never in the address, and never from the HTTP cache', async (_name, call, path) => {
     fetchMock.mockResolvedValue(json({ ok: 1 }))
     expect(await call()).toEqual({ ok: 1 })
@@ -188,10 +191,22 @@ describe('the actions on an item', () => {
     expect(headersOf(init)).toEqual({ Authorization: `Bearer ${TOKEN}` })
   })
 
+  it('eraseFile: POSTs with no body and answers null for the empty reply', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    expect(await eraseFile('77', TOKEN)).toBeNull()
+    const [url, init] = sent()
+    expect(url).toBe(`${API_BASE}/gallery/items/77/erase`)
+    expect(init).toMatchObject({ method: 'POST', cache: 'no-store' })
+    expect(init.body).toBeUndefined()
+    expect(headersOf(init)).toEqual({ Authorization: `Bearer ${TOKEN}` })
+  })
+
   it('URL-encodes the id', async () => {
     fetchMock.mockImplementation(async () => json({}))
     await approve('a/b?c', TOKEN)
     await removeItem('a/b?c', TOKEN)
+    await eraseFile('a/b?c', TOKEN)
+    expect(fetchMock.mock.calls[2][0]).toBe(`${API_BASE}/gallery/items/a%2Fb%3Fc/erase`)
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/gallery/items/a%2Fb%3Fc/approve`)
     expect(fetchMock.mock.calls[1][0]).toBe(`${API_BASE}/gallery/items/a%2Fb%3Fc`)
   })
@@ -201,6 +216,7 @@ describe('the actions on an item', () => {
     ['approve', () => approve('77', TOKEN)],
     ['reject', () => reject('77', 'why', TOKEN)],
     ['hide', () => hide('77', 'why', TOKEN)],
+    ['eraseFile', () => eraseFile('77', TOKEN)],
   ])('%s: throws the server\'s message with the status on a 409', async (_name, call) => {
     fetchMock.mockResolvedValue(json({ error: 'That item has already moved on.' }, 409))
     const err = await call().catch((e) => e)

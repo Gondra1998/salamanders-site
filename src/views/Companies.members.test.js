@@ -43,13 +43,21 @@ const render = async (opts) => {
   await settle(w, opts)
   return w
 }
+// jsdom has no scrolling: the tests record where each scroll went, and how, and put the prototype back after.
+const savedScroll = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+const savedScrollBy = Object.getOwnPropertyDescriptor(window, 'scrollBy')
+const restore = (target, key, saved) => (saved ? Object.defineProperty(target, key, saved) : delete target[key])
+
 // The page polls on a timer; unmounting clears it between tests.
 afterEach(() => {
   mounted.splice(0).forEach((w) => w.unmount())
   vi.unstubAllEnvs()
+  restore(Element.prototype, 'scrollIntoView', savedScroll)
+  restore(window, 'scrollBy', savedScrollBy)
 })
 
 let scrolled
+let behaviours
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.resetAllMocks()
@@ -58,7 +66,11 @@ beforeEach(() => {
   api.getInfirmary.mockResolvedValue(fixture.infirmary)
   api.getPublicRoster.mockResolvedValue(PUBLIC)
   scrolled = []
-  Element.prototype.scrollIntoView = vi.fn(function () { scrolled.push(this) })
+  behaviours = []
+  Element.prototype.scrollIntoView = function (options) {
+    scrolled.push(this)
+    behaviours.push(options?.behavior)
+  }
   window.scrollBy = vi.fn()
   window.history.replaceState(null, '', '/companies')
 })
@@ -199,7 +211,7 @@ describe('Companies: the Infirmary', () => {
     expect(w.find('.rs-high-command').exists()).toBe(true)
   })
 
-  it('goes back to the order first when a chip is used while it is open, then scrolls (Review Focus 5)', async () => {
+  it('goes back to the order first when a chip is used while it is open, then scrolls', async () => {
     const w = await render()
     await w.find('button.rs-infirmary-toggle').trigger('click')
     await flushPromises()
@@ -222,7 +234,7 @@ describe('Companies: the Infirmary', () => {
   })
 })
 
-describe('Companies: who does not get the member tools (Review Focus 3)', () => {
+describe('Companies: who does not get the member tools', () => {
   it('a signed-in account without the Legion role sees the public view: no toolbar, no Muster, counts instead of ladders', async () => {
     api.getRoster.mockRejectedValue(apiError(403, 'The roster is open to the XVIIIth Legion.'))
     const w = await render({ member: false })
@@ -478,9 +490,8 @@ describe('Companies: Find me, Expand all, status links and deep links', () => {
       const w = await render()
       await w.find('.rs-find').trigger('click')
       await flushPromises()
-      const used = Element.prototype.scrollIntoView.mock.calls.map(([options]) => options.behavior)
-      expect(used.length).toBeGreaterThan(0)
-      expect(used.every((b) => b === behavior)).toBe(true)
+      expect(behaviours.length).toBeGreaterThan(0)
+      expect(behaviours.every((b) => b === behavior)).toBe(true)
     } finally {
       delete window.matchMedia
     }

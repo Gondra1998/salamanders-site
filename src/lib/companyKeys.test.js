@@ -8,6 +8,7 @@ import {
   MUSTER_ID,
   articleIdOfBranch,
   branchKeyOfArticle,
+  fragmentId,
   legacyRosterTarget,
 } from './companyKeys'
 
@@ -80,6 +81,24 @@ describe('articleIdOfBranch and branchKeyOfArticle', () => {
   })
 })
 
+describe('fragmentId', () => {
+  it.each([
+    ['#third', 'third'],
+    ['#company-3', 'company-3'],
+    ['#company%2D3', 'company-3'], // encoded
+    ['#high-command', 'high-command'],
+  ])('reads %s as %j', (hash, id) => {
+    expect(fragmentId(hash)).toBe(id)
+  })
+
+  it.each([['#access_token=abc&expires_in=3600'], ['#a=b'], ['#'], [''], ['#%E0%A4%A'], [null], [undefined]])(
+    'takes %j as no id, without throwing (the sign-in callback, nothing, a bad escape)',
+    (hash) => {
+      expect(fragmentId(hash)).toBeNull()
+    },
+  )
+})
+
 describe('legacyRosterTarget', () => {
   const go = (hash, query = {}) => legacyRosterTarget({ hash, query })
 
@@ -104,5 +123,9 @@ describe('legacyRosterTarget', () => {
 
   it('reads an encoded key', () => {
     expect(go('#company%2D3').hash).toBe('#third')
+  })
+
+  it('takes a route with no hash at all', () => {
+    expect(go(undefined)).toEqual({ path: '/companies', hash: '', query: {} })
   })
 })

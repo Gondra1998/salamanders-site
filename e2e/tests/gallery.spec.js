@@ -29,7 +29,7 @@ test.describe('Reliquarium', () => {
 
   test('a member sees a clip posted in the channel, and it loads in place', async ({ page, request }) => {
     // WebM: Playwright's open-source Chromium may not decode the H.264 in clip.mp4.
-    const posted = await request.post(`${MOCK}/__test/channel/post`, { data: { token: MEMBER, content: CLIP_TITLE, attachments: ['clip.webm'] } })
+    const posted = await request.post(`${MOCK}/__test/channel/post`, { data: { token: MEMBER, content: `#gameplay ${CLIP_TITLE}`, attachments: ['clip.webm'] } })
     expect(posted.status()).toBe(200)
     await expect
       .poll(

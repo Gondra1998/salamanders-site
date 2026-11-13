@@ -4,14 +4,14 @@ import {
   archiveDoc,
   bestMission,
   calc,
-  discordText,
   findMission,
   honours,
+  idsOf,
+  kd,
   nextOpenSlot,
   parseBackup,
   progression,
-  renameInTeam,
-  renamePlan,
+  slotIds,
   teamStats,
   withMission,
 } from './tracker'
@@ -55,6 +55,9 @@ describe('calc', () => {
     expect(b1.o).toBe(1) // b1's objective for Alpha does not count for b1
     expect(R.ts[0].cc.Sniper).toBe(1)
     expect(R.home).toEqual({ a1: 1, a2: 1, b1: 2 })
+    // Class K/D input: every entry counts (Beta's b1, with no kills, too).
+    expect(R.C.Tactical).toMatchObject({ n: 4, k: 150, i: 1 })
+    expect([kd(150, 4), kd(50, 0)]).toEqual(['37,5', '50']) // no incaps: the kills themselves
   })
 
   it('finds the data checks and the fallen', () => {
@@ -62,6 +65,18 @@ describe('calc', () => {
     expect(R.CK.nd).toEqual(['Beta W1 O1']) // played, no kills entered
     expect(R.CK.sg).toBe(0)
     expect(R.kia.get('a2')).toBe(2)
+  })
+
+  it('finds a player on two rosters, a name on no roster, play after KIA and short rosters', () => {
+    const t = teams()
+    t[1].ro.push('b1') // b1 now on Alpha's roster as well as Beta's
+    t[2].m.push([2, 2, 1, 0, 0, 0, 0, '', [row('Brother Ashkar')]])
+    t[2].m.push([3, 1, 1, 0, 0, 0, 0, '', [row('Brother Ashkarr'), row('a2')]])
+    const CK = calc(t).CK
+    expect(CK.twice).toEqual([{ label: 'b1: Alpha, Beta', t: 2 }])
+    expect(CK.stray.map((x) => x.label)).toEqual(['Brother Ashkar in Beta W2 O2', 'Brother Ashkarr in Beta W3 O1'])
+    expect(CK.afterKia).toEqual([{ label: 'a2 (KIA W2) in Beta W3 O1', t: 2, w: 3, o: 1 }])
+    expect(CK.short.map((x) => x.label)).toEqual(['Beta (1/3)'])
   })
 
   it('moves a team by its rank change since last week', () => {
@@ -157,37 +172,9 @@ describe('the views', () => {
     expect(bestMission(WEIGHTS).total).toBe(500 + 200 + 100 + 75 + 100)
     expect(bestMission({ ...WEIGHTS, gs: 0 }).parts[1]).toEqual(['3 Guardian Relics', 150])
   })
-
-  it('writes the standings for Discord', () => {
-    // Local noon: discordText prints the viewer's own date, and an ISO date string is midnight UTC (the day before, west of it).
-    const text = discordText(calc(teams()), new Date(2026, 9, 24, 12))
-    expect(text).toContain('(as of 24 Oct 2026)')
-    expect(text).toContain('• Event Champion: Alpha (1.275)')
-  })
 })
 
 describe('Manage', () => {
-  it('renames a player everywhere in a team', () => {
-    const d = renameInTeam(teams()[1], 'a2', 'x')
-    expect(d.ro).toEqual(['a1', 'x'])
-    expect(d.kw).toEqual({ x: 2 })
-    expect(d.m[0][8][1][0]).toBe('x')
-  })
-
-  it('plans a rename across the live event and the archive', () => {
-    const t = teams()
-    const archive = { e1: { name: 'Old', teams: [t[2]] } }
-    expect(renamePlan(t, archive, 'b1', 'z')).toMatchObject({ teams: [1, 2], archives: ['e1'], entries: 3 })
-  })
-
-  it('refuses a rename that would merge two players in one mission or across rosters', () => {
-    const t = teams()
-    expect(renamePlan(t, {}, 'a1', 'b1').error).toMatch(/both appear in Alpha W2 O1/)
-    expect(renamePlan(t, {}, 'a2', 'b1').error).toMatch(/roster of Beta/)
-    expect(renamePlan(t, {}, 'A1', 'q').error).toBe('No entries for “A1”. Did you mean “a1”?')
-    expect(renamePlan(t, {}, 'a1', 'a1').error).toBe('The names are identical.')
-  })
-
   it('reads a backup and refuses a damaged one', () => {
     const P = parseBackup({ exported: '2026-10-01T00:00:00Z', scoring: { base: '400' }, teams: Object.values(teams()) })
     expect(P.teams).toHaveLength(2)
@@ -212,6 +199,26 @@ describe('Manage', () => {
     const a = archiveDoc(teams(), WEIGHTS, 'Tour', new Date('2026-10-01T00:00:00Z'))
     expect(a.sum).toEqual({ champ: 'Alpha', pts: 1275, nt: 2, nm: 3 })
     expect(a.teams[1].ki).toEqual([])
+  })
+
+  it('keeps the Discord id each slot was filled with, through the archive and a backup, renamed or not', () => {
+    const A = '300000000000000041'
+    const B = '300000000000000042'
+    const deployment = [{ id: A, name: 'a1', avatar: null }]
+    const before = { di: { a2: B, gone: '300000000000000043' } }
+    // The Deployment brother of that name, else the id kept from before; a typed name with neither has none.
+    expect(slotIds(['a1', 'a2', 'typed'], deployment, before)).toEqual({ a1: A, a2: B })
+    expect(slotIds(['a1'], [], undefined)).toEqual({})
+    const ts = teams()
+    ts[1].di = { a1: A, a2: B, x: 'no id', y: 7 }
+    // Only ids of names on the roster count; the archive and a backup keep the Discord ids.
+    expect(calc(ts).ids).toEqual(new Map([['a1', A], ['a2', B]]))
+    expect(archiveDoc(ts, WEIGHTS, 'Tour').teams[0].di).toEqual({ a1: A, a2: B })
+    expect(archiveDoc(ts, WEIGHTS, 'Tour').teams[1].di).toEqual({})
+    expect(parseBackup({ teams: Object.values(ts) }).teams[0].di).toEqual({ a1: A, a2: B })
+    expect(idsOf({ di: [A] })).toEqual([])
+    expect(idsOf({ di: null })).toEqual([])
+    expect(idsOf(null)).toEqual([])
   })
 
   it('puts a mission in its slot and finds the next open one', () => {

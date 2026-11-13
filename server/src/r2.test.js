@@ -106,6 +106,9 @@ describe('configured', () => {
     expect(err.message).toBe('R2 is not configured.')
     expect(() => r2.presignGet('k')).toThrow(R2Error)
     expect(() => r2.presignGet('k')).toThrow('R2 is not configured.')
+    const gone = await r2.remove('k').catch((e) => e)
+    expect(gone).toBeInstanceOf(R2Error)
+    expect(gone.message).toBe('R2 is not configured.')
     expect(calls).toHaveLength(0)
   })
 })
@@ -311,6 +314,93 @@ describe('put', () => {
   ])('refuses bad upload headers %o without touching the network', async (opts, message) => {
     const { r2, calls } = make()
     await expect(r2.put('k', new Uint8Array(1), opts)).rejects.toThrow(new TypeError(message))
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe('remove', () => {
+  const DELETE_SIGNED = 'host;x-amz-content-sha256;x-amz-date'
+
+  it('deletes one object, header-signed, with no body', async () => {
+    const { r2, calls } = make({ response: () => new Response(null, { status: 204 }) })
+    await expect(r2.remove('clips/1/2.mp4')).resolves.toBeUndefined()
+    expect(calls).toHaveLength(1)
+    const [url, init] = calls[0]
+    expect(url).toBe('https://acct0123.r2.cloudflarestorage.com/relics/clips/1/2.mp4')
+    expect(init.method).toBe('DELETE')
+    expect(init.body).toBeUndefined()
+    const canonical = canonicalRequest({
+      method: 'DELETE',
+      path: '/relics/clips/1/2.mp4',
+      query: '',
+      headers: { host: 'acct0123.r2.cloudflarestorage.com', 'x-amz-content-sha256': 'UNSIGNED-PAYLOAD', 'x-amz-date': AMZ_DATE },
+      payloadHash: 'UNSIGNED-PAYLOAD',
+    })
+    expect(init.headers).toEqual({
+      'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
+      'x-amz-date': AMZ_DATE,
+      Authorization: `AWS4-HMAC-SHA256 Credential=KEYID0123/20261102/auto/s3/aws4_request, SignedHeaders=${DELETE_SIGNED}, Signature=${sign(canonical)}`,
+    })
+  })
+
+  it('signs the encoded key path, so it deletes the object put and presignGet name', async () => {
+    const { r2, calls } = make()
+    await r2.remove('art/a b+c/é.png')
+    expect(calls[0][0]).toBe('https://acct0123.r2.cloudflarestorage.com/relics/art/a%20b%2Bc/%C3%A9.png')
+    expect(calls[0][1].headers.Authorization).toContain(
+      sign(
+        canonicalRequest({
+          method: 'DELETE',
+          path: '/relics/art/a%20b%2Bc/%C3%A9.png',
+          query: '',
+          headers: { host: 'acct0123.r2.cloudflarestorage.com', 'x-amz-content-sha256': 'UNSIGNED-PAYLOAD', 'x-amz-date': AMZ_DATE },
+          payloadHash: 'UNSIGNED-PAYLOAD',
+        }),
+      ),
+    )
+  })
+
+  it.each([200, 204, 404])('resolves on %i: an object already gone is what was asked for', async (status) => {
+    const reply = new Response(status === 204 ? null : '<x/>', { status })
+    const { r2 } = make({ response: () => reply })
+    await expect(r2.remove('k')).resolves.toBeUndefined()
+    if (status !== 204) await expect(reply.text()).rejects.toThrow()
+  })
+
+  it.each([
+    [401, 'R2 refused the credentials (401).'],
+    [403, 'R2 refused the credentials (403).'],
+    [400, 'R2 refused the delete (400).'],
+    [409, 'R2 refused the delete (409).'],
+    [503, 'R2 refused the delete (503).'],
+  ])('throws R2Error naming a %i as %j, with no key, secret or bucket in it, and lets go of the reply', async (status, message) => {
+    const reply = new Response(`<Error>${SETTINGS.secretAccessKey}</Error>`, { status })
+    const { r2 } = make({ response: () => reply })
+    const err = await r2.remove('k').catch((e) => e)
+    expect(err).toBeInstanceOf(R2Error)
+    expect(err.status).toBe(status)
+    expect(err.message).toBe(message)
+    for (const value of Object.values(SETTINGS)) expect(err.message).not.toContain(value)
+    await expect(reply.text()).rejects.toThrow()
+  })
+
+  it('throws R2Error with status 0 when R2 is unreachable, dropping the original error', async () => {
+    const { r2 } = make({
+      fetchImpl: async () => {
+        throw new TypeError(`fetch failed ${SETTINGS.secretAccessKey}`)
+      },
+    })
+    const err = await r2.remove('k').catch((e) => e)
+    expect(err).toBeInstanceOf(R2Error)
+    expect(err.status).toBe(0)
+    expect(err.message).toBe('R2 is unreachable.')
+    expect(err.cause).toBeUndefined()
+  })
+
+  it.each(['', null, undefined, 7, ['k']])('refuses a key of %j before any request: an empty one would name the bucket itself', async (key) => {
+    const { r2, calls } = make()
+    await expect(r2.remove(key)).rejects.toThrow(TypeError)
+    await expect(r2.remove(key)).rejects.toThrow('remove: the key must be a non-empty string')
     expect(calls).toHaveLength(0)
   })
 })

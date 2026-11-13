@@ -17,6 +17,7 @@ describe('RosterBranch variant="embedded"', () => {
     expect(w.find('.rs-sigil').exists()).toBe(false)
     expect(w.find('h2').exists()).toBe(false)
     expect(w.find('.rs-title').text()).toBe('Ranks')
+    expect(w.find('.rs-title').element.tagName).toBe('H3') // under the company's own h2
     expect(w.find('.rs-head h3').text()).toBe('Captain')
     expect(w.findAll('.rs-head li.rs-member').length).toBeGreaterThan(0)
     expect(w.find('.rs-tail').text()).toContain(String(branch('company-3').count))
@@ -53,6 +54,7 @@ describe('RosterBranch variant="embedded"', () => {
     expect(w.find('.rs-chev').exists()).toBe(false)
     expect(w.find('.rs-body').exists()).toBe(false)
     expect(w.find('.rs-title').text()).toBe('Ranks')
+    expect(w.find('.rs-title').element.tagName).toBe('H3')
     expect(w.find('article').classes()).toContain('rs-static')
   })
 
@@ -74,10 +76,16 @@ describe('RosterBranch: the other variants are unchanged', () => {
   it('the default variant still has its sigil, h2 title and ladder', () => {
     const w = mount(RosterBranch, { props: { branch: branch('company-3'), open: false } })
     expect(w.find('.rs-sigil').text()).toBe('III')
-    expect(w.find('h2').text()).toBe('3rd Battle Company')
+    expect(w.find('h2.rs-title').text()).toBe('3rd Battle Company')
     expect(w.find('article').classes()).toContain('rs-branch')
     expect(w.find('article').classes()).not.toContain('rs-embedded')
     expect(w.find('.rs-ladder').exists()).toBe(true)
+  })
+
+  it('the default variant names a branch with nothing to open as plain text in its h2', () => {
+    const w = mount(RosterBranch, { props: { branch: branch('venerable-dreadnoughts'), open: false } })
+    expect(w.find('button').exists()).toBe(false)
+    expect(w.find('h2.rs-title').text()).toBe(branch('venerable-dreadnoughts').label)
   })
 
   it('unassigned is still not a branch, and has no data-branch', () => {

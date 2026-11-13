@@ -6,7 +6,8 @@ vi.mock('../lib/deathwatch/api', () => ({ getMe: vi.fn() }))
 vi.mock('../lib/deathwatch/fixture', () => ({ loadFixture: vi.fn() }))
 import { getMe } from '../lib/deathwatch/api'
 import { loadFixture } from '../lib/deathwatch/fixture'
-import { useDeathwatch } from './deathwatch'
+import { ME_TIMEOUT_MS, useDeathwatch } from './deathwatch'
+import { ROLES } from '../lib/deathwatch/areas'
 
 const apiError = (status) => Object.assign(new Error('nope'), { status })
 const deferred = () => {
@@ -29,23 +30,23 @@ beforeEach(() => {
 
 describe('deathwatch store', () => {
   it('starts idle, not a commander and without Deathwatch Command', () => {
-    expect(useDeathwatch()).toMatchObject({ status: 'idle', commander: false, command: false })
+    expect(useDeathwatch()).toMatchObject({ status: 'idle', commander: false, command: false, roles: [] })
   })
 
   it('does not keep an earlier clearance while it checks again, not even for an instant', () => {
     const s = useDeathwatch()
-    s.$patch({ status: 'allowed', commander: true, command: true })
+    s.$patch({ status: 'allowed', commander: true, command: true, roles: ['legion'] })
     getMe.mockReturnValue(deferred().promise)
     s.load('tok') // not awaited: the state straight after the call is what a render would see
-    expect(s).toMatchObject({ status: 'checking', commander: false, command: false })
+    expect(s).toMatchObject({ status: 'checking', commander: false, command: false, roles: [] })
   })
 
   it('sends someone with no token to sign in, without asking the server', async () => {
     const s = useDeathwatch()
     for (const token of [null, undefined, '']) {
-      s.$patch({ commander: true, command: true })
+      s.$patch({ commander: true, command: true, roles: ['legion'] })
       await s.load(token)
-      expect(s, String(token)).toMatchObject({ status: 'signin', commander: false, command: false })
+      expect(s, String(token)).toMatchObject({ status: 'signin', commander: false, command: false, roles: [] })
     }
     expect(getMe).not.toHaveBeenCalled()
   })
@@ -115,6 +116,48 @@ describe('deathwatch store', () => {
       await s.load('t')
       expect(s, JSON.stringify(body)).toMatchObject({ command: false })
     }
+  })
+
+  it('keeps the standings the server names, strings only, none for someone refused or a list that is none, and every one from a server from before them', async () => {
+    const s = useDeathwatch()
+    const cases = [
+      [{ access: true, roles: ['legion', 'deployment'] }, ['legion', 'deployment']],
+      [{ access: true, roles: ['legion', 7, null, { a: 1 }, ['x'], 'accolade'] }, ['legion', 'accolade']],
+      [{ access: true, roles: 'legion' }, []],
+      [{ access: true, roles: { 0: 'legion', length: 1 } }, []],
+      [{ access: true }, ROLES.map(([r]) => r)],
+      [{ access: true, roles: null }, []],
+      [{ access: false, roles: ['legion'] }, []],
+      [{ access: false }, []],
+    ]
+    for (const [body, roles] of cases) {
+      getMe.mockResolvedValue(body)
+      await s.load('t')
+      expect(s.roles, JSON.stringify(body)).toEqual(roles)
+    }
+  })
+
+  it('drops the standings at once when a new check starts, and on reset', async () => {
+    const s = useDeathwatch()
+    getMe.mockResolvedValue({ access: true, roles: ['legion'] })
+    await s.load('t')
+    const d = deferred()
+    getMe.mockReturnValueOnce(d.promise)
+    const done = s.load('t')
+    await tick()
+    expect(s.roles).toEqual([])
+    d.resolve({ access: true, roles: ['emissary'] })
+    await done
+    expect(s.roles).toEqual(['emissary'])
+    s.reset()
+    expect(s.roles).toEqual([])
+  })
+
+  it('takes the standings of a fixture scene', async () => {
+    const s = useDeathwatch()
+    loadFixture.mockResolvedValue({ _fixture: true, scene: 'legion', status: 'allowed', commander: false, command: false, roles: ['legion'] })
+    await s.load(null)
+    expect(s.roles).toEqual(['legion'])
   })
 
   it('does not stay a commander after a failed check', async () => {
@@ -191,14 +234,14 @@ describe('deathwatch store', () => {
 
   // Any mix of loads and resets, their answers landing in any order: only the last call started may leave a mark.
   const OUTCOMES = [
-    { reply: { access: true, watchCommander: true }, state: { status: 'allowed', commander: true, command: true } },
-    { reply: { access: true, deathwatchCommand: true }, state: { status: 'allowed', commander: false, command: true } },
-    { reply: { access: true }, state: { status: 'allowed', commander: false, command: false } },
-    { reply: { access: false }, state: { status: 'denied', commander: false, command: false } },
-    { error: apiError(401), state: { status: 'signin', commander: false, command: false } },
-    { error: apiError(503), state: { status: 'unavailable', commander: false, command: false } },
+    { reply: { access: true, watchCommander: true, roles: [] }, state: { status: 'allowed', commander: true, command: true, roles: [] } },
+    { reply: { access: true, deathwatchCommand: true, roles: [] }, state: { status: 'allowed', commander: false, command: true, roles: [] } },
+    { reply: { access: true, roles: ['legion'] }, state: { status: 'allowed', commander: false, command: false, roles: ['legion'] } },
+    { reply: { access: false }, state: { status: 'denied', commander: false, command: false, roles: [] } },
+    { error: apiError(401), state: { status: 'signin', commander: false, command: false, roles: [] } },
+    { error: apiError(503), state: { status: 'unavailable', commander: false, command: false, roles: [] } },
   ]
-  const IDLE = { status: 'idle', commander: false, command: false }
+  const IDLE = { status: 'idle', commander: false, command: false, roles: [] }
 
   it('lets only the last load or reset leave a mark, whatever order the answers arrive in', async () => {
     const call = fc.oneof(
@@ -267,5 +310,57 @@ describe('deathwatch store', () => {
     d.resolve({ _fixture: true, scene: 'commander', status: 'allowed', commander: true })
     await p
     expect(s).toMatchObject({ status: 'idle', commander: false })
+  })
+
+  it('leaves no timer behind once the server has answered', async () => {
+    vi.useFakeTimers()
+    try {
+      getMe.mockResolvedValue({ access: true })
+      await useDeathwatch().load('tok')
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('waits ten seconds for the server', () => {
+    expect(ME_TIMEOUT_MS).toBe(10_000)
+  })
+
+  it('drops an answer that comes after the time limit: "Try again" asks anew', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = useDeathwatch()
+      const slow = deferred()
+      getMe.mockReturnValueOnce(slow.promise)
+      const p = s.load('tok')
+      await vi.advanceTimersByTimeAsync(ME_TIMEOUT_MS)
+      await p
+      slow.resolve({ access: true, watchCommander: true, deathwatchCommand: true })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(s).toMatchObject({ status: 'unavailable', commander: false, command: false })
+
+      getMe.mockResolvedValueOnce({ access: true })
+      await s.load('tok')
+      expect(s).toMatchObject({ status: 'allowed', commander: false, command: false })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('counts a server that does not answer within the time limit as out of reach', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = useDeathwatch()
+      getMe.mockReturnValue(deferred().promise) // never answers
+      const p = s.load('tok')
+      await vi.advanceTimersByTimeAsync(ME_TIMEOUT_MS - 1)
+      expect(s.status).toBe('checking')
+      await vi.advanceTimersByTimeAsync(1)
+      await p
+      expect(s).toMatchObject({ status: 'unavailable', commander: false, command: false })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

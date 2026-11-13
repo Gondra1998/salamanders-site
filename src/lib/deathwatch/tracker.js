@@ -63,7 +63,7 @@ export function calc(teams, custom) {
   const CK = { nd: [], sg: 0 }
   const dupes = {}
   const P = Object.create(null)
-  const C = Object.fromEntries(CLASSES.map((c) => [c, { n: 0, k: 0, kn: 0, g: 0 }]))
+  const C = Object.fromEntries(CLASSES.map((c) => [c, { n: 0, k: 0, kn: 0, i: 0 }]))
   let none = 0
   let cur = 1
   const ts = src
@@ -112,7 +112,7 @@ export function calc(teams, custom) {
         const c = Object.hasOwn(C, r[1]) ? C[r[1]] : null
         if (c) {
           c.n++
-          c.g += g
+          c.i += r[9] // every entry's incaps, for the class's K/D
           if (r[3] > 0) {
             c.kn++
             c.k += r[3]
@@ -140,6 +140,8 @@ export function calc(teams, custom) {
   CK.du = Object.values(dupes).filter((a) => a.length > 1)
   CK.slots = ts.flatMap((t) => t.m.filter((m) => (+m[4] || 0) + (+m[6] || 0) > SLOTS).map((m) => `${t.n} W${m[0]} O${m[1]}`))
   const kia = new Map(src.flatMap((t) => (t.ki ?? []).filter((n) => (t.ro ?? []).includes(n)).map((n) => [n, +(t.kw ?? {})[n] || 0])))
+  Object.assign(CK, moreChecks(ts, home, kia))
+  const ids = new Map(src.flatMap((t) => idsOf(t).filter(([n]) => (t.ro ?? []).includes(n))))
   return {
     S,
     ts: ts.sort((a, b) => a.r - b.r),
@@ -151,7 +153,48 @@ export function calc(teams, custom) {
     CK,
     names: [...new Set([...Object.keys(home), ...Object.keys(P)])],
     kia,
+    ids,
   }
+}
+
+/**
+ * A Kill Team's slots' Discord ids, as Manage saves them (`di`): for each name, the Deployment brother of that name,
+ * else the one the team was filled with before (renamed since, or no longer deployed); a typed name with neither
+ * has none. → { name: id }.
+ */
+export function slotIds(names, deployment, team) {
+  const before = Object.fromEntries(idsOf(team))
+  return Object.fromEntries(names.flatMap((n) => [[n, deployment.find((m) => m.name === n)?.id ?? before[n]]]).filter(([, id]) => id))
+}
+
+/** A Kill Team's Discord ids, as Manage filled its slots (`di`, name → id): → [[name, id]], Discord ids only. */
+export const idsOf = (t) => (t?.di !== null && typeof t?.di === 'object' && !Array.isArray(t.di) ? Object.entries(t.di).filter(([, id]) => typeof id === 'string' && /^\d{17,20}$/.test(id)) : [])
+
+/**
+ * The checks that point at what to fix: each finding is { label } and where it is, a team (t: its id), a mission
+ * (t, w, o). → { twice, stray, afterKia, short }.
+ */
+function moreChecks(ts, home, kia) {
+  const at = (t, m) => ({ t: t.id, w: m[0], o: m[1] })
+  const rosters = Object.create(null)
+  for (const t of ts) for (const p of new Set(t.ro)) (rosters[p] ??= []).push(t)
+  const twice = Object.entries(rosters)
+    .filter(([, on]) => on.length > 1)
+    .map(([p, on]) => ({ label: `${p}: ${on.map((t) => t.n).join(', ')}`, t: on[1].id }))
+  const stray = []
+  const afterKia = []
+  for (const t of ts)
+    for (const m of t.m) {
+      if (!isPlayed(m)) continue
+      for (const [p] of m[8] ?? []) {
+        if (!p) continue
+        if (!(p in home)) stray.push({ label: `${p} in ${t.n} W${m[0]} O${m[1]}`, ...at(t, m) })
+        const fell = kia.get(p)
+        if (fell && m[0] > fell) afterKia.push({ label: `${p} (KIA W${fell}) in ${t.n} W${m[0]} O${m[1]}`, ...at(t, m) })
+      }
+    }
+  const short = ts.filter((t) => t.ro.length < 3).map((t) => ({ label: `${t.n} (${t.ro.length}/3)`, t: t.id }))
+  return { twice, stray, afterKia, short }
 }
 
 /** "KIA" or "KIA W2" for a fallen player, else ''. */
@@ -289,88 +332,13 @@ export function progression(R, mode) {
   }
 }
 
-/** The standings as a Discord message (a code block, plus the honour roll if it still fits in 2000 characters). */
-export function discordText(R, date = new Date()) {
-  const d = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-  const nw = Math.min(12, Math.max(9, ...R.ts.map((t) => t.n.length)))
-  const g = (x) => Math.round(x).toLocaleString('de-DE')
-  const head = `${'#'.padEnd(2)} ${'Kill Team'.padEnd(nw)} ${['W1', 'W2', 'W3', 'W4'].map((x) => x.padStart(5)).join(' ')} ${'Total'.padStart(7)}`
-  const rows = R.ts.map((t) =>
-    `${String(t.r).padEnd(2)} ${t.n.slice(0, nw).padEnd(nw)} ${t.wk.map((w) => g(w).padStart(5)).join(' ')} ${g(t.tot).padStart(7)} ${t.mv > 0 ? '▲' : t.mv < 0 ? '▼' : ''}`.trimEnd(),
-  )
-  const hl = [['MVP', 'mvp'], ['Executioner', 'k'], ['Terminator', 's'], ['Guardian Angel', 'v']]
-    .map(([label, k]) => {
-      const b = leaders(R.pl, k)
-      return b && `• ${label}: ${b.who.map((p) => p.n + (R.kia.has(p.n) ? ` (${kiaLabel(R, p.n)})` : '')).join(', ')} (${k === 'mvp' ? b.value.toFixed(1).replace('.', ',') : num(b.value)})`
-    })
-    .filter(Boolean)
-  const c = R.ts[0]
-  if (c && c.tot > 0) hl.unshift(`• Event Champion: ${c.n} (${num(c.tot)})`)
-  const text = `**🏆 Deathwatch Event – Standings** (as of ${d})\n\`\`\`\n${head}\n${rows.join('\n')}\n\`\`\``
-  const full = hl.length ? `${text}\n**Honour Roll**\n${hl.join('\n')}` : text
-  return full.length <= 2000 ? full : text
-}
-
 /** A number as the old site showed it: one decimal at most, German separators. */
 export const num = (n) => (typeof n === 'number' ? (Math.round(n * 10) / 10).toLocaleString('de-DE') : n)
 export const mvpText = (v) => v.toFixed(1).replace('.', ',')
+/** Kills per incap, as games show K/D: with no incaps, the kills themselves. */
+export const kd = (k, i) => num(k / Math.max(1, i))
 
 // ── Manage ────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** A team with `a` renamed to `b` everywhere: roster, KIA list and every mission row. */
-export function renameInTeam(t, a, b) {
-  const d = clone(t)
-  d.ro = [...new Set((d.ro ?? []).map((n) => (n === a ? b : n)))]
-  d.ki = [...new Set((d.ki ?? []).map((n) => (n === a ? b : n)))]
-  d.kw = Object.fromEntries(Object.entries(d.kw ?? {}).map(([n, w]) => [n === a ? b : n, w]))
-  for (const m of d.m ?? []) for (const r of m[8] ?? []) if (r[0] === a) r[0] = b
-  return d
-}
-
-/**
- * What renaming `a` to `b` would touch, live and archived. → { teams: [id], archives: [id], entries, existing
- * (b's entries), roster (a is on a live roster), error } where error says why it must not run.
- */
-export function renamePlan(teams, archive, a, b) {
-  if (!a || !b) return { error: 'Enter the current and the new name.' }
-  if (a === b) return { error: 'The names are identical.' }
-  const conflicts = []
-  let entries = 0
-  let existing = 0
-  const scan = (t, where) => {
-    let hit = false
-    for (const m of t.m ?? []) {
-      const rows = m[8] ?? []
-      if (rows.some((r) => r[0] === a) && rows.some((r) => r[0] === b)) conflicts.push(`${where}${t.n} W${m[0]} O${m[1]}`)
-      for (const r of rows) {
-        if (r[0] === a) {
-          entries++
-          hit = true
-        }
-        if (r[0] === b) existing++
-      }
-    }
-    return hit || (t.ro ?? []).includes(a)
-  }
-  const live = Object.values(teams ?? {})
-  const hitTeams = live.filter((t) => scan(t, ''))
-  const hitArchives = Object.entries(archive ?? {}).filter(([, ev]) => (ev.teams ?? []).map((t) => scan(t, `${ev.name}: `)).some(Boolean))
-  const plan = { teams: hitTeams.map((t) => t.id), archives: hitArchives.map(([k]) => k), entries, existing, roster: hitTeams.some((t) => t.ro?.includes(a)) }
-  if (!hitTeams.length && !hitArchives.length) {
-    const all = [...live, ...Object.values(archive ?? {}).flatMap((e) => e.teams ?? [])].flatMap((t) => [...(t.ro ?? []), ...(t.m ?? []).flatMap((m) => (m[8] ?? []).map((r) => r[0]))])
-    const near = all.find((x) => x && x.toLowerCase() === a.toLowerCase() && x !== a)
-    return { ...plan, error: `No entries for “${a}”.${near ? ` Did you mean “${near}”?` : ''}` }
-  }
-  if (conflicts.length) {
-    return { ...plan, error: `Can't merge: “${a}” and “${b}” both appear in ${conflicts.slice(0, 4).join(', ')}${conflicts.length > 4 ? ' …' : ''}. Fix those missions first.` }
-  }
-  const onA = live.filter((t) => t.ro?.includes(a)).map((t) => t.id)
-  const onB = live.filter((t) => t.ro?.includes(b))
-  if (onA.length && onB.some((t) => !onA.includes(t.id))) {
-    return { ...plan, error: `Can't merge: “${b}” is on the roster of ${onB.map((t) => t.n).join(', ')}, “${a}” on another roster.` }
-  }
-  return plan
-}
 
 const toNum = (x) => +x || 0
 
@@ -401,7 +369,7 @@ export function parseBackup(x) {
       rk,
       rows.map(([name, cls, ...nums]) => [name, cls, ...nums.map(toNum)]),
     ])
-    return { id: t.id, n: t.n, co: typeof t.co === 'string' ? t.co : COMPANIES[0], ro: t.ro.map(String), ki: Array.isArray(t.ki) ? t.ki.map(String) : [], kw, m }
+    return { id: t.id, n: t.n, co: typeof t.co === 'string' ? t.co : COMPANIES[0], ro: t.ro.map(String), ki: Array.isArray(t.ki) ? t.ki.map(String) : [], kw, di: Object.fromEntries(idsOf(t)), m }
   })
   let scoring = null
   if (x.scoring && typeof x.scoring === 'object') {
@@ -418,7 +386,7 @@ export function archiveDoc(teams, S, name, at = new Date()) {
     name,
     at: at.toISOString(),
     sc: { ...S },
-    teams: Object.values(teams).map((t) => ({ id: t.id, n: t.n, co: t.co, ro: t.ro ?? [], ki: t.ki ?? [], kw: t.kw ?? {}, m: t.m ?? [] })),
+    teams: Object.values(teams).map((t) => ({ id: t.id, n: t.n, co: t.co, ro: t.ro ?? [], ki: t.ki ?? [], kw: t.kw ?? {}, di: Object.fromEntries(idsOf(t)), m: t.m ?? [] })),
     sum: { champ: c && c.tot > 0 ? c.n : '', pts: c ? c.tot : 0, nt: R.ts.length, nm: R.ts.reduce((a, t) => a + t.pl, 0) },
   }
 }

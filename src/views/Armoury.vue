@@ -7,6 +7,8 @@ import { usePlanner } from '../stores/planner'
 import { WIKI } from '../lib/wiki'
 import { resolveWeapon, SOURCE_LABEL, slotAverages, GAUGE_MAX, weaponLabel, versionLabel } from '../lib/weapons'
 import WeaponTree from '../components/WeaponTree.vue'
+import PageHeader from '../components/PageHeader.vue'
+import StatePanel from '../components/StatePanel.vue'
 
 const planner = usePlanner()
 
@@ -138,21 +140,18 @@ watch(() => route.query.w, openFromQuery)
 
 <template>
   <section class="armoury">
-    <header class="a-head">
-      <p class="eyebrow">Wargear</p>
-      <h1 class="a-title">Weapon Armoury</h1>
-      <p class="a-intro">
-        Every weapon of the Chapter. Pick one to plan its perk tree. Trees ship with the
-        site and are re-synced weekly.
-      </p>
-    </header>
+    <PageHeader
+      eyebrow="Wargear"
+      title="Weapon Armoury"
+      lede="Every weapon of the Chapter. Pick one to plan its perk tree. Trees ship with the site and are re-synced weekly."
+    />
 
     <div class="a-controls">
       <div class="catbar" role="tablist" aria-label="Weapon categories">
         <button
           v-for="c in cats"
           :key="c.key"
-          class="cat-tab"
+          class="cat-tab tab-forge"
           :class="{ on: active === c.key }"
           role="tab"
           :aria-selected="active === c.key"
@@ -164,7 +163,7 @@ watch(() => route.query.w, openFromQuery)
       </div>
       <input
         v-model="q"
-        class="w-search"
+        class="w-search field-forge"
         type="search"
         placeholder="Search weapons…"
         aria-label="Search weapons"
@@ -189,23 +188,29 @@ watch(() => route.query.w, openFromQuery)
 
       <!-- Weapon detail -->
       <div ref="detail" class="w-detail">
-        <div v-if="status === 'idle'" class="w-prompt">
-          <span class="w-prompt-mark">⚒</span>
-          <p>Select a weapon to plan its perk tree.</p>
-        </div>
+        <StatePanel
+          v-if="status === 'idle'"
+          kind="prompt"
+          class="w-prompt"
+          body="Select a weapon to plan its perk tree."
+        />
 
-        <div v-else-if="status === 'loading'" class="w-loading">
-          <span class="spinner" /> Syncing {{ weaponLabel(activeWeapon) }} from the wiki…
-        </div>
+        <StatePanel
+          v-else-if="status === 'loading'"
+          kind="loading"
+          :body="`Syncing ${weaponLabel(activeWeapon)} from the wiki…`"
+        />
 
-        <div v-else-if="status === 'error'" class="w-error">
-          <h2>{{ weaponLabel(activeWeapon) }}</h2>
-          <p>{{ errorMsg }}</p>
-          <div class="w-error-actions">
-            <button class="btn-drake btn-sm" @click="selectWeapon(activeWeapon)">Retry</button>
-            <a class="btn-ghost btn-sm" :href="wikiUrl(activeWeapon)" target="_blank" rel="noopener">Open wiki ↗</a>
-          </div>
-        </div>
+        <StatePanel
+          v-else-if="status === 'error'"
+          kind="error"
+          class="w-error"
+          :title="weaponLabel(activeWeapon)"
+          :body="errorMsg"
+        >
+          <button class="btn-drake btn-sm" @click="selectWeapon(activeWeapon)">Retry</button>
+          <a class="btn-ghost btn-sm" :href="wikiUrl(activeWeapon)" target="_blank" rel="noopener">Open wiki ↗</a>
+        </StatePanel>
 
         <template v-else-if="status === 'ready' && data">
           <div class="w-hero">
@@ -309,19 +314,6 @@ watch(() => route.query.w, openFromQuery)
   margin: 0 auto;
   padding: 4rem 1.5rem 2rem;
 }
-.a-title {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  font-weight: 700;
-  font-size: clamp(2.2rem, 7vw, 3.6rem);
-  color: var(--color-bone);
-  margin: 0.4rem 0 0.6rem;
-}
-.a-intro {
-  color: var(--color-smoke);
-  max-width: 54ch;
-  line-height: 1.6;
-}
 
 .a-controls {
   display: flex;
@@ -335,49 +327,14 @@ watch(() => route.query.w, openFromQuery)
   gap: 0.4rem;
   flex-wrap: wrap;
 }
-.cat-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 0.85rem;
-  color: var(--color-smoke);
-  background: rgba(14, 28, 22, 0.5);
-  border: 1px solid var(--color-ash);
-  padding: 0.5rem 0.9rem;
-  border-radius: 2px;
-  cursor: pointer;
-  min-height: var(--tap);
-  transition: transform var(--dur-press) var(--ease-forge);
-}
-.cat-tab:active {
-  transform: scale(0.97);
-}
-.cat-tab.on {
-  color: #1a0d06;
-  background: linear-gradient(180deg, #ffb066, #ff6a2b);
-  border-color: rgba(255, 176, 102, 0.6);
-}
 .cat-count {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   opacity: 0.7;
 }
 .w-search {
   flex: 1 1 14rem;
   max-width: 20rem;
-  padding: 0.55rem 0.9rem;
-  background: rgba(14, 28, 22, 0.6);
-  border: 1px solid var(--color-ash);
-  border-radius: 3px;
-  color: var(--color-bone);
-  font-size: 0.9rem;
-  min-height: var(--tap);
-}
-.w-search::placeholder {
-  color: var(--color-faint);
 }
 
 .a-layout {
@@ -410,10 +367,10 @@ watch(() => route.query.w, openFromQuery)
   text-align: left;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--color-ash);
-  border-radius: 3px;
-  background: rgba(14, 28, 22, 0.4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-basalt-2) 40%, transparent);
   color: var(--color-bone);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   cursor: pointer;
   min-height: var(--tap);
   transition:
@@ -427,64 +384,39 @@ watch(() => route.query.w, openFromQuery)
 }
 .w-item.on {
   border-color: var(--color-ember);
-  background: rgba(255, 106, 43, 0.1);
+  background: color-mix(in srgb, var(--color-ember) 10%, transparent);
 }
 .w-item-users {
   flex: none;
   font-family: var(--font-mono);
-  font-size: max(0.62rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-drake);
 }
 .w-empty {
   color: var(--color-smoke);
   padding: 1rem 0;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .w-detail {
   border: 1px solid var(--color-ash);
-  border-radius: 8px;
-  background: rgba(7, 17, 13, 0.4);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-pitch) 40%, transparent);
   padding: 1.4rem;
   min-height: 16rem;
   min-width: 0;
   scroll-margin-top: 5rem;
 }
-.w-prompt,
-.w-loading,
-.w-error {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.8rem;
+/* A state panel is its own dense frame, so the outer one steps aside instead of boxing it twice. */
+.w-detail:has(> .state-panel) {
+  border: 0;
+  background: none;
+  padding: 0;
+  min-height: 0;
+}
+.w-detail > .state-panel {
   min-height: 14rem;
-  text-align: center;
-  color: var(--color-smoke);
-}
-.w-prompt-mark {
-  font-size: 2.5rem;
-  opacity: 0.5;
-}
-.w-loading {
-  flex-direction: row;
-}
-.spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--color-ash-2);
-  border-top-color: var(--color-ember);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-.w-error h2 {
-  font-family: var(--font-display);
-  text-transform: uppercase;
-  color: var(--color-bone);
-}
-.w-error-actions {
-  display: flex;
-  gap: 0.5rem;
+  justify-content: center;
 }
 
 .w-hero {
@@ -497,7 +429,7 @@ watch(() => route.query.w, openFromQuery)
   font-family: var(--font-display);
   text-transform: uppercase;
   font-weight: 700;
-  font-size: clamp(1.4rem, 4vw, 2rem);
+  font-size: var(--text-xl);
   color: var(--color-bone);
 }
 .w-src {
@@ -505,22 +437,22 @@ watch(() => route.query.w, openFromQuery)
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.58rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   padding: 2px 7px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-ash);
 }
 .w-src.baked {
   color: var(--color-drake);
-  border-color: rgba(89, 214, 108, 0.4);
+  border-color: color-mix(in srgb, var(--color-drake) 40%, transparent);
 }
 .w-src.wiki {
   color: var(--color-cobalt);
-  border-color: rgba(108, 196, 239, 0.4);
+  border-color: color-mix(in srgb, var(--color-cobalt) 40%, transparent);
 }
 .w-src.offline {
   color: var(--color-gold);
-  border-color: rgba(223, 184, 91, 0.4);
+  border-color: color-mix(in srgb, var(--color-gold) 40%, transparent);
 }
 /* dossier tags */
 .w-tags {
@@ -538,13 +470,13 @@ watch(() => route.query.w, openFromQuery)
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  font-size: max(0.54rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .w-tags dd {
   margin: 0.15rem 0 0;
-  font-size: 0.82rem;
-  color: #c3d0c6;
+  font-size: var(--text-sm);
+  color: var(--color-pewter);
   max-width: 34ch;
 }
 
@@ -553,8 +485,8 @@ watch(() => route.query.w, openFromQuery)
   margin: 1.4rem 0 1.6rem;
   padding: 1.1rem 1.2rem 1.2rem;
   border: 1px solid var(--color-ash);
-  border-radius: 6px;
-  background: rgba(5, 10, 8, 0.45);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-obsidian) 45%, transparent);
 }
 .stats-head {
   display: flex;
@@ -569,7 +501,7 @@ watch(() => route.query.w, openFromQuery)
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: var(--text-md);
   color: var(--color-bone);
 }
 /* Melee defence type, beside the title; the version picker stays on the right. */
@@ -579,10 +511,10 @@ watch(() => route.query.w, openFromQuery)
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.62rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   padding: 2px 8px;
   border: 1px solid currentColor;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   color: var(--color-smoke);
 }
 .defence[data-defence='Block'] {
@@ -598,9 +530,9 @@ watch(() => route.query.w, openFromQuery)
   margin: 1.2rem 0 0;
   padding: 1rem 1.2rem;
   border: 1px dashed var(--color-ash);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   color: var(--color-smoke);
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
 .stats-version {
   display: flex;
@@ -613,16 +545,16 @@ watch(() => route.query.w, openFromQuery)
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  font-size: max(0.54rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .stats-version select {
-  background: rgba(5, 10, 8, 0.8);
+  background: color-mix(in srgb, var(--color-obsidian) 80%, transparent);
   border: 1px solid var(--color-ash);
   color: var(--color-bone);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.35rem 0.5rem;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   max-width: 16rem;
   min-width: 0;
 }
@@ -637,7 +569,7 @@ watch(() => route.query.w, openFromQuery)
 }
 .gauge {
   display: grid;
-  grid-template-columns: 8.5rem 1fr 2.4rem 2.6rem;
+  grid-template-columns: 9.5rem 1fr 2.4rem 2.6rem;
   align-items: center;
   gap: 0.7rem;
 }
@@ -645,7 +577,7 @@ watch(() => route.query.w, openFromQuery)
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: max(0.58rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 /* Track is notched into ten segments, like a gauge struck on the anvil. */
@@ -653,10 +585,10 @@ watch(() => route.query.w, openFromQuery)
   position: relative;
   height: 12px;
   border: 1px solid var(--color-ash);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background-image: repeating-linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0.05) 0 calc(10% - 1px),
+    color-mix(in srgb, var(--color-bone) 5%, transparent) 0 calc(10% - 1px),
     transparent calc(10% - 1px) 10%
   );
   overflow: hidden;
@@ -664,13 +596,21 @@ watch(() => route.query.w, openFromQuery)
 .gauge-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  background: linear-gradient(90deg, #8a4a1c, var(--color-ember));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-ember) 45%, var(--color-obsidian)),
+    var(--color-ember)
+  );
 }
 .gauge-fill.over {
-  background: linear-gradient(90deg, #a35a1f, #ffb066);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-ember) 60%, var(--color-obsidian)),
+    var(--color-ember-light)
+  );
 }
 .gauge-fill.under {
-  background: linear-gradient(90deg, #2f4438, #5d7767);
+  background: linear-gradient(90deg, var(--color-ash), var(--color-ash-2));
 }
 .gauge-avg {
   position: absolute;
@@ -683,28 +623,28 @@ watch(() => route.query.w, openFromQuery)
 }
 .gauge-val {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--color-bone);
   text-align: right;
 }
 .gauge-delta {
   font-family: var(--font-mono);
-  font-size: max(0.66rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   text-align: right;
 }
 .gauge-delta.over {
   color: var(--color-drake);
 }
 .gauge-delta.under {
-  color: #8b6f6f;
+  color: color-mix(in srgb, var(--color-vacant) 55%, var(--color-smoke));
 }
 .gauge-delta.par {
   color: var(--color-smoke);
 }
 .gauges-key {
   margin-top: 0.8rem;
-  color: #728078;
-  font-size: 0.7rem;
+  color: var(--color-smoke);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -720,13 +660,13 @@ watch(() => route.query.w, openFromQuery)
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  font-size: max(0.54rem, var(--text-floor));
+  font-size: max(var(--text-xs), var(--text-floor));
   color: var(--color-smoke);
 }
 .figures dd {
   margin: 0.15rem 0 0;
   font-family: var(--font-display);
-  font-size: 1.1rem;
+  font-size: var(--text-base);
   color: var(--color-gold);
 }
 
@@ -740,10 +680,10 @@ watch(() => route.query.w, openFromQuery)
 }
 
 .w-hero-intro {
-  color: #c3d0c6;
+  color: var(--color-pewter);
   line-height: 1.6;
   margin: 0.8rem 0;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   max-width: 60ch;
 }
 .w-hero-actions {
@@ -763,12 +703,12 @@ watch(() => route.query.w, openFromQuery)
   left: 50%;
   transform: translateX(-50%);
   z-index: 80;
-  background: rgba(5, 10, 8, 0.92);
+  background: color-mix(in srgb, var(--color-obsidian) 92%, transparent);
   border: 1px solid var(--color-drake);
   color: var(--color-bone);
   padding: 0.6rem 1.1rem;
-  border-radius: 3px;
-  font-size: 0.85rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
 }
 .toast-enter-active {
   transition:

@@ -48,14 +48,14 @@ const footerLinks = computed(() => links.value.filter((l) => l.to !== '/'))
   text-transform: uppercase;
   letter-spacing: 0.16em;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: var(--text-base);
   color: var(--color-bone);
 }
 .footer-motto {
   color: var(--color-smoke);
   font-style: italic;
   margin-top: 0.35rem;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
 .footer-links {
   display: flex;
@@ -71,7 +71,7 @@ const footerLinks = computed(() => links.value.filter((l) => l.to !== '/'))
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   color: var(--color-smoke);
 }
 @media (hover: hover) and (pointer: fine) {
@@ -84,7 +84,7 @@ const footerLinks = computed(() => links.value.filter((l) => l.to !== '/'))
   margin: 1rem auto 0;
   padding: 1rem 1.5rem 2rem;
   color: var(--color-faint);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 </style>

@@ -5,6 +5,7 @@ import { Upstream } from './discordRoles'
 import { R2Error, createR2 } from './r2'
 import { POLL_ACTOR } from './galleryStore'
 import { MAX_CLIP_BYTES } from './galleryParse'
+import { OTHER_CLIPS_CAP_BYTES, STORAGE_CAP_BYTES } from './galleryPolicy'
 
 const CHANNEL = '200000000000000100'
 const T0 = Date.parse('2026-11-02T12:00:00.000Z')
@@ -25,6 +26,7 @@ const video = (n, over = {}) => ({
   ...over,
 })
 const clip = (n) => message(n, { attachments: [video(n)] })
+const gameplayClip = (n, over = {}) => message(n, { attachments: [video(n, over)], content: '#gameplay' })
 const range = (from, to, make = message) => Array.from({ length: to - from + 1 }, (_, i) => make(from + i))
 
 /** The clips channel, oldest first, read the way galleryDiscord reads it. */
@@ -64,8 +66,11 @@ function fakeR2(order = []) {
   return r2
 }
 
-/** In memory, with the real store's contract: setSync refuses an unknown or undefined key. */
-function fakeStore({ cursor, items = [] } = {}, order = []) {
+/**
+ * In memory, with the real store's contract: setSync refuses an unknown or undefined key, a polled clip goes in
+ * approved or pending only, and storedBytes is `held` plus the bytes of every row with a file.
+ */
+function fakeStore({ cursor, items = [], held = 0 } = {}, order = []) {
   const s = {
     sync: cursor === undefined ? null : { channel_id: CHANNEL, last_message_id: cursor, last_run_at: null, last_ok_at: null, last_error: null },
     syncCalls: [],
@@ -90,18 +95,25 @@ function fakeStore({ cursor, items = [] } = {}, order = []) {
       return s.items.some((it) => it.messageId === messageId && it.attachmentId === attachmentId)
     },
     async insertDiscordItem(row, actor) {
+      if (!['approved', 'pending'].includes(row.status)) throw new TypeError(`not a polled status: ${row.status}`)
       order.push(['insert', row.messageId, row.attachmentId])
       if (s.items.some((it) => it.messageId === row.messageId && it.attachmentId === row.attachmentId)) return 'exists'
-      const item = { ...row, id: s.items.length + 1, status: 'approved' }
+      const item = { ...row, id: s.items.length + 1 }
       s.items.push(item)
       s.events.push({ itemId: item.id, action: 'stored', actor })
       return { id: item.id }
     },
-    live: () => s.items.filter((it) => it.status === 'approved'),
-    async approvedClipIds({ newest }) {
+    held,
+    sizeCalls: 0,
+    async storedBytes() {
+      s.sizeCalls++
+      return s.items.reduce((n, it) => n + (it.r2Key ? it.bytes : 0), s.held)
+    },
+    live: () => s.items.filter((it) => it.status === 'approved' || it.status === 'pending'),
+    async watchedClipIds({ newest }) {
       return s.live().sort((a, b) => b.id - a.id).slice(0, newest).map((it) => ({ id: String(it.id), discord_message_id: it.messageId }))
     },
-    async approvedClipMessageIds({ after = null, limit }) {
+    async watchedClipMessageIds({ after = null, limit }) {
       return s.live()
         .filter((it) => after === null || it.id > Number(after))
         .sort((a, b) => a.id - b.id)
@@ -120,12 +132,12 @@ function fakeStore({ cursor, items = [] } = {}, order = []) {
   return s
 }
 
-function setup({ channel = [], cursor, items, ...over } = {}) {
+function setup({ channel = [], cursor, items, held, ...over } = {}) {
   const order = []
   const clock = { t: T0 }
   const discord = over.discord ?? fakeDiscord(channel)
   const r2 = fakeR2(order)
-  const store = fakeStore({ cursor, items }, order)
+  const store = fakeStore({ cursor, items, held }, order)
   const log = vi.fn()
   const poll = createGalleryPoll({ discord, r2, store, channelId: CHANNEL, intervalMs: 120_000, now: () => clock.t, log, ...over })
   return { poll, discord, r2, store, log, order, clock }
@@ -182,8 +194,8 @@ describe('copying the channel', () => {
     expect(() => setup({ [name]: 1 })).not.toThrow()
   })
 
-  it('copies each attachment to r2 under clips/<msg>/<att>.<ext> before inserting, status approved, event stored', async () => {
-    const two = message(2, { attachments: [video(2), video(3, { content_type: 'image/png', size: 5 })], content: 'two shots' })
+  it('copies each attachment to r2 under clips/<msg>/<att>.<ext> before inserting, with its status, event stored', async () => {
+    const two = message(2, { attachments: [video(2), video(3, { content_type: 'image/png', size: 5 })], content: '#gameplay two shots' })
     const { poll, discord, r2, store, order } = setup({ cursor: id(0), channel: [clip(1), two] })
     await poll.runOnce()
 
@@ -214,6 +226,7 @@ describe('copying the channel', () => {
     })
     // The signed CDN link is not handed to the store.
     expect(store.items[0]).not.toHaveProperty('download')
+    expect(store.items.map((it) => it.status)).toEqual(['pending', 'approved', 'approved'])
     expect(store.events).toEqual([1, 2, 3].map((itemId) => ({ itemId, action: 'stored', actor: POLL_ACTOR })))
     expect(store.sync).toMatchObject({ last_message_id: id(2), last_ok_at: iso(T0), last_error: null })
   })
@@ -558,12 +571,12 @@ describe('deletions', () => {
       channel: [message(1), ...range(11, 60)],
       items: [{ messageId: id(1), attachmentId: attId(1) }],
     })
-    store.approvedClipMessageIds = async () => []
+    store.watchedClipMessageIds = async () => []
     await poll.runOnce()
     expect(store.items[0].status).toBe('approved')
   })
 
-  it('slow sweep: runs when now - lastSweep >= sweepMs, walks approvedClipMessageIds in pages, exists() false → markDiscordDeleted, Upstream → stops the sweep and records last_error but keeps the copy work done', async () => {
+  it('slow sweep: runs when now - lastSweep >= sweepMs, walks watchedClipMessageIds in pages, exists() false → markDiscordDeleted, Upstream → stops the sweep and records last_error but keeps the copy work done', async () => {
     // 120 clips, one per message except message 5 with two; the site's newest 50 are all still in Discord.
     const items = range(1, 120, (n) => ({ messageId: id(n), attachmentId: attId(n) }))
     items.splice(5, 0, { messageId: id(5), attachmentId: attId(1000) })
@@ -571,8 +584,8 @@ describe('deletions', () => {
     const { poll, store, discord, clock } = setup({ cursor: id(120), channel, items, sweepMs: 1000 })
     const exists = () => discord.calls.filter((c) => c[0] === 'exists').map((c) => c[1])
     const pages = []
-    const page = store.approvedClipMessageIds
-    store.approvedClipMessageIds = async (args) => {
+    const page = store.watchedClipMessageIds
+    store.watchedClipMessageIds = async (args) => {
       pages.push(args)
       return page(args)
     }
@@ -592,7 +605,7 @@ describe('deletions', () => {
 
     // Due again: a new clip is copied, then Discord fails part way through the sweep.
     clock.t = T0 + 1999
-    discord.channel.push(clip(121))
+    discord.channel.push(gameplayClip(121))
     discord.exists = async (ch, messageId) => {
       discord.calls.push(['exists', messageId])
       if (messageId === id(50)) throw new Upstream('Discord answered 500 for a clips message.')
@@ -636,8 +649,8 @@ describe('a 429 handled by discord leaves the batch intact', () => {
       { status: 200, body: [] },
     )
     const { poll, store } = setup({ cursor: id(0), discord })
-    store.approvedClipIds = async () => []
-    store.approvedClipMessageIds = async () => []
+    store.watchedClipIds = async () => []
+    store.watchedClipMessageIds = async () => []
     await poll.runOnce()
     expect(store.items.map((it) => it.messageId)).toEqual([id(2)])
     expect(store.sync).toMatchObject({ last_message_id: id(2), last_ok_at: iso(T0), last_error: null })
@@ -721,5 +734,118 @@ describe('runOnce, start, stop and status', () => {
       last_error: 'Discord is unreachable.',
     }
     expect(await poll.status()).toEqual({ lastRunAt: iso(T0 + 1000), lastOkAt: iso(T0), lastError: 'Discord is unreachable.' })
+  })
+})
+
+describe('what goes on the site and what waits for review (galleryPolicy.js)', () => {
+  const statuses = async (channel) => {
+    const { poll, store } = setup({ cursor: id(0), channel })
+    await poll.runOnce()
+    return store.items.map((it) => [it.media, it.status])
+  }
+
+  it('a #gameplay file goes on the site; an untagged one is still copied, and waits', async () => {
+    expect(await statuses([gameplayClip(1), clip(2)])).toEqual([
+      ['video', 'approved'],
+      ['video', 'pending'],
+    ])
+  })
+
+  it('a tagged Medal link goes on the site; YouTube and Twitch links wait, tagged or not', async () => {
+    const links = '#gameplay https://medal.tv/clips/cAbC123xyz https://youtu.be/abcdefghijk https://clips.twitch.tv/Some-Slug'
+    expect(await statuses([message(1, { content: links }), message(2, { content: 'https://medal.tv/clips/zZz' })])).toEqual([
+      ['embed', 'approved'],
+      ['embed', 'pending'],
+      ['embed', 'pending'],
+      ['embed', 'pending'],
+    ])
+  })
+
+  it('a waiting clip whose message is deleted leaves the review queue, as an approved one leaves the site', async () => {
+    const { poll, store, discord } = setup({ cursor: id(0), channel: [clip(1), gameplayClip(2)] })
+    await poll.runOnce()
+    discord.channel = []
+    await poll.runOnce()
+    expect(store.items.map((it) => it.status)).toEqual(['removed', 'removed'])
+  })
+})
+
+describe('the storage caps (galleryPolicy.js)', () => {
+  const run = async ({ held, channel }) => {
+    const ctx = setup({ cursor: id(0), channel, held })
+    await ctx.poll.runOnce()
+    return ctx
+  }
+
+  it('copies any clip while it fits under the lower cap, up to the byte', async () => {
+    const { store, r2 } = await run({ held: OTHER_CLIPS_CAP_BYTES - 1001, channel: [clip(1)] })
+    expect(r2.puts).toHaveLength(1)
+    expect(store.items).toHaveLength(1)
+  })
+
+  it('past the lower cap, skips an untagged clip before downloading it, says why, and moves on', async () => {
+    const { store, r2, discord, log } = await run({ held: OTHER_CLIPS_CAP_BYTES - 1000, channel: [clip(1)] })
+    expect(discord.calls.some((c) => c[0] === 'download')).toBe(false)
+    expect(r2.puts).toEqual([])
+    expect(store.items).toEqual([])
+    expect(store.sync.last_message_id).toBe(id(1))
+    const why = `Skipped clips message ${id(1)} (could not copy an attachment: past 7 GB stored, only #gameplay clips are copied)`
+    expect(store.sync.last_error).toBe(why)
+    expect(log).toHaveBeenCalledWith(`Clips poll: ${why}`)
+  })
+
+  it('past the lower cap still copies a #gameplay clip, up to the full cap', async () => {
+    const { store, r2 } = await run({ held: STORAGE_CAP_BYTES - 1001, channel: [gameplayClip(1)] })
+    expect(r2.puts).toHaveLength(1)
+    expect(store.items.map((it) => it.status)).toEqual(['approved'])
+  })
+
+  it('past the full cap skips even a #gameplay clip, and says the store is full', async () => {
+    const { store, r2 } = await run({ held: STORAGE_CAP_BYTES - 1000, channel: [gameplayClip(1)] })
+    expect(r2.puts).toEqual([])
+    expect(store.items).toEqual([])
+    expect(store.sync.last_error).toBe(
+      `Skipped clips message ${id(1)} (could not copy an attachment: the Reliquarium is full, 9 GB stored)`,
+    )
+    expect(store.sync.last_ok_at).toBe(iso(T0))
+  })
+
+  it('checks each file against what is held by then, so two that only fit apart are not both copied', async () => {
+    // video(n) is 1000 + n bytes: 1001 and 1002 here, 2003 together.
+    const both = await run({ held: OTHER_CLIPS_CAP_BYTES - 2003, channel: [clip(1), clip(2)] })
+    expect(both.store.items.map((it) => it.messageId)).toEqual([id(1), id(2)])
+    const one = await run({ held: OTHER_CLIPS_CAP_BYTES - 2002, channel: [clip(1), clip(2)] })
+    expect(one.store.items.map((it) => it.messageId)).toEqual([id(1)])
+    expect(one.store.sync.last_message_id).toBe(id(2))
+  })
+
+  it('holds the size Discord states against the cap, before any byte is downloaded', async () => {
+    const { r2 } = await run({ held: OTHER_CLIPS_CAP_BYTES - 5000, channel: [message(1, { attachments: [video(1, { size: 5001 })] })] })
+    expect(r2.puts).toEqual([])
+  })
+
+  it('never refuses a link for space: it holds no file', async () => {
+    const { store } = await run({ held: STORAGE_CAP_BYTES, channel: [message(1, { content: '#gameplay https://medal.tv/clips/cAbC123xyz' })] })
+    expect(store.items.map((it) => it.media)).toEqual(['embed'])
+    expect(store.sizeCalls).toBe(0)
+  })
+
+  it('asks for nothing it does not need: a file already held is neither size-checked nor copied again', async () => {
+    const ctx = setup({ cursor: id(0), channel: [clip(1)], held: STORAGE_CAP_BYTES })
+    ctx.store.items.push({ id: 1, messageId: id(1), attachmentId: attId(1), status: 'pending', r2Key: 'k', bytes: 1 })
+    await ctx.poll.runOnce()
+    expect(ctx.store.sizeCalls).toBe(0)
+    expect(ctx.store.sync.last_error).toBeNull()
+  })
+
+  it('Postgres failing the size check ends the pass where it is: the cursor stays, nothing is skipped', async () => {
+    const ctx = setup({ cursor: id(0), channel: [clip(1)] })
+    ctx.store.storedBytes = async () => {
+      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })
+    }
+    await ctx.poll.runOnce()
+    expect(ctx.store.items).toEqual([])
+    expect(ctx.store.sync.last_message_id).toBe(id(0))
+    expect(ctx.store.sync.last_error).toBe('The clips poll failed (Error).')
   })
 })

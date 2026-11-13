@@ -31,9 +31,14 @@ export const articleIdOfBranch = (branchKey) => articleByBranch.get(branchKey) ?
 /** The roster branch key for an article id, or null. */
 export const branchKeyOfArticle = (articleId) => branchByArticle.get(articleId) ?? null
 
-function keyOf(hash) {
+/**
+ * The id a URL fragment names (`#third` → "third"), or null. The sign-in callback also uses the fragment
+ * (`#access_token=…`), so anything with `=` is not ours, and neither is an empty fragment or a bad escape.
+ * Whether the id names anything on the page is the caller's check.
+ */
+export function fragmentId(hash) {
   const raw = String(hash ?? '').slice(1)
-  if (!raw || raw.includes('=')) return null // empty, or the sign-in callback's `#access_token=…`
+  if (!raw || raw.includes('=')) return null
   try {
     return decodeURIComponent(raw)
   } catch {
@@ -43,6 +48,6 @@ function keyOf(hash) {
 
 /** A vue-router redirect for /roster: to /companies, keeping the query, with an old #branch-key hash mapped to its article id (or dropped). */
 export function legacyRosterTarget(to) {
-  const article = articleIdOfBranch(keyOf(to.hash))
+  const article = articleIdOfBranch(fragmentId(to.hash))
   return { path: '/companies', hash: article ? `#${article}` : '', query: to.query }
 }

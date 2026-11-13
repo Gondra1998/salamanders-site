@@ -10,6 +10,10 @@
  *   aborted, or R2 is not configured.
  * presignGet(key, { expiresSec = 900 }) → a query-signed GET link. Pure
  *   maths over the secret: no request to Cloudflare.
+ * remove(key) → deletes one object, header-signed. Resolves on any 2xx and on
+ *   a 404 (already gone); throws R2Error(status) as put does. An empty key is
+ *   a TypeError before any request: DELETE on the bare bucket path is a
+ *   request to delete the bucket.
  * Objects live path-style at `${endpoint}/${bucket}/${key}`, region auto,
  * service s3. Errors never carry the secret, the request or R2's reply.
  */
@@ -147,5 +151,30 @@ export function createR2({ accountId, bucket, accessKeyId, secretAccessKey, endp
     return `${base.origin}${path}?${query}&X-Amz-Signature=${sig}`
   }
 
-  return { configured, put, presignGet }
+  async function remove(key) {
+    if (typeof key !== 'string' || key === '') throw new TypeError('remove: the key must be a non-empty string')
+    const ctx = context()
+    const path = pathOf(key)
+    const signed = { host: base.host, 'x-amz-content-sha256': UNSIGNED, 'x-amz-date': ctx.amzDate }
+    const sig = sign(ctx, canonicalRequest({ method: 'DELETE', path, query: '', headers: signed, payloadHash: UNSIGNED }))
+    let res
+    try {
+      res = await fetchImpl(`${base.origin}${path}`, {
+        method: 'DELETE',
+        headers: {
+          'x-amz-content-sha256': UNSIGNED,
+          'x-amz-date': ctx.amzDate,
+          Authorization: `${ALGORITHM} Credential=${accessKeyId}/${scopeOf(ctx)}, SignedHeaders=${namesOf(signed).join(';')}, Signature=${sig}`,
+        },
+      })
+    } catch {
+      throw new R2Error('R2 is unreachable.', 0)
+    }
+    await res.body?.cancel()
+    if (res.ok || res.status === 404) return
+    const what = res.status === 401 || res.status === 403 ? 'R2 refused the credentials' : 'R2 refused the delete'
+    throw new R2Error(`${what} (${res.status}).`, res.status)
+  }
+
+  return { configured, put, presignGet, remove }
 }

@@ -48,10 +48,9 @@ const where = (n) => (n.level === null ? 'Prestige' : `Level ${n.level}`)
 .stale-notice {
   margin: 0 0 1.4rem;
   padding: 1rem 1.2rem;
-  border: 1px solid rgba(255, 106, 43, 0.45);
-  border-left-width: 3px;
-  border-radius: 4px;
-  background: rgba(255, 106, 43, 0.07);
+  border: 1px solid color-mix(in srgb, var(--color-ember) 45%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-ember) 7%, transparent);
 }
 .stale-top {
   display: flex;
@@ -64,18 +63,23 @@ const where = (n) => (n.level === null ? 'Prestige' : `Level ${n.level}`)
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-size: 1.05rem;
+  font-size: var(--text-base);
   color: var(--color-ember);
 }
 .stale-dismiss {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: var(--color-smoke);
   background: transparent;
   border: 1px solid var(--color-ash);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   padding: 0.3rem 0.7rem;
   cursor: pointer;
   transition: transform var(--dur-press) var(--ease-forge);
@@ -91,7 +95,7 @@ const where = (n) => (n.level === null ? 'Prestige' : `Level ${n.level}`)
 .stale-lead {
   margin: 0.5rem 0 0.7rem;
   font-family: var(--font-sans);
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   color: var(--color-smoke);
 }
 .stale-list {
@@ -107,7 +111,7 @@ const where = (n) => (n.level === null ? 'Prestige' : `Level ${n.level}`)
   align-items: baseline;
   gap: 0.2rem 0.6rem;
   font-family: var(--font-sans);
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   color: var(--color-bone);
 }
 .stale-where {
@@ -115,12 +119,12 @@ const where = (n) => (n.level === null ? 'Prestige' : `Level ${n.level}`)
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   color: var(--color-smoke);
 }
 .stale-was {
   text-decoration: line-through;
-  text-decoration-color: rgba(255, 106, 43, 0.6);
+  text-decoration-color: color-mix(in srgb, var(--color-ember) 60%, transparent);
   color: var(--color-smoke);
 }
 .stale-rework {
@@ -135,7 +139,7 @@ const where = (n) => (n.level === null ? 'Prestige' : `Level ${n.level}`)
 .stale-note {
   flex-basis: 100%;
   padding-left: 5.1rem;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: var(--color-smoke);
 }
 @media (max-width: 36rem) {

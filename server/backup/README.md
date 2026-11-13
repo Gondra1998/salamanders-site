@@ -62,3 +62,69 @@ the production path when `DEST` was set but empty, and a test wrote fake files i
 
 After editing the script, rerun both, then reinstall it (`install -m 755 ...` above); the installed copy is what
 cron runs.
+
+# Nightly R2 backup and storage purge
+
+`salamanders-r2-backup` backs up the Reliquarium's private R2 bucket into `/mnt/bretpc/salamanders-r2-backup`, then
+runs the storage purge (`server/src/galleryPurge.js`, rules in `server/src/galleryPolicy.js`). It runs on the host,
+with rclone in a container pinned by digest, so nothing is installed for it.
+
+1. `rclone copy --ignore-existing`: every object the backup does not hold yet. An object is written once under its
+   own key and never changed, so nothing is sent twice. It **copies, never syncs**: R2 losing a file never takes
+   it out of the backup. Files leave the backup only in step 4, by name.
+2. `rclone check --one-way`: every object in R2 must be in the backup at the same size and MD5.
+3. Only then, both listings go to the API's purge, which takes out of R2 the files of items rejected, hidden or
+   removed for 30 days, and only those the backup holds at R2's size, and every file deleted for good (a member's
+   own takedown, an approver's Delete for good, the erase below). Its counts go into the status line.
+4. The purge names the files the backup is to let go of: those deleted for good, and those of items taken down
+   60 days ago (`BACKUP_KEEP_DAYS` in `galleryPolicy.js`), so a taken-down file exists nowhere after that. Every
+   name must be a storage key in the exact shape the API makes (`art/<id>.<ext>`, `clips/<message>/<attachment>.<ext>`);
+   one that is not stops the run before anything is deleted. The keys are not written to the log, and a dry run
+   deletes nothing.
+
+The R2 values are read from `server/.env` (read, never sourced) and reach rclone as environment variables passed by
+name, so the secret is never on a command line. The script refuses to run on a mutable image tag, on a mock
+endpoint, or when the backup drive is not mounted, and takes a lock so two runs cannot overlap.
+
+## Install
+
+```sh
+install -m 755 server/backup/salamanders-r2-backup ~/.local/bin/
+crontab -e   # add:
+10 3 * * * $HOME/.local/bin/salamanders-r2-backup >> $HOME/.local/state/salamanders-r2-backup/cron.log 2>&1
+```
+
+That is every night at 03:10 local time, before the Sunday database backup at 03:40. `PURGE=0` backs up without
+purging, `PURGE=dry` only reports what the purge would take. The other settings and the exit codes are in the
+header of the script. **The latest result is always `~/.local/state/salamanders-r2-backup/last-run`**, and nothing
+alerts on failure.
+
+To restore a file the purge took, copy it back from the backup to the same key (`rclone copyto`), then clear
+`file_purged_at` on its row. A restored item is still rejected, hidden or removed: approve it, if wanted, after that.
+This works only within 60 days of the takedown; after that the backup no longer holds the file. A file deleted for
+good cannot be restored: its row is gone.
+
+## Erase on request
+
+For a "please forget me" request, run the script by hand with one target:
+
+```sh
+~/.local/bin/salamanders-r2-backup --erase-item <item id>        # one item, any status
+~/.local/bin/salamanders-r2-backup --erase-member <discord id>   # everything one member posted
+```
+
+It takes the same lock as the nightly run. The API (`server/src/galleryEraseRun.js`) first deletes each item's row
+and history and takes its file out of R2, keeping only the storage key in `gallery_erasures`. The usual run then
+follows and step 4 deletes the backup copy. The key note goes on a later night, once neither R2 nor the backup holds
+the file. An erase needs `PURGE=1` (the default): the backup copy goes in the purge step. Exit code 10 means the
+erase itself failed, and nothing after it ran.
+
+## Tests
+
+```sh
+bash server/backup/test-r2.sh           # ~180 cases against a fake `docker`; a few seconds
+python3 -I server/backup/mutate-r2.py   # ~70 hand-made bugs, one at a time (~10 minutes); every one must make test-r2.sh fail
+```
+
+`test-r2.sh` ends with the same kind of canary as `test.sh`, on `/mnt/bretpc/salamanders-r2-backup`. After editing the
+script, rerun both, then reinstall it; the installed copy is what cron runs.

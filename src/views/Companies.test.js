@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import companies from '../data/companies.json'
@@ -47,25 +47,47 @@ describe('Companies', () => {
     expect(w.find('.c-empty').text()).toBe('No companies match “zzzzzz”.')
   })
 
-  it('jumps to a company from its chip', async () => {
-    const scrolled = []
-    Element.prototype.scrollIntoView = function () { scrolled.push(this.id) }
-    const w = mount(Companies, { attachTo: document.body }) // the jump looks the article up in the document
-    await w.findAll('.c-chip')[2].trigger('click')
-    expect(scrolled).toEqual([companies[2].id])
-    w.unmount()
-  })
+  describe('jumping about the page', () => {
+    // jsdom has no scrolling: record where each scroll went, and how, then put the prototype back as it was.
+    const saved = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+    const mounted = []
+    let scrolled
+    beforeEach(() => {
+      scrolled = []
+      Element.prototype.scrollIntoView = function (options) { scrolled.push([this.id, options?.behavior]) }
+    })
+    afterEach(() => {
+      mounted.splice(0).forEach((w) => w.unmount())
+      if (saved) Object.defineProperty(Element.prototype, 'scrollIntoView', saved)
+      else delete Element.prototype.scrollIntoView
+      delete window.matchMedia
+    })
+    // the jump looks the article up in the document
+    const attached = () => {
+      const w = mount(Companies, { attachTo: document.body })
+      mounted.push(w)
+      return w
+    }
+    const MOTION = [
+      ['prefers reduced motion', true, 'auto'],
+      ['welcomes motion', false, 'smooth'],
+    ]
 
-  it('takes a visitor from any company back to the chip row, and moves focus there', async () => {
-    const scrolled = []
-    Element.prototype.scrollIntoView = function () { scrolled.push(this.id) }
-    const w = mount(Companies, { attachTo: document.body })
-    expect(w.find('nav.c-index').attributes('id')).toBe('company-index')
-    expect(w.find('nav.c-index').attributes('tabindex')).toBe('-1')
-    await w.findAll('article.company')[3].find('button.c-top').trigger('click')
-    expect(scrolled).toEqual(['company-index'])
-    expect(document.activeElement).toBe(w.find('nav.c-index').element)
-    w.unmount()
+    it.each(MOTION)('when the visitor %s, a chip jumps to its company the matching way', async (_, reduced, behavior) => {
+      window.matchMedia = vi.fn(() => ({ matches: reduced }))
+      await attached().findAll('.c-chip')[2].trigger('click')
+      expect(scrolled).toEqual([[companies[2].id, behavior]])
+    })
+
+    it.each(MOTION)('when the visitor %s, "↑ Index" goes back to the chip row the matching way, and moves focus there', async (_, reduced, behavior) => {
+      window.matchMedia = vi.fn(() => ({ matches: reduced }))
+      const w = attached()
+      expect(w.find('nav.c-index').attributes('id')).toBe('company-index')
+      expect(w.find('nav.c-index').attributes('tabindex')).toBe('-1')
+      await w.findAll('article.company')[3].find('button.c-top').trigger('click')
+      expect(scrolled).toEqual([['company-index', behavior]])
+      expect(document.activeElement).toBe(w.find('nav.c-index').element)
+    })
   })
 
   it('puts each text block on the readable surface', () => {

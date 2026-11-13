@@ -335,6 +335,14 @@ describe('DeathwatchArea', () => {
     expect(asked.find('h2').exists()).toBe(false)
   })
 
+  it('offers no "Edit page" over a tab locked for the viewer, as the desk without Deathwatch Command', async () => {
+    const desk = (await mountAt('/deathwatch/armouringhall/watch-command', { roles: ['legion', 'deployment', 'desk'] })).w
+    expect(desk.text()).toContain('Reserved for the Deathwatch Command.')
+    expect(desk.find('.pe-open').exists()).toBe(false)
+    const commander = (await mountAt('/deathwatch/armouringhall/watch-command', { commander: true })).w
+    expect(commander.find('.pe-open').exists()).toBe(true)
+  })
+
   it('offers "Edit page" to the desk, and not to an admin', async () => {
     expect((await mountAt('/deathwatch/recruitment/requirements', { roles: ['legion', 'deployment', 'desk'] })).w.find('.pe-open').exists()).toBe(true)
     expect((await mountAt('/deathwatch/recruitment/requirements', { roles: ['legion', 'deployment', 'admin'] })).w.find('.pe-open').exists()).toBe(false)

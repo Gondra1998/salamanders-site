@@ -15,7 +15,7 @@
 import { Upstream } from './discordRoles.js'
 import { etagOf, ifNoneMatches } from './deathwatchEtag.js'
 import { MAX_ACTIVE_ACCESS, MAX_BODY_BYTES, isDiscordId, isKind, parseAccessBody, parseDocWrite } from './deathwatchValidate.js'
-import { departed, searchMembers } from './deathwatchPeople.js'
+import { departed, rejoinedSince, searchMembers } from './deathwatchPeople.js'
 import { readJson as readJsonWithin, reply, send } from './httpReply.js'
 
 const ACCESS_ROUTE = /^\/deathwatch\/access\/([^/]+)\/([^/]+)$/
@@ -50,7 +50,7 @@ export function namedIn(all) {
   return { ids, names }
 }
 
-export function createDeathwatchHandler({ access, store, roster = null, deploymentRoleIds = [], faceRoleIds = [] }) {
+export function createDeathwatchHandler({ access, store, roster = null, memberOf, deploymentRoleIds = [], faceRoleIds = [] }) {
   const me = async (_request, verdict) =>
     reply(200, {
       access: verdict.access,
@@ -140,9 +140,14 @@ export function createDeathwatchHandler({ access, store, roster = null, deployme
     if (read.error) return reply(read.status, { error: read.error })
     const body = parseAccessBody(read.body)
     if (typeof body === 'string') return reply(400, { error: body })
-    const people = await membersNow()
-    if (!people) return reply(503, { error: NOT_YET })
-    if (!people.some((p) => p.id === body.discordId)) return reply(404, { error: 'Not in the server.' })
+    // Asked of Discord live (roles.memberOf), not of the roster: someone who joined a minute ago is found, and their
+    // join date is the present one.
+    const member = await memberOf(body.discordId)
+    if (!member) return reply(404, { error: 'Not in the server.' })
+    // What they were given before they left and came back is void: it goes first, so what is given now counts.
+    for (const d of await store.delegationsOf(body.discordId)) {
+      if (rejoinedSince(member.joinedAt, d.grantedAt)) await store.removeAccess(body.discordId, d.kind, 'left-guild')
+    }
     const result = await store.addAccess(body.discordId, body.kind, verdict.user.id)
     if (result === 'limit') return reply(409, { error: `The access limit (${MAX_ACTIVE_ACCESS}) is reached. Remove someone first.` })
     access.forget() // so nobody keeps a verdict from before it

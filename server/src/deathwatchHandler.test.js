@@ -59,7 +59,7 @@ function memStore() {
     addAccess: vi.fn(async (id, kind, actorId) => {
       if (access.has(key(id, kind))) return 'exists'
       if (access.size >= MAX_ACTIVE_ACCESS) return 'limit'
-      access.set(key(id, kind), { discordId: id, kind, grantedBy: actorId, grantedAt: GIVEN })
+      access.set(key(id, kind), { discordId: id, kind, grantedBy: actorId, grantedAt: new Date() }) // now()
       events.push({ id, kind, actor: actorId, action: 'added' })
       return 'added'
     }),
@@ -93,7 +93,7 @@ function setup({ configured = true, roster = null, deploymentRoleIds = [DW], fac
     }),
     memberOf: vi.fn(async (id) => {
       const u = Object.values(users).find((x) => x.id === id)
-      return u.roles === null ? null : { roles: u.roles, joinedAt: u.joinedAt ?? JOINED }
+      return !u || u.roles === null ? null : { roles: u.roles, joinedAt: u.joinedAt ?? JOINED }
     }),
   }
   const store = memStore()
@@ -108,7 +108,14 @@ function setup({ configured = true, roster = null, deploymentRoleIds = [DW], fac
     legionRoleId: LEGION,
   })
   // deploymentRoleIds: null leaves it out, as a server with no Deployment role set does.
-  const handle = createDeathwatchHandler({ access, store, roster, ...(deploymentRoleIds ? { deploymentRoleIds } : {}), ...(faceRoleIds ? { faceRoleIds } : {}) })
+  const handle = createDeathwatchHandler({
+    access,
+    store,
+    roster,
+    memberOf: roles.memberOf, // the live member lookup (discordRoles.js), as index.js hands it over
+    ...(deploymentRoleIds ? { deploymentRoleIds } : {}),
+    ...(faceRoleIds ? { faceRoleIds } : {}),
+  })
 
   // body: an object (sent as JSON), or `raw` for a literal body; `headers` override the defaults.
   async function call(who, method, path, body, { raw, headers = {} } = {}) {
@@ -703,14 +710,55 @@ describe('POST /deathwatch/access', () => {
     expect((await call('plain', 'POST', '/deathwatch/doc', DOC)).status).toBe(200)
   })
 
-  it('refuses someone who is not in the server, and answers 503 before the roster has loaded', async () => {
+  it('asks Discord whether the person is in the server: not there is refused, whatever the roster says', async () => {
     const { call, store } = setup({ roster: rosterOf(everyone()) })
-    const res = await add(call, { discordId: OTHER, kind: 'desk' })
-    expect([res.status, res.body]).toEqual([404, { error: 'Not in the server.' }])
-    for (const roster of [rosterOf(null), null]) {
-      const r = await add(setup({ roster }).call, { discordId: USERS.plain.id, kind: 'desk' })
-      expect([r.status, r.body]).toEqual([503, { error: 'The member list is not available yet. Try again.' }])
+    for (const id of [OTHER, USERS.stranger.id]) {
+      const res = await add(call, { discordId: id, kind: 'desk' })
+      expect([id, res.status, res.body]).toEqual([id, 404, { error: 'Not in the server.' }])
     }
+    expect(store.events).toEqual([])
+  })
+
+  it('adds someone who joined since the roster last loaded, or while it has not loaded at all', async () => {
+    for (const roster of [rosterOf([]), rosterOf(null), null]) {
+      const { call, store } = setup({ roster })
+      expect((await add(call, { discordId: USERS.plain.id, kind: 'desk' })).status).toBe(201)
+      expect(store.events).toEqual([{ id: USERS.plain.id, kind: 'desk', actor: USERS.commander.id, action: 'added' }])
+    }
+  })
+
+  it('gives again what was lost by leaving and coming back: the old one goes as left-guild, the new one counts', async () => {
+    const { call, store, users } = setup({ roster: rosterOf(everyone()) })
+    store.give(USERS.plain.id, 'desk')
+    store.give(USERS.plain.id, 'watchcommand')
+    users.plain.joinedAt = '2026-07-01T00:00:00.000Z' // after both were given
+    const res = await add(call, { discordId: USERS.plain.id, kind: 'desk' })
+    expect([res.status, res.body]).toEqual([201, { discordId: USERS.plain.id, kind: 'desk' }])
+    expect(store.events).toEqual([
+      { id: USERS.plain.id, kind: 'desk', actor: 'left-guild', action: 'removed' },
+      { id: USERS.plain.id, kind: 'watchcommand', actor: 'left-guild', action: 'removed' },
+      { id: USERS.plain.id, kind: 'desk', actor: USERS.commander.id, action: 'added' },
+    ])
+    expect((await call('plain', 'GET', '/deathwatch/me')).body.roles).toEqual(['deployment', 'desk'])
+  })
+
+  it('leaves what was given alone when Discord gives no join date: it is still there, and the add says so', async () => {
+    const { call, store, users } = setup({ roster: rosterOf(everyone()) })
+    store.give(USERS.plain.id, 'desk')
+    users.plain.joinedAt = 'not a date'
+    expect((await add(call, { discordId: USERS.plain.id, kind: 'desk' })).status).toBe(200)
+    expect(store.events).toEqual([])
+  })
+
+  it('answers 503 when Discord cannot be asked about the person', async () => {
+    const { call, roles, store } = setup({ roster: rosterOf(everyone()) })
+    const live = roles.memberOf.getMockImplementation()
+    roles.memberOf.mockImplementation(async (id) => {
+      if (id === USERS.plain.id) throw new Upstream()
+      return live(id)
+    })
+    const res = await add(call, { discordId: USERS.plain.id, kind: 'desk' })
+    expect([res.status, res.body]).toEqual([503, { error: 'Discord could not be reached. Try again.' }])
     expect(store.events).toEqual([])
   })
 

@@ -38,9 +38,9 @@ const currentTab = computed(() => area.value.tabs.find((t) => t.slug === page.va
 const tabLabel = computed(() => currentTab.value.label)
 // A single tab may list its own (Watch Command, Enter mission): the rest of the area stays open. Hidden only, as above.
 const locked = computed(() => !!currentTab.value.roles && !mayOpen(currentTab.value.roles, who.value))
-// The texts the open view reads, which the Watch Commander and the desk can edit in place ("Edit page"). Hidden
-// only, as above.
-const texts = computed(() => (store.canEdit ? pageTexts(page.value.area, page.value.tab, page.value.sub) : []))
+// The texts the open view reads, which the Watch Commander and the desk can edit in place ("Edit page"), never over a
+// tab locked for them. Hidden only, as above.
+const texts = computed(() => (store.canEdit && !locked.value ? pageTexts(page.value.area, page.value.tab, page.value.sub) : []))
 
 // While a view's chunk is on its way (after a short delay, so a fast one never flashes it), and if it fails.
 // From 900px the Armouring Hall has no rail (.solo): its views head themselves (HallHead). Where no view does (still

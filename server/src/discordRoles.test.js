@@ -279,6 +279,7 @@ describe('guildAdmins', () => {
       { id: '200000000000000001', permissions: String(0x8n | (1n << 40n)) },
       { id: '200000000000000002', permissions: String(0x7) },
       { id: '200000000000000003', permissions: '8x' },
+      { id: '200000000000000006', permissions: 'x8' },
       { id: '200000000000000004', permissions: null },
       { id: '200000000000000005' },
       null,
@@ -294,6 +295,8 @@ describe('guildAdmins', () => {
   it.each([
     ['500', { status: 500, body: {} }],
     ['200 without a roles list', { status: 200, body: { owner_id: '9' } }],
+    ['200 with a JSON null body', { status: 200, raw: 'null' }],
+    ['200 with a body that is not JSON', { status: 200, raw: '<html>bad gateway</html>' }],
   ])('a %s is a failure', async (_, route) => {
     await expect(read(route)).rejects.toBeInstanceOf(Upstream)
   })

@@ -127,6 +127,8 @@ const deathwatch = createDeathwatchHandler({
   store: deathwatchStore,
   // The Deployment list: members holding DEATHWATCH_ROLE_ID, from the roster's cache (no extra Discord calls).
   roster,
+  // Access → add: whether the person is in the guild, and since when, asked live.
+  memberOf: (id) => roles.memberOf(id),
   deploymentRoleIds: (process.env.DEATHWATCH_ROLE_ID || '').split(',').filter(Boolean),
   // The faces: Legion and Emissary members the Event Tracker names, for their pictures there.
   faceRoleIds: [LEGION_ROLE, process.env.EMISSARY_ROLE_ID].filter(Boolean),

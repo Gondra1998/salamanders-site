@@ -113,7 +113,7 @@ watch(
         </div>
         <div v-else-if="shownPhase === 'shut'" key="shut" class="dwb-say">
           <p class="dwb-big">The gate stays shut</p>
-          <p class="dwb-text">Your clearance is not on record. Access is held by the Deathwatch and by those the Watch Commander has cleared.</p>
+          <p class="dwb-text">Your clearance is not on record. Access is held by the XVIIIth Legion, its Emissaries, the Deathwatch and those the Watch Commander has cleared.</p>
           <RouterLink class="dwb-back" to="/companies">Return to the companies</RouterLink>
         </div>
         <div v-else-if="shownPhase === 'signin'" key="signin" class="dwb-say">
@@ -422,7 +422,12 @@ watch(
   text-decoration: none;
   transition:
     color var(--dur-state) var(--ease-forge),
-    border-color var(--dur-state) var(--ease-forge);
+    border-color var(--dur-state) var(--ease-forge),
+    transform var(--dur-press) var(--ease-forge);
+}
+/* It squeezes when pressed, as every other pressable does. */
+.dwb-back:active {
+  transform: scale(0.97);
 }
 .dwb-back:focus-visible {
   outline: 2px solid var(--dw-accent);

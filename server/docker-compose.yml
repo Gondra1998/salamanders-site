@@ -55,6 +55,10 @@ services:
       WATCH_COMMANDER_ROLE_ID: ${WATCH_COMMANDER_ROLE_ID:-}
       # Optional: the Deathwatch Command role (it shows the Watch Command tab). Unset, nobody is Deathwatch Command.
       DEATHWATCH_COMMAND_ROLE_ID: ${DEATHWATCH_COMMAND_ROLE_ID:-}
+      EMISSARY_ROLE_ID: ${EMISSARY_ROLE_ID:-}
+      XENOSBANE_SIGIL_ROLE_ID: ${XENOSBANE_SIGIL_ROLE_ID:-}
+      VIGILIA_MORTIS_ROLE_ID: ${VIGILIA_MORTIS_ROLE_ID:-}
+      KILL_MARINE_ROLE_ID: ${KILL_MARINE_ROLE_ID:-}
       # Reliquarium (members-only art and clips galleries). No defaults anywhere: until the clips channel
       # and all four R2 values are set, every /gallery route answers 503 and the clips poll does not start.
       GALLERY_CHANNEL_ID: ${GALLERY_CHANNEL_ID:-}

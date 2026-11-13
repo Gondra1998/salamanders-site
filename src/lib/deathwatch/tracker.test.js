@@ -10,8 +10,6 @@ import {
   nextOpenSlot,
   parseBackup,
   progression,
-  renameInTeam,
-  renamePlan,
   teamStats,
   withMission,
 } from './tracker'
@@ -65,6 +63,18 @@ describe('calc', () => {
     expect(R.CK.nd).toEqual(['Beta W1 O1']) // played, no kills entered
     expect(R.CK.sg).toBe(0)
     expect(R.kia.get('a2')).toBe(2)
+  })
+
+  it('finds a player on two rosters, a name on no roster, play after KIA and short rosters', () => {
+    const t = teams()
+    t[1].ro.push('b1') // b1 now on Alpha's roster as well as Beta's
+    t[2].m.push([2, 2, 1, 0, 0, 0, 0, '', [row('Brother Ashkar')]])
+    t[2].m.push([3, 1, 1, 0, 0, 0, 0, '', [row('Brother Ashkarr'), row('a2')]])
+    const CK = calc(t).CK
+    expect(CK.twice).toEqual([{ label: 'b1: Alpha, Beta', t: 2 }])
+    expect(CK.stray.map((x) => x.label)).toEqual(['Brother Ashkar in Beta W2 O2', 'Brother Ashkarr in Beta W3 O1'])
+    expect(CK.afterKia).toEqual([{ label: 'a2 (KIA W2) in Beta W3 O1', t: 2, w: 3, o: 1 }])
+    expect(CK.short.map((x) => x.label)).toEqual(['Beta (1/3)'])
   })
 
   it('moves a team by its rank change since last week', () => {
@@ -163,27 +173,6 @@ describe('the views', () => {
 })
 
 describe('Manage', () => {
-  it('renames a player everywhere in a team', () => {
-    const d = renameInTeam(teams()[1], 'a2', 'x')
-    expect(d.ro).toEqual(['a1', 'x'])
-    expect(d.kw).toEqual({ x: 2 })
-    expect(d.m[0][8][1][0]).toBe('x')
-  })
-
-  it('plans a rename across the live event and the archive', () => {
-    const t = teams()
-    const archive = { e1: { name: 'Old', teams: [t[2]] } }
-    expect(renamePlan(t, archive, 'b1', 'z')).toMatchObject({ teams: [1, 2], archives: ['e1'], entries: 3 })
-  })
-
-  it('refuses a rename that would merge two players in one mission or across rosters', () => {
-    const t = teams()
-    expect(renamePlan(t, {}, 'a1', 'b1').error).toMatch(/both appear in Alpha W2 O1/)
-    expect(renamePlan(t, {}, 'a2', 'b1').error).toMatch(/roster of Beta/)
-    expect(renamePlan(t, {}, 'A1', 'q').error).toBe('No entries for “A1”. Did you mean “a1”?')
-    expect(renamePlan(t, {}, 'a1', 'a1').error).toBe('The names are identical.')
-  })
-
   it('reads a backup and refuses a damaged one', () => {
     const P = parseBackup({ exported: '2026-10-01T00:00:00Z', scoring: { base: '400' }, teams: Object.values(teams()) })
     expect(P.teams).toHaveLength(2)

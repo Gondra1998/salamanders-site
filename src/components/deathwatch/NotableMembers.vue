@@ -181,7 +181,7 @@ const shown = computed(() => anyone(n.value))
   border-radius: 12px;
   background:
     radial-gradient(ellipse at 0% 0%, rgb(212 169 74 / 0.14), transparent 55%),
-    linear-gradient(180deg, rgb(22 22 26 / 0.92), rgb(8 8 10 / 0.96));
+    linear-gradient(180deg, rgb(22 22 26 / 0.8), rgb(8 8 10 / 0.8));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 0 50px -14px rgb(212 169 74 / 0.45);
 }
 .nm-crest {
@@ -265,7 +265,7 @@ const shown = computed(() => anyone(n.value))
   padding: 18px 18px 16px;
   border: 1px solid rgb(201 154 62 / 0.35);
   border-radius: 10px;
-  background: linear-gradient(180deg, rgb(24 24 28 / 0.9), rgb(9 9 11 / 0.95));
+  background: linear-gradient(180deg, rgb(24 24 28 / 0.8), rgb(9 9 11 / 0.8));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
 }
 .nm-v::before {
@@ -319,7 +319,7 @@ const shown = computed(() => anyone(n.value))
   border-color: rgb(192 57 43 / 0.45);
   background:
     repeating-linear-gradient(135deg, rgb(255 255 255 / 0.012) 0 8px, transparent 8px 16px),
-    linear-gradient(180deg, rgb(26 18 18 / 0.92), rgb(9 7 7 / 0.96));
+    linear-gradient(180deg, rgb(26 18 18 / 0.8), rgb(9 7 7 / 0.8));
 }
 .nm-v.sealed::before {
   background: linear-gradient(90deg, transparent, #c0392b, transparent);

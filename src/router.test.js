@@ -82,7 +82,7 @@ describe('the Deathwatch routes', () => {
     ['/deathwatch/armouringhall/watch-command/watchbrother', '/deathwatch/armouringhall/watch-command/watchsergeant'],
     ['/deathwatch/armouringhall/restricted-wargear/anything', '/deathwatch/armouringhall/restricted-wargear'],
     ['/deathwatch/chronicles', '/deathwatch/chronicles/hall-of-champions'],
-    ['/deathwatch/manage', '/deathwatch/manage/enter-mission'],
+    ['/deathwatch/administratum', '/deathwatch/administratum/enter-mission'],
   ])('takes %s to %s', async (from, to) => {
     await router.push(from)
     expect(router.currentRoute.value.fullPath).toBe(to)

@@ -60,13 +60,13 @@ const profile = computed(() => {
 
 <template>
   <template v-if="!player">
-    <h2 class="dw-plaque">Players</h2>
+    <h2 class="dw-plaque">Operatives</h2>
     <p v-if="notes" class="dw-sub">Home Kill Team objectives only. MVP weights are set under Manage.</p>
     <p v-if="!R.pl.length" class="dw-empty">No missions played yet.</p>
     <div v-else class="dw-scroll">
       <table class="dw-table">
         <thead>
-          <tr><th>#</th><th class="l">Player</th><th>MVP</th><th>Kills</th><th>Special</th><th>Revives</th><th>Incaps</th><th title="Kills per incap">K/D</th><th>Seeds</th><th class="l">Class</th></tr>
+          <tr><th>#</th><th class="l">Operative</th><th>MVP</th><th>Kills</th><th>Special</th><th>Revives</th><th>Incaps</th><th title="Kills per incap">K/D</th><th>Seeds</th><th class="l">Class</th></tr>
         </thead>
         <tbody>
           <tr v-for="(p, i) in R.pl" :key="p.n" :class="medal(p) < 4 ? `m${medal(p)}` : ''">
@@ -93,10 +93,10 @@ const profile = computed(() => {
   </template>
 
   <template v-else>
-    <p><RouterLink class="dw-link" :to="to.players()">← All players</RouterLink></p>
-    <h2 class="dw-plaque">Player profile</h2>
+    <p><RouterLink class="dw-link" :to="to.players()">← All operatives</RouterLink></p>
+    <h2 class="dw-plaque">Personnel Docket</h2>
     <label class="dw-field pick">
-      Player
+      Operative
       <select :value="player" @change="$emit('pick', $event.target.value)">
         <option v-if="!names.includes(player)" :value="player">{{ player }}</option>
         <option v-for="x in names" :key="x" :value="x">{{ x }}</option>

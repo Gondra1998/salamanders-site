@@ -23,7 +23,8 @@ const decoded = (segment) => {
  */
 export function deathwatchRedirect(to) {
   if (to.name !== 'deathwatch-area') return undefined // every other page is not ours to touch
-  const page = resolveArea(to.params)
+  // Manage was renamed the Administratum (2026-11): its old addresses still lead there.
+  const page = resolveArea(to.params.area === 'manage' ? { ...to.params, area: 'administratum' } : to.params)
   const { query, hash } = to
   if (!page) {
     return { name: 'not-found', params: { pathMatch: to.path.split('/').filter(Boolean).map(decoded) }, query, hash }

@@ -38,6 +38,7 @@ import { createPerksHandler } from './perks.js'
 import { createPrivileges } from './privileges.js'
 import { createReportsHandler } from './reports.js'
 import { createRoster } from './roster.js'
+import { LEGION_ROLE } from './rosterLadder.js'
 import { createRosterHandler } from './rosterHandler.js'
 import { createRosterPublicHandler } from './rosterPublicHandler.js'
 import { createReportsStore } from './reportsStore.js'
@@ -104,7 +105,8 @@ const reports = createReportsHandler({
 
 // The Deathwatch area — see deathwatchHandler.js. Its two role ids have no
 // defaults: until both are set in the environment every route answers 503.
-// The Deathwatch Command role id is optional: unset, nobody is Deathwatch Command.
+// DEATHWATCH_ROLE_ID is Deathwatch Deployment. The Deathwatch Command, Emissary and award role ids are
+// optional: unset, nobody holds that standing (deathwatchAccess.js).
 const deathwatchStore = createDeathwatchStore(pool)
 const deathwatch = createDeathwatchHandler({
   access: createDeathwatchAccess({
@@ -113,8 +115,16 @@ const deathwatch = createDeathwatchHandler({
     deathwatchRoleId: process.env.DEATHWATCH_ROLE_ID,
     commanderRoleId: process.env.WATCH_COMMANDER_ROLE_ID,
     deathwatchCommandRoleId: process.env.DEATHWATCH_COMMAND_ROLE_ID,
+    legionRoleId: LEGION_ROLE,
+    emissaryRoleId: process.env.EMISSARY_ROLE_ID,
+    xenosbaneRoleId: process.env.XENOSBANE_SIGIL_ROLE_ID,
+    vigiliaRoleId: process.env.VIGILIA_MORTIS_ROLE_ID,
+    killMarineRoleId: process.env.KILL_MARINE_ROLE_ID,
   }),
   store: deathwatchStore,
+  // The Deployment list: members holding DEATHWATCH_ROLE_ID, from the roster's cache (no extra Discord calls).
+  roster,
+  deploymentRoleIds: (process.env.DEATHWATCH_ROLE_ID || '').split(',').filter(Boolean),
 })
 
 // The Reliquarium, members-only art and clips galleries — see galleryHandler.js. Until the clips channel

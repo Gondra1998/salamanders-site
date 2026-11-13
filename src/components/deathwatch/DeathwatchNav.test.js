@@ -37,7 +37,7 @@ describe('DeathwatchNav', () => {
   })
 
   it('draws the home icon on the way back', () => {
-    const w = mountNav({ area: 'manage', current: 'checks' })
+    const w = mountNav({ area: 'administratum', current: 'checks' })
     expect(w.findAll('a').at(-1).get('path').attributes('d')).toBe('M3 11l9-8 9 8M5 9.5V21h5v-6h4v6h5V9.5')
   })
 
@@ -51,7 +51,7 @@ describe('DeathwatchNav', () => {
     const w = mountNav({ area: 'eventtracker', current: 'players' })
     const current = w.findAll('[aria-current="page"]')
     expect(current).toHaveLength(1)
-    expect(current[0].text()).toBe('Players')
+    expect(current[0].text()).toBe('Operatives')
   })
 
   it('ends with a way back to the fortress', () => {

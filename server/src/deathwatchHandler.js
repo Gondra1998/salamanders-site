@@ -1,5 +1,6 @@
 /**
  * The Deathwatch routes: who am I, the area's data, document edits, and grants.
+ * Also the Deathwatch Deployment list (who holds the role, from the roster's member cache, roster.js).
  * Modeled on reports.js. Every route asks deathwatchAccess.js for a live
  * verdict and every uncertain path fails closed: 401 (no Discord identity),
  * 403 (not allowed), 503 (Discord unreachable, or the role ids are not set).
@@ -14,6 +15,12 @@ import { etagOf, ifNoneMatches } from './deathwatchEtag.js'
 import { MAX_ACTIVE_GRANTS, MAX_BODY_BYTES, isDiscordId, parseDocWrite, parseGrantBody } from './deathwatchValidate.js'
 
 const GRANT_ROUTE = /^\/deathwatch\/grants\/([^/]+)$/
+
+/** Who reads the Event Tracker: the cfg document `g`'s list for it (strings only), else Deathwatch Deployment. */
+export function trackerReaders(cfg) {
+  const list = cfg?.g?.eventtracker
+  return Array.isArray(list) ? list.filter((r) => typeof r === 'string') : ['deployment']
+}
 
 function send(status, text, headers = {}) {
   return new Response(text, { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers } })
@@ -39,16 +46,37 @@ async function readJson(request) {
   return { body }
 }
 
-export function createDeathwatchHandler({ access, store }) {
+export function createDeathwatchHandler({ access, store, roster = null, deploymentRoleIds = [] }) {
   const me = async (_request, verdict) =>
-    reply(200, { access: verdict.access, watchCommander: verdict.watchCommander, deathwatchCommand: verdict.deathwatchCommand })
+    reply(200, {
+      access: verdict.access,
+      watchCommander: verdict.watchCommander,
+      deathwatchCommand: verdict.deathwatchCommand,
+      roles: verdict.roles,
+    })
+
+  // The Event Tracker's documents (the live event and the archive) go only to its readers: the Watch Commander,
+  // and the roles he opened it to in Manage → Access (cfg `g`), else Deathwatch Deployment. Everyone with access
+  // gets cfg, which holds the page texts every part needs and that choice.
+  const readsTracker = (verdict, cfg) => verdict.watchCommander || trackerReaders(cfg).some((r) => verdict.roles.includes(r))
 
   async function data(request, verdict) {
     if (!verdict.access) return reply(403, { error: 'Restricted to the Deathwatch.' })
-    const text = JSON.stringify(await store.readAll())
+    const all = await store.readAll()
+    const tracker = readsTracker(verdict, all.cfg)
+    const text = JSON.stringify(tracker ? all : { teams: {}, cfg: all.cfg, archive: {} })
     const etag = etagOf(text)
     if (ifNoneMatches(request.headers.get('If-None-Match'), etag)) return send(304, null, { ETag: etag })
     return send(200, text, { ETag: etag })
+  }
+
+  // The battle-brothers holding Deathwatch Deployment (names and avatars, for Manage's Kill Team slots and the
+  // tracker's names): to the Event Tracker's readers only, as its data is.
+  async function deployment(_request, verdict) {
+    if (!verdict.access || !readsTracker(verdict, (await store.readAll()).cfg)) return reply(403, { error: 'Restricted to the Event Tracker.' })
+    const members = roster && deploymentRoleIds.length ? await roster.holding(deploymentRoleIds) : null
+    if (!members) return reply(503, { error: 'The member list is not available yet. Try again.' })
+    return reply(200, { members })
   }
 
   async function writeDoc(request, verdict) {
@@ -84,6 +112,7 @@ export function createDeathwatchHandler({ access, store }) {
   function find(method, pathname) {
     if (method === 'GET' && pathname === '/deathwatch/me') return { commander: false, run: me }
     if (method === 'GET' && pathname === '/deathwatch/data') return { commander: false, run: data }
+    if (method === 'GET' && pathname === '/deathwatch/deployment') return { commander: false, run: deployment }
     if (method === 'POST' && pathname === '/deathwatch/doc') return { commander: true, run: writeDoc }
     if (method === 'GET' && pathname === '/deathwatch/grants') return { commander: true, run: listGrants }
     if (method === 'POST' && pathname === '/deathwatch/grants') return { commander: true, run: addGrant }

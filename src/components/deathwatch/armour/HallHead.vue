@@ -35,7 +35,13 @@ const ICONS = {
   archive: 'M3 4h18v4H3zM5 8v12h14V8M10 12h4',
 }
 const head = () => HEADS[props.area]
-const line = () => head().line ?? (data.cfg.tx?.cur_n || DEFAULT_EVENT_NAME)
+// On the Event Tracker's Archive the line is the archived event open there (else "Event archive"), never the live one.
+const archived = () => {
+  if (props.area !== 'eventtracker' || props.tab !== 'archive') return null
+  const e = route.query.e
+  return (typeof e === 'string' && Object.hasOwn(data.archive ?? {}, e) && data.archive[e].name) || 'Event archive'
+}
+const line = () => head().line ?? archived() ?? (data.cfg.tx?.cur_n || DEFAULT_EVENT_NAME)
 const tabs = () => AREAS[props.area].tabs.filter((t) => !t.command || store.command)
 const icon = (t) => (t.command ? 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3' : (ICONS[t.slug] ?? 'M12 3 4.5 6v5.5c0 4.4 3.1 8.2 7.5 9.5 4.4-1.3 7.5-5.1 7.5-9.5V6z'))
 const to = (t) => ({ path: resolveArea({ area: props.area, tab: t.slug }).canonical, query: route.query.scene ? { scene: route.query.scene } : {} })
@@ -171,6 +177,11 @@ const to = (t) => ({ path: resolveArea({ area: props.area, tab: t.slug }).canoni
   border: 1px solid color-mix(in oklab, var(--dw-accent) 22%, var(--dw-line-2));
   border-radius: 2px;
   background: rgb(10 14 10 / 0.75);
+  /* It squeezes when pressed, as every other pressable does. */
+  transition: transform var(--dur-press) var(--ease-forge);
+}
+.hh-tab:active {
+  transform: scale(0.97);
 }
 .hh-tab svg {
   width: 18px;
@@ -180,11 +191,12 @@ const to = (t) => ({ path: resolveArea({ area: props.area, tab: t.slug }).canoni
   stroke-width: 1.8;
   stroke-linejoin: round;
 }
-/* The open tab: gold, in a gold frame on a warmer ground. */
+/* The open tab: filled with the accent, so it reads at a glance among the others (gold is kept for honours,
+   DESIGN.md). */
 .hh-tab[aria-current='page'] {
-  color: var(--dw-gold);
-  border-color: color-mix(in oklab, var(--dw-gold) 70%, transparent);
-  background: color-mix(in oklab, var(--dw-gold) 8%, rgb(22 22 18 / 0.9));
+  color: var(--dw-accent-ink, #041004);
+  border-color: var(--dw-accent);
+  background: var(--dw-accent);
 }
 .hh-tab:focus-visible {
   outline: 2px solid var(--dw-accent);

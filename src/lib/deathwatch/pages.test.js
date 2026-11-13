@@ -16,7 +16,7 @@ const listed = Object.entries(AREAS).flatMap(([area, { tabs }]) => tabs.map((t) 
 describe('pageLoader', () => {
   it('has exactly one view file for every tab of every area, and none for anything else', () => {
     expect(files.sort()).toEqual([...listed].sort())
-    expect(listed).toHaveLength(25)
+    expect(listed).toHaveLength(26)
   })
 
   it('gives a lazy loader for each of them', () => {
@@ -37,7 +37,7 @@ describe('pageLoader', () => {
   it('gives null for an unknown area or tab, or a tab under the wrong area', () => {
     expect(pageLoader('eventtracker', 'nope')).toBeNull()
     expect(pageLoader('nope', 'standings')).toBeNull()
-    expect(pageLoader('manage', 'standings')).toBeNull()
+    expect(pageLoader('administratum', 'standings')).toBeNull()
     expect(pageLoader('', '')).toBeNull()
   })
 

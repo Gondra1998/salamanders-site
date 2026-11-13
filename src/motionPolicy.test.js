@@ -288,7 +288,7 @@ describe('the motion rules check', () => {
     const everything = walk(srcDir).filter((f) => !SKIPPED.includes(f)).sort()
     expect(expand(SWEPT)).toEqual(everything)
     // and the depth is real: the app shell, a deep page, and the skeleton components are all in
-    for (const f of ['App.vue', 'views/deathwatch/pages/manage/checks.vue', 'components/deathwatch/skeleton/SkTable.vue']) {
+    for (const f of ['App.vue', 'views/deathwatch/pages/administratum/checks.vue', 'components/deathwatch/skeleton/SkTable.vue']) {
       expect(everything).toContain(f)
     }
   })

@@ -28,6 +28,20 @@ describe('deathwatchRedirect', () => {
     })
   })
 
+  it('takes the old Manage addresses to the Administratum, keeping the query', () => {
+    const query = { scene: 'commander' }
+    expect(deathwatchRedirect(to('/deathwatch/manage/checks', { area: 'manage', tab: 'checks' }, query))).toEqual({
+      path: '/deathwatch/administratum/checks',
+      query,
+      hash: '',
+      replace: true,
+    })
+    expect(deathwatchRedirect(to('/deathwatch/manage/manage', { area: 'manage', tab: 'manage' }))).toMatchObject({
+      path: '/deathwatch/administratum/manage',
+    })
+    expect(deathwatchRedirect(to('/deathwatch/administratum/checks', { area: 'administratum', tab: 'checks' }))).toBeUndefined()
+  })
+
   it('replaces an unknown tab with the first, and drops a trailing slash', () => {
     expect(deathwatchRedirect(to('/deathwatch/eventtracker/bogus', { area: 'eventtracker', tab: 'bogus' }))).toMatchObject({
       path: '/deathwatch/eventtracker/standings',

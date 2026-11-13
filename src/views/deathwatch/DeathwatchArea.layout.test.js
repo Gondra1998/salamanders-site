@@ -41,7 +41,7 @@ describe('the wide-screen rail', () => {
     expect(rem('display', rule('.dw-area.solo .dw-area-side', solo))).toBe('none')
     expect(rem('grid-template-columns', rule('.dw-area.solo', solo))).toBe('minmax(0, 1fr)')
     expect(rem('max-width', rule('.dw-area.solo .dw-area-main', solo))).toBe('none')
-    expect(source).toContain(`['armouringhall', 'recruitment', 'eventtracker'].includes(page.value.area)`)
+    expect(source).toContain(`['armouringhall', 'recruitment', 'eventtracker', 'administratum'].includes(page.value.area)`)
     expect(source).toContain(`:class="{ solo }"`)
   })
 })

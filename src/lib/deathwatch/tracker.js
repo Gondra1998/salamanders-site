@@ -140,6 +140,7 @@ export function calc(teams, custom) {
   CK.du = Object.values(dupes).filter((a) => a.length > 1)
   CK.slots = ts.flatMap((t) => t.m.filter((m) => (+m[4] || 0) + (+m[6] || 0) > SLOTS).map((m) => `${t.n} W${m[0]} O${m[1]}`))
   const kia = new Map(src.flatMap((t) => (t.ki ?? []).filter((n) => (t.ro ?? []).includes(n)).map((n) => [n, +(t.kw ?? {})[n] || 0])))
+  Object.assign(CK, moreChecks(ts, home, kia))
   return {
     S,
     ts: ts.sort((a, b) => a.r - b.r),
@@ -152,6 +153,33 @@ export function calc(teams, custom) {
     names: [...new Set([...Object.keys(home), ...Object.keys(P)])],
     kia,
   }
+}
+
+/**
+ * The checks that point at what to fix: each finding is { label } and where it is, a team (t: its id), a mission
+ * (t, w, o). → { twice, stray, afterKia, short }.
+ */
+function moreChecks(ts, home, kia) {
+  const at = (t, m) => ({ t: t.id, w: m[0], o: m[1] })
+  const rosters = Object.create(null)
+  for (const t of ts) for (const p of new Set(t.ro)) (rosters[p] ??= []).push(t)
+  const twice = Object.entries(rosters)
+    .filter(([, on]) => on.length > 1)
+    .map(([p, on]) => ({ label: `${p}: ${on.map((t) => t.n).join(', ')}`, t: on[1].id }))
+  const stray = []
+  const afterKia = []
+  for (const t of ts)
+    for (const m of t.m) {
+      if (!isPlayed(m)) continue
+      for (const [p] of m[8] ?? []) {
+        if (!p) continue
+        if (!(p in home)) stray.push({ label: `${p} in ${t.n} W${m[0]} O${m[1]}`, ...at(t, m) })
+        const fell = kia.get(p)
+        if (fell && m[0] > fell) afterKia.push({ label: `${p} (KIA W${fell}) in ${t.n} W${m[0]} O${m[1]}`, ...at(t, m) })
+      }
+    }
+  const short = ts.filter((t) => t.ro.length < 3).map((t) => ({ label: `${t.n} (${t.ro.length}/3)`, t: t.id }))
+  return { twice, stray, afterKia, short }
 }
 
 /** "KIA" or "KIA W2" for a fallen player, else ''. */
@@ -296,61 +324,6 @@ export const mvpText = (v) => v.toFixed(1).replace('.', ',')
 export const kd = (k, i) => num(k / Math.max(1, i))
 
 // ── Manage ────────────────────────────────────────────────────────────────────────────────────────────────
-
-/** A team with `a` renamed to `b` everywhere: roster, KIA list and every mission row. */
-export function renameInTeam(t, a, b) {
-  const d = clone(t)
-  d.ro = [...new Set((d.ro ?? []).map((n) => (n === a ? b : n)))]
-  d.ki = [...new Set((d.ki ?? []).map((n) => (n === a ? b : n)))]
-  d.kw = Object.fromEntries(Object.entries(d.kw ?? {}).map(([n, w]) => [n === a ? b : n, w]))
-  for (const m of d.m ?? []) for (const r of m[8] ?? []) if (r[0] === a) r[0] = b
-  return d
-}
-
-/**
- * What renaming `a` to `b` would touch, live and archived. → { teams: [id], archives: [id], entries, existing
- * (b's entries), roster (a is on a live roster), error } where error says why it must not run.
- */
-export function renamePlan(teams, archive, a, b) {
-  if (!a || !b) return { error: 'Enter the current and the new name.' }
-  if (a === b) return { error: 'The names are identical.' }
-  const conflicts = []
-  let entries = 0
-  let existing = 0
-  const scan = (t, where) => {
-    let hit = false
-    for (const m of t.m ?? []) {
-      const rows = m[8] ?? []
-      if (rows.some((r) => r[0] === a) && rows.some((r) => r[0] === b)) conflicts.push(`${where}${t.n} W${m[0]} O${m[1]}`)
-      for (const r of rows) {
-        if (r[0] === a) {
-          entries++
-          hit = true
-        }
-        if (r[0] === b) existing++
-      }
-    }
-    return hit || (t.ro ?? []).includes(a)
-  }
-  const live = Object.values(teams ?? {})
-  const hitTeams = live.filter((t) => scan(t, ''))
-  const hitArchives = Object.entries(archive ?? {}).filter(([, ev]) => (ev.teams ?? []).map((t) => scan(t, `${ev.name}: `)).some(Boolean))
-  const plan = { teams: hitTeams.map((t) => t.id), archives: hitArchives.map(([k]) => k), entries, existing, roster: hitTeams.some((t) => t.ro?.includes(a)) }
-  if (!hitTeams.length && !hitArchives.length) {
-    const all = [...live, ...Object.values(archive ?? {}).flatMap((e) => e.teams ?? [])].flatMap((t) => [...(t.ro ?? []), ...(t.m ?? []).flatMap((m) => (m[8] ?? []).map((r) => r[0]))])
-    const near = all.find((x) => x && x.toLowerCase() === a.toLowerCase() && x !== a)
-    return { ...plan, error: `No entries for “${a}”.${near ? ` Did you mean “${near}”?` : ''}` }
-  }
-  if (conflicts.length) {
-    return { ...plan, error: `Can't merge: “${a}” and “${b}” both appear in ${conflicts.slice(0, 4).join(', ')}${conflicts.length > 4 ? ' …' : ''}. Fix those missions first.` }
-  }
-  const onA = live.filter((t) => t.ro?.includes(a)).map((t) => t.id)
-  const onB = live.filter((t) => t.ro?.includes(b))
-  if (onA.length && onB.some((t) => !onA.includes(t.id))) {
-    return { ...plan, error: `Can't merge: “${b}” is on the roster of ${onB.map((t) => t.n).join(', ')}, “${a}” on another roster.` }
-  }
-  return plan
-}
 
 const toNum = (x) => +x || 0
 

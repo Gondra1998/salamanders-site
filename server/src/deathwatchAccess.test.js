@@ -31,6 +31,8 @@ const req = (token) =>
 
 function setup({ granted = [], delegated = {}, joinedAt = EARLY, ...opts } = {}) {
   const clock = { t: 1_000 }
+  // When every member's present membership began; a test may move it, as a leave and a rejoin would.
+  const member = { joinedAt }
   const fail = { identify: false, roles: false }
   const roles = {
     identify: vi.fn(async (request) => {
@@ -41,7 +43,7 @@ function setup({ granted = [], delegated = {}, joinedAt = EARLY, ...opts } = {})
     memberOf: vi.fn(async (id) => {
       if (fail.roles) throw new Upstream()
       const held = Object.values(USERS).find((u) => u.id === id).roles
-      return held === null ? null : { roles: held, joinedAt }
+      return held === null ? null : { roles: held, joinedAt: member.joinedAt }
     }),
   }
   // What the Watch Commander has given whom (deathwatch_access): a "grant" is the general level, given after joining.
@@ -66,7 +68,7 @@ function setup({ granted = [], delegated = {}, joinedAt = EARLY, ...opts } = {})
     now: () => clock.t,
     ...opts,
   })
-  return { access, roles, store, clock, fail, delegations, removed }
+  return { access, roles, store, clock, fail, delegations, removed, member }
 }
 
 describe('configured', () => {
@@ -747,6 +749,15 @@ describe('what the Watch Commander gives by hand, and leaving the guild', () => 
     const { v, removed } = await resolveAs('plain', { joinedAt: LATE.toISOString(), delegated: { [USERS.plain.id]: given('desk') } })
     expect(v.desk).toBe(false)
     expect(removed).toHaveLength(1)
+  })
+
+  it('drops the cached verdicts when it removes something, so a read cached before stops at once', async () => {
+    const t = setup({ delegated: { [USERS.plain.id]: given('desk') } })
+    expect((await t.access.resolve(req('plain'))).desk).toBe(true)
+    t.member.joinedAt = '2026-07-01T00:00:00.000Z' // left and came back
+    expect((await t.access.resolve(req('plain'))).desk).toBe(true) // still the cached read
+    expect((await t.access.resolve(req('plain'), { fresh: true })).desk).toBe(false) // a write's look finds it void
+    expect((await t.access.resolve(req('plain'))).desk).toBe(false) // and the cached read went with it
   })
 
   it('a join date Discord did not give proves nothing: it neither counts nor is removed', async () => {

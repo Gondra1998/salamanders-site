@@ -88,7 +88,10 @@ export function createDeathwatchAccess({
     if (member) {
       for (const d of await store.delegationsOf(user.id)) {
         if (joinedBefore(member.joinedAt, d.grantedAt)) given.add(d.kind)
-        else if (rejoinedSince(member.joinedAt, d.grantedAt)) await store.removeAccess(user.id, d.kind, 'left-guild')
+        else if (rejoinedSince(member.joinedAt, d.grantedAt)) {
+          await store.removeAccess(user.id, d.kind, 'left-guild')
+          forget() // an access change like any other: no read may keep a verdict from before it
+        }
       }
     }
     const standing = {

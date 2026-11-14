@@ -414,11 +414,20 @@ export function createScene(w, h, o = {}) {
       if (p.y > lakeTopAt(p.x) - 5) break
       raw.push(p)
     }
-    // The river does not stop at the shore: it runs on into the lake, a third of the way across the visible crust, so
-    // it can pour in and fan out there.
-    const lastX = raw[raw.length - 1].x
-    raw.push({ x: lastX - 2 * mx, y: lakeTopAt(lastX) + 3 })
-    raw.push({ x: lastX - 11 * mx, y: lakeTopAt(lastX) + lake.vis * 0.3 })
+    // The river does not stop at the shore, and it does not turn a corner there either. It comes down to the shore on
+    // the line it was already on, and runs out a little way onto the lake, still leaning the way it came and easing
+    // toward the viewer. (It used to jog sideways and end as a straight-sided tab lying on the lake: from most windows
+    // it read as a box.)
+    const last = raw[raw.length - 1]
+    const before = raw[raw.length - 2] || breach
+    const tl = Math.hypot(last.x - before.x, last.y - before.y) || 1
+    const tx = (last.x - before.x) / tl
+    const ty = Math.max(0.35, (last.y - before.y) / tl)
+    const shoreHere = lakeTopAt(last.x) + 2
+    const atShore = { x: last.x + (tx / ty) * Math.max(0, shoreHere - last.y), y: shoreHere }
+    raw.push(atShore)
+    const runOut = lake.vis * 0.27
+    raw.push({ x: atShore.x + (tx / ty) * runOut * 0.4, y: atShore.y + runOut })
     const N = 80
     const { pts, length } = smoothPath(raw, N)
     // the first sample on the lake: the mouth. The channel opens a little from just above it.
@@ -433,6 +442,7 @@ export function createScene(w, h, o = {}) {
     const nx = new Float32Array(N + 1)
     const ny = new Float32Array(N + 1)
     const hw = new Float32Array(N + 1)
+    const fan = new Float32Array(N + 1)
     for (let i = 0; i <= N; i++) {
       const a = pts[Math.max(0, i - 1)]
       const b = pts[Math.min(N, i + 1)]
@@ -442,9 +452,12 @@ export function createScene(w, h, o = {}) {
       nx[i] = -dy / l
       ny[i] = dx / l
       const s = i / N
-      hw[i] = chb * (0.13 + 0.3 * Math.pow(s, 1.25)) * (phone ? 0.78 : 1) * (1 + 0.1 * (vnoise(s * 6, 4.4) - 0.5)) * (1 + 0.5 * sm((s - (mouthS - 0.1)) / 0.2))
+      // The channel opens a little as it nears the shore, then spreads into a fan as it runs out onto the lake: its
+      // banks curve away from each other, as a stream's do where it meets still water. `fan` is how far that has gone.
+      fan[i] = sm((s - (mouthS - 0.035)) / (1 - mouthS + 0.035))
+      hw[i] = chb * (0.13 + 0.3 * Math.pow(s, 1.25)) * (phone ? 0.78 : 1) * (1 + 0.1 * (vnoise(s * 6, 4.4) - 0.5)) * (1 + 0.4 * sm((s - (mouthS - 0.14)) / 0.14) + 1.5 * fan[i] * fan[i])
     }
-    return { pts, N, nx, ny, hw, length, inlet: pts[N], mouth: pts[mouthI], mouthI, mouthS }
+    return { pts, N, nx, ny, hw, fan, length, inlet: pts[N], mouth: pts[mouthI], mouthI, mouthS }
   })()
   // the dry land above the lake: levees and shoulders are clipped to it, so the channel crosses the shore and never
   // shows a cut end on the lake
@@ -622,11 +635,20 @@ export function createScene(w, h, o = {}) {
       const core = 8 * (1 - sm(s / 0.55)) * Math.exp(-Math.pow(across / (0.28 * hwHere), 2))
       const rim = 6 * (1 - 0.4 * s) * Math.exp(-Math.pow((edge - 0.84) / 0.1, 2))
       const lip = -6 * sm((edge - 0.92) / 0.08)
-      return core + (rim + lip) * (1 - into(s))
+      // (and it runs hotter over its last stretch, into the heat of the pool it feeds: there is no dark tongue of
+      // river lying on the bright lake)
+      return core + (rim + lip) * (1 - into(s)) + 3.2 * sm((s - (river.mouthS - 0.12)) / 0.12)
     }
+    const fanAt = (s) => sm((s - (river.mouthS - 0.035)) / (1 - river.mouthS + 0.035))
     // How opaque it is. Over its last stretch the river melts into the lake's open lava: the sides feather away and the
     // end fades, rather than stopping at an edge.
-    const melt = (s, across, hwHere) => (1 - sm((s - river.mouthS) / (1 - river.mouthS || 1))) * (1 - 0.85 * into(s) * sm((Math.abs(across) / hwHere - 0.45) / 0.55))
+    // (In the fan only the middle is still the river: the wider it has spread, the more of each side has already gone
+    // into the lake. So its end is a soft tongue with no corners, not a tab.)
+    const melt = (s, across, hwHere) => {
+      const f = fanAt(s)
+      const sides = 1 - f * sm((Math.abs(across) / hwHere - (0.8 - 0.6 * f)) / 0.38)
+      return (1 - sm((s - river.mouthS) / (1 - river.mouthS || 1))) * sides
+    }
     for (let i = 0; i < river.N; i++) {
       const a = river.pts[i]
       const b = river.pts[i + 1]
@@ -2247,7 +2269,7 @@ export function createScene(w, h, o = {}) {
     const ix = river.inlet.x
     const iy = river.inlet.y
     const Rh = Math.max(groundH * 0.85, 36)
-    const poolRx = Math.max(river.hw[river.N] * 2, groundH * 0.45)
+    const poolRx = Math.max(river.hw[river.mouthI] * 1.6, groundH * 0.45)
     const poolRy = poolRx * 0.42
     const pcy = iy + poolRy * 0.25
     // The fill order. The lava spreads from the mouth over the ground: sideways along the mountain's base both ways,
@@ -3211,13 +3233,24 @@ export function createScene(w, h, o = {}) {
       ctx.globalAlpha = 1
       // cooled banks, wider than the channel: a soft dark shoulder, then the levee itself
       // (clipped to dry land: where the river reaches the lake it opens into it)
+      // (and they thin out to nothing as they come down to it: cut off square at the shore, they stood either side of
+      // the mouth like two posts)
+      const mouthP = river.mouth
+      const bank = (rgb, alpha) => {
+        const grd = ctx.createLinearGradient(a.x, a.y, mouthP.x, mouthP.y)
+        grd.addColorStop(0, `rgba(${rgb},${alpha})`)
+        grd.addColorStop(0.8, `rgba(${rgb},${alpha})`)
+        grd.addColorStop(0.97, `rgba(${rgb},0)`)
+        grd.addColorStop(1, `rgba(${rgb},0)`)
+        return grd
+      }
       ctx.save()
       ctx.clip(aboveLake, 'evenodd')
       ribbon(ctx, 1.7, 3)
-      ctx.fillStyle = 'rgba(9,6,5,0.42)'
+      ctx.fillStyle = bank('9,6,5', 0.42)
       ctx.fill()
       ribbon(ctx, 1.08, 1.5)
-      ctx.fillStyle = 'rgba(44,17,10,0.9)'
+      ctx.fillStyle = bank('44,17,10', 0.9)
       ctx.fill()
       ctx.restore()
       // the molten body: the Doom fire, laid along the channel
@@ -3296,7 +3329,12 @@ export function createScene(w, h, o = {}) {
           }
           ctx.closePath()
           const roof = ctx.createLinearGradient(river.pts[lo].x, river.pts[lo].y, river.pts[hi].x, river.pts[hi].y)
-          for (let i = lo; i <= hi; i++) roof.addColorStop((i - lo) / (hi - lo), `rgba(46,13,7,${((1 - ks[i]) * 0.94).toFixed(3)})`)
+          // (it thins out over the river's last stretch: the lake is not roofed, and a roof that ran right down to it
+          // ended as a dark box against the lava)
+          for (let i = lo; i <= hi; i++) {
+            const nearLake = 1 - sm((i / river.N - (river.mouthS - 0.16)) / 0.14)
+            roof.addColorStop((i - lo) / (hi - lo), `rgba(46,13,7,${((1 - ks[i]) * 0.94 * nearLake).toFixed(3)})`)
+          }
           ctx.fillStyle = roof
           ctx.fill()
         }

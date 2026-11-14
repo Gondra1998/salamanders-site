@@ -22,7 +22,10 @@ if (!dom.includes('<title>golden</title>')) {
   console.error(`golden: the page did not finish. ${log ? log[1].slice(0, 600) : 'Is the dev server up on 127.0.0.1:5191?'}`)
   process.exit(2)
 }
-const now = JSON.parse(dom.match(/<script id="golden" type="application\/json">([\s\S]*?)<\/script>/)[1])
+const now = JSON.parse(dom.match(/<script id="golden"[^>]*>([\s\S]*?)<\/script>/)[1])
+// (numbers the page reports beside the hashes: the brightest pixel the drawing reaches)
+const notes = dom.match(/<script id="golden"[^>]*data-notes="([^"]*)"/)
+if (notes) for (const [name, n] of Object.entries(JSON.parse(notes[1].replace(/&quot;/g, '"')))) console.log(`${name}: rgb(${n.rgb.join(', ')}), luminance ${n.luminance}, ${(n.share * 100).toFixed(3)}% of the picture within a tenth of it`)
 const names = Object.keys(now)
 
 if (process.argv.includes('--write')) {

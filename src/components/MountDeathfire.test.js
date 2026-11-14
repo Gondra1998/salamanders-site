@@ -365,3 +365,163 @@ describe('what the live mountain did, and this one must', () => {
     expect(createScene).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('the same mountain behind every page', () => {
+  it('shows an inner page the same scene, mirrored and quiet, and builds nothing for it', async () => {
+    await start()
+    pass(50)
+    const measured = measureCalm.mock.calls.length
+    await router.push('/builds')
+    await settle()
+    pass(100)
+    expect(createScene).toHaveBeenCalledTimes(1)
+    expect(lastEnv()).toMatchObject({ mirror: true, quiet: true })
+    // the new page's text lies elsewhere: it is measured at once, not a third of a second later
+    expect(measureCalm.mock.calls.length).toBe(measured + 1)
+
+    await router.push('/')
+    await settle()
+    pass(100)
+    expect(lastEnv()).toMatchObject({ mirror: false, quiet: false })
+    expect(createScene).toHaveBeenCalledTimes(1)
+  })
+
+  it('never mirrors a phone, and gives it the phone\'s mountain under where the hero\'s text ends', async () => {
+    setWindow(390, 844)
+    await start({ path: '/builds' })
+    expect(loadBaked).toHaveBeenCalledWith('phone')
+    const options = createScene.mock.calls[0][2]
+    expect(options.faceX).toBeUndefined()
+    expect(options.textBottom).toBe(352)
+    pass(50)
+    expect(lastEnv()).toMatchObject({ mirror: false, quiet: true })
+    // half as much ash on a phone: 460 x (390 x 844 / 1600000) / 2 = 47 flakes, 19 of them in front
+    expect(fake.calls('fillRect', wrapper.find('canvas.deathfire-canvas').element.getContext('2d'))).toHaveLength(19)
+  })
+})
+
+describe('Deathwatch, which is off planet', () => {
+  const deathwatch = { path: '/deathwatch', component: Page, meta: { deathfire: false, ashOver: true } }
+  const shown = (selector) => wrapper.find(selector).element.style.display !== 'none'
+
+  it('draws nothing there, ends a trial that was raging, and brings the mountain back on leaving', async () => {
+    window.history.replaceState(null, '', '/?trial=3')
+    await start({ routes: [deathwatch] })
+    pass(8000)
+    expect(lastEnv().trial).toBeGreaterThan(0.9)
+    expect(shown('.deathfire')).toBe(true)
+
+    await router.push('/deathwatch')
+    await settle()
+    expect(shown('.deathfire')).toBe(false)
+    expect(shown('.deathfire-veil')).toBe(false) // though the page is marked ashOver
+    const drawn = scene().draw.mock.calls.length
+    const thrown = scene().erupt.mock.calls.length
+    pass(3000)
+    expect(scene().draw.mock.calls.length).toBe(drawn)
+    expect(scene().erupt.mock.calls.length).toBe(thrown)
+
+    await router.push('/')
+    await settle()
+    pass(100)
+    expect(shown('.deathfire')).toBe(true)
+    expect(scene().draw.mock.calls.length).toBeGreaterThan(drawn)
+    expect(lastEnv().trial).toBe(0)
+    expect(createScene).toHaveBeenCalledTimes(1)
+  })
+
+  it('opened there, fetches and builds nothing until the visitor leaves for the rest of the site', async () => {
+    await start({ path: '/deathwatch', routes: [deathwatch] })
+    pass(1000)
+    expect(loadBaked).not.toHaveBeenCalled()
+    expect(createScene).not.toHaveBeenCalled()
+    expect(shown('.deathfire')).toBe(false)
+
+    await router.push('/builds')
+    await settle()
+    pass(50)
+    expect(createScene).toHaveBeenCalledTimes(1)
+    expect(scene().draw).toHaveBeenCalled()
+    expect(shown('.deathfire')).toBe(true)
+  })
+
+  it('shows the veil again on a page marked ashOver that is not Deathwatch', async () => {
+    await start({ path: '/deathwatch', routes: [deathwatch, { path: '/accolades', component: Page, meta: { ashOver: true } }] })
+    await router.push('/accolades')
+    await settle()
+    pass(50)
+    expect(shown('.deathfire-veil')).toBe(true)
+  })
+})
+
+describe('a page opened directly, before the router knows which page it is', () => {
+  const deathwatch = { path: '/deathwatch', component: { template: '<p>page</p>' }, meta: { deathfire: false, ashOver: true } }
+  /** Mount as the app does: at once, with the first navigation still on its way. */
+  async function open(path) {
+    const history = createMemoryHistory()
+    history.replace(path) // the address the browser was opened at
+    router = createRouter({
+      history,
+      routes: [{ path: '/', component: { template: '<p>page</p>' } }, { path: '/builds', component: { template: '<p>page</p>' } }, deathwatch],
+    })
+    // (installing the router is what starts its first navigation, to wherever the address bar points)
+    wrapper = mount(MountDeathfire, { global: { plugins: [router] }, attachTo: document.body })
+    await router.isReady()
+    await settle()
+  }
+
+  it('fetches and builds nothing for a Deathwatch page', async () => {
+    await open('/deathwatch')
+    pass(500)
+    expect(loadBaked).not.toHaveBeenCalled()
+    expect(createScene).not.toHaveBeenCalled()
+  })
+
+  it('draws an inner page mirrored from its first frame', async () => {
+    await open('/builds')
+    pass(100)
+    expect(createScene).toHaveBeenCalledTimes(1)
+    for (const call of scene().draw.mock.calls) expect(call[3]).toMatchObject({ mirror: true, quiet: true })
+  })
+
+  it('builds nothing while the page is still being found out, whatever stirs in the meantime', async () => {
+    // A browser's resize observer calls back once as soon as it is asked to watch, and a page's own code can take a
+    // while to arrive. Neither may start a build for the placeholder page the router shows until it knows.
+    let watching = null
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback) {
+        watching = callback
+      }
+      observe() {
+        Promise.resolve().then(() => watching([]))
+      }
+      disconnect() {}
+    })
+    let arrive
+    const slow = { ...deathwatch, component: () => new Promise((resolve) => (arrive = () => resolve({ template: '<p>page</p>' }))) }
+    const history = createMemoryHistory()
+    history.replace('/deathwatch')
+    router = createRouter({ history, routes: [{ path: '/', component: { template: '<p>page</p>' } }, slow] })
+    wrapper = mount(MountDeathfire, { global: { plugins: [router] }, attachTo: document.body })
+    await settle()
+    pass(200) // the observer's first call has come and gone, and frames have run
+    await settle()
+    expect(loadBaked).not.toHaveBeenCalled()
+    expect(createScene).not.toHaveBeenCalled()
+
+    arrive()
+    await router.isReady()
+    await settle()
+    pass(200)
+    expect(loadBaked).not.toHaveBeenCalled()
+    expect(createScene).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('with reduced motion, still draws its one frame once the page is known', async () => {
+    motionAllowed.mockReturnValue(false)
+    await open('/builds')
+    expect(scene().draw).toHaveBeenCalledTimes(1)
+    expect(lastEnv()).toMatchObject({ mirror: true, quiet: true })
+  })
+})

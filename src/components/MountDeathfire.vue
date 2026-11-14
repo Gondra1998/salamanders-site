@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { motionAllowed } from '../lib/doomfire'
 import { deathfireHeat } from '../lib/deathfireHeat'
 import { loadBaked } from '../lib/deathfire/baked.js'
@@ -40,7 +40,10 @@ const veil = ref(null)
 const mode = ref('off')
 
 const route = useRoute()
+const router = useRouter()
 const ashOver = computed(() => !!route.meta?.ashOver)
+// A page can say no mountain is drawn behind it at all (meta.deathfire: false). Deathwatch does: it is off planet.
+const shows = computed(() => route.meta?.deathfire !== false)
 
 const FPS = 30
 
@@ -49,6 +52,7 @@ let stopped = false
 let last = 0
 let t = 0
 let hidden = false
+let known = false // the router has settled which page was opened (see onMounted)
 
 let scene = null // the drawing, built for this window
 let sceneKey = '' // what it was built for (compose's key)
@@ -101,19 +105,20 @@ function kitFor(kind) {
  * Make sure the scene on screen is the one this window and page call for.
  *
  * One scene serves every page, so most calls find nothing to do. It is built again only when the window changes.
+ * Behind a page with no mountain (Deathwatch) nothing is fetched or built at all.
  * The canvas is sized in the same breath as the new scene is built, so the old scene goes on drawing at its own size
  * until then.
  * Resolves to true when it built a scene.
  */
 async function layout() {
   const cv = canvas.value
-  if (!cv) return false
+  if (!cv || !known) return false
   const w = window.innerWidth
   const h = window.innerHeight
   lastW = w
   lastH = h
   const ratio = Math.min(window.devicePixelRatio || 1, 2)
-  const plan = compose({ w, h, dpr: ratio, path: route.path })
+  const plan = compose({ w, h, dpr: ratio, path: route.path, shows: shows.value })
   if (!plan) return false
   view = { mirror: plan.mirror, quiet: plan.quiet }
   if (plan.key === sceneKey || plan.key === wanted) return false
@@ -170,7 +175,7 @@ function relayout() {
  * begins.
  */
 function draw(dt, secs, live) {
-  if (!scene || !ctx) return
+  if (!scene || !ctx || !shows.value) return
   const { phase, trial, blast } = sky.step(secs, live)
   const stirred = excitement(phase, trial)
   // the mountain's own pulse: the more stirred, the oftener. Most are spits; about one in five is an eruption
@@ -244,13 +249,16 @@ const onVisibility = () => (hidden = document.hidden)
 watch(
   () => route.path,
   async () => {
+    // (a Time of Trial does not go on raging unseen behind a page with no mountain: it ends there)
+    if (!shows.value) sky?.endTrial()
+    calmAt = -1 // the new page's text lies elsewhere: measure it on the next frame
     const built = await layout()
     // (a still frame is not on a loop: it is drawn again for the new page, whose text lies elsewhere)
     if (!built && mode.value === 'still') still()
   },
 )
 
-onMounted(() => {
+onMounted(async () => {
   hidden = document.hidden
   sky = createSky({ storage: storage(), hold: devNumber('moon'), fresh: dev?.get('visit') === 'new' })
   const tier = devNumber('trial')
@@ -265,6 +273,14 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(relayout)
     resizeObserver.observe(host.value)
   }
+
+  // The app mounts before the router has settled which page was opened, and until it has, the route is a
+  // placeholder that looks like the home page. Nothing is built for that (layout() waits for `known`, whoever calls
+  // it: the resize observer calls once as soon as it starts watching): a page opened directly must get its own view
+  // from the first frame, and a Deathwatch page must fetch nothing.
+  await router.isReady().catch(() => {})
+  if (stopped) return
+  known = true
 
   if (!motionAllowed()) {
     mode.value = 'still'
@@ -296,10 +312,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="host" class="deathfire" :data-mode="mode" aria-hidden="true">
+  <div v-show="shows" ref="host" class="deathfire" :data-mode="mode" aria-hidden="true">
     <canvas ref="canvas" class="deathfire-canvas" />
   </div>
-  <canvas v-show="ashOver" ref="veil" class="deathfire-veil" aria-hidden="true" />
+  <canvas v-show="shows && ashOver" ref="veil" class="deathfire-veil" aria-hidden="true" />
 </template>
 
 <style scoped>

@@ -1,66 +1,31 @@
-// @vitest-environment jsdom
-import { describe, it, expect } from 'vitest'
-import { profileFor, profileKeyFor, routeProfiles } from './fireTuning'
+import { describe, expect, it } from 'vitest'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import * as tuning from './fireTuning'
 
-describe('the Deathwatch volcano profile', () => {
-  const deathwatch = () => routeProfiles['/deathwatch/*']
-
-  it('is one profile for the hub and every page under it', () => {
-    expect(deathwatch()).toBeDefined()
-    for (const path of ['/deathwatch', '/deathwatch/eventtracker/standings', '/deathwatch/administratum/enter-mission']) {
-      expect(profileFor(path), path).toBe(deathwatch())
-    }
+describe('the title\'s fire', () => {
+  it('is all this module holds: the numbers the hero\'s burning title is drawn with', () => {
+    expect(Object.keys(tuning).sort()).toEqual(['DEFAULTS', 'fireTuning'])
+    expect(tuning.DEFAULTS).toEqual({ text: { pixel: 1, speed: 1.45, maxHeight: 0.8, variation: 0.95, intensity: 1.3, base: 0.35 } })
+    expect(tuning.fireTuning.text).toEqual(tuning.DEFAULTS.text)
   })
 
-  it('is a quieter mountain than the landing page, so a page of tables keeps its contrast', () => {
-    expect(deathwatch().density).toBeLessThan(1)
-    expect(deathwatch().scale).toBeLessThan(1)
-  })
-
-  it('covers the /deathwatch section only, not a path that merely starts with the same letters', () => {
-    for (const path of ['/deathwatchful', '/deathwatch-x/y', '/x/deathwatch']) {
-      expect(profileFor(path), path).toBe(routeProfiles['*'])
-    }
-  })
-
-  it('leaves every other page as it was', () => {
-    expect(routeProfiles['/']).toEqual({ bearing: 0, scale: 1, variance: 1, density: 1 }) // the landing page, exactly: do not tidy
-    expect(profileFor('/')).toBe(routeProfiles['/'])
-    expect(profileFor('/companies')).toBe(routeProfiles['/companies'])
-    expect(profileFor('/roster')).toBe(routeProfiles['/roster'])
-    expect(profileFor('/nowhere')).toBe(routeProfiles['*'])
-  })
-
-  it('answers something that is not a path with the catch-all', () => {
-    for (const path of [undefined, null, '', 5, {}]) expect(profileFor(path), String(path)).toBe(routeProfiles['*'])
-  })
-
-  it('never takes a property of Object for a profile', () => {
-    for (const path of ['__proto__', '/__proto__', 'constructor', '/constructor/x', '/toString']) {
-      expect(profileFor(path), path).toBe(routeProfiles['*'])
-    }
+  it('keeps its own copy, so nothing that changes it changes the defaults', () => {
+    expect(tuning.fireTuning.text).not.toBe(tuning.DEFAULTS.text)
   })
 })
 
-describe('profileKeyFor', () => {
-  it('names the entry that governs a path: its own, else its section, else the catch-all', () => {
-    expect(profileKeyFor('/roster')).toBe('/roster')
-    expect(profileKeyFor('/deathwatch')).toBe('/deathwatch/*')
-    expect(profileKeyFor('/deathwatch/eventtracker/standings')).toBe('/deathwatch/*')
-    expect(profileKeyFor('/nowhere')).toBe('*')
-    expect(profileKeyFor(undefined)).toBe('*')
-  })
-})
-
-describe('volcano route profiles', () => {
-  it('/roster has its own profile instead of the unrouted fallback', () => {
-    expect(routeProfiles['/roster']).toBeDefined()
-    expect(profileFor('/roster')).not.toBe(routeProfiles['*'])
-  })
-
-  it('/roster is a calm, low horizon: a long reading page of panels must not sit under a glaring peak', () => {
-    const { density, scale } = profileFor('/roster')
-    expect(density).toBeLessThanOrEqual(0.6)
-    expect(scale).toBeLessThanOrEqual(0.6)
+describe('the dev tuner', () => {
+  // It was a slider panel (the URL switch tune=1) for the old volcano and the title. The look is settled and it is
+  // gone: this keeps it from coming back by halves.
+  const src = fileURLToPath(new URL('..', import.meta.url))
+  it('is gone, with everything that switched it on', () => {
+    expect(existsSync(join(src, 'components/FireTuner.vue'))).toBe(false)
+    const files = readdirSync(src, { recursive: true })
+      .map((f) => String(f).replaceAll('\\', '/'))
+      .filter((f) => /\.(vue|js)$/.test(f) && !/\.test\.js$/.test(f))
+    const offenders = files.filter((f) => /FireTuner|tuningEnabled|sal-tune|[?&]tune=/.test(readFileSync(join(src, f), 'utf8')))
+    expect(offenders).toEqual([])
   })
 })

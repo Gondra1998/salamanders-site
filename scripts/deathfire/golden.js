@@ -36,6 +36,30 @@ function hash(cv) {
   return (h >>> 0).toString(16).padStart(8, '0')
 }
 
+/**
+ * The brightest pixel of a canvas, by how bright it is to the eye (the relative luminance contrast is reckoned by),
+ * and how much of the picture is nearly as bright. The site's contrast tests assume a "brightest lava"
+ * (src/test-utils/contrast.js): this is what the drawing really reaches.
+ */
+function brightest(cv) {
+  const data = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data
+  const lin = new Float32Array(256)
+  for (let i = 0; i < 256; i++) lin[i] = i / 255 <= 0.03928 ? i / 255 / 12.92 : ((i / 255 + 0.055) / 1.055) ** 2.4
+  const lum = (k) => 0.2126 * lin[data[k]] + 0.7152 * lin[data[k + 1]] + 0.0722 * lin[data[k + 2]]
+  let best = 0
+  let at = 0
+  for (let k = 0; k < data.length; k += 4) {
+    const l = lum(k)
+    if (l > best) {
+      best = l
+      at = k
+    }
+  }
+  let near = 0
+  for (let k = 0; k < data.length; k += 4) if (lum(k) > 0.9 * best) near++
+  return { rgb: [data[at], data[at + 1], data[at + 2]], luminance: +best.toFixed(3), share: +(near / (data.length / 4)).toFixed(5) }
+}
+
 /** A block of text to keep calm around, where the home page's title stands, and the page's own measure of it. */
 function calmFor(w, h) {
   const r = { l: 0.2 * w, r: 0.8 * w, t: 0.36 * h, b: 0.56 * h }
@@ -95,14 +119,16 @@ try {
   // an inner page: the same scene, drawn mirrored and quiet
   out['desktop-inner'] = hash(run({ ...desktop, options: { faceX: 0.14, ...withPictures('desktop') }, env: { mirror: true, quiet: true } }).cv)
 
-  out['desktop-trial'] = hash(
-    run({
-      ...desktop,
-      options: { faceX: 0.14, ...withPictures('desktop') },
-      env: { lakeLevel: 1, spill: 1, trial: 1, moonPhase: 0.5 },
-      before: (scene, i) => i === 10 && scene.erupt(2.1, 0.4),
-    }).cv,
-  )
+  const trial = run({
+    ...desktop,
+    options: { faceX: 0.14, ...withPictures('desktop') },
+    env: { lakeLevel: 1, spill: 1, trial: 1, moonPhase: 0.5 },
+    before: (scene, i) => i === 10 && scene.erupt(2.1, 0.4),
+  })
+  out['desktop-trial'] = hash(trial.cv)
+  // (not a case: a number to read. The brightest the drawing gets, in its heaviest frame, and in a calm one.)
+  const notes = { 'brightest in a trial': brightest(trial.cv), 'brightest at rest': brightest(home.cv) }
+  document.getElementById('golden').dataset.notes = JSON.stringify(notes)
 
   out['phone-home'] = hash(run({ w: 390, h: 844, dpr: 2, options: { textBottom: 352, ...withPictures('phone') } }).cv)
 

@@ -1,116 +1,20 @@
-// THROWAWAY MOCK. A 2D canvas repaint of the hero drawing, shown over the real page by viewer.js.
-// Nothing here ships: it exists so the look can be judged in Chrome before any product code changes.
+// Mount Deathfire, the drawing: a 2D canvas painting of the volcano that stands behind every page.
 //
-// References looked at before drawing (docs/design/refs):
-//   usgs-mauna-loa-2022-12-08-fissure-3-channel.png  : one wide river, bright margins, crust plates mid-stream, dark levees
-//   usgs-halemaumau-2021-01-19-lake-channel-evening.jpg : a lake of dark crust plates netted with thin orange seams, hot only at the inlet
-//   zzArchive/dev-mock-lava3d/shots/desktop-r3-4.png   : the round-3 3D mock, the one that felt alive (one river, lit relief, jagged crown, sphere moon)
+// createScene(w, h, o) builds one scene for a window (the mountain's geometry, the two fires, the lake, everything
+// that moves) and hands back how to draw a frame of it. It owns only paint: the clocks, the page's text and the
+// lifecycle belong to whatever hosts it.
+//
+// References looked at before drawing (USGS photographs):
+//   Mauna Loa, 2022-12-08, the fissure 3 channel : one wide river, bright margins, crust plates mid-stream, dark levees
+//   Halema'uma'u, 2021-01-19, the lake at evening : a lake of dark crust plates netted with thin orange seams, hot only at the inlet
 
-import { DoomFire, DOOM_PALETTE } from '../../src/lib/doomfire.js'
+import { DoomFire } from '../doomfire.js'
+import { clamp01, hash2, mulberry32, sm, vnoise } from './noise.js'
+import { DOOM, MOLTEN, TOP, forgePalette, heatColourIn } from './palette.js'
+import { excitement } from './trial.js'
 
 const TAU = Math.PI * 2
-// The title's fire palette, flat, so the lava and the title burn in the same colours.
-const TOP = DOOM_PALETTE.length - 1
-const DOOM = new Float32Array(DOOM_PALETTE.length * 3)
-DOOM_PALETTE.forEach((c, i) => DOOM.set(c, i * 3))
-// The same 37 steps graded for rock that glows rather than gas that burns. The Doom ramp's upper middle is a mustard
-// yellow (183,183,47): right for flame on black, sulphurous for lava. Here red is pushed up and green pulled down, so
-// the middle of the ramp is a deep orange, and the top four steps run warm white instead of pure white.
-const MOLTEN = new Float32Array(DOOM_PALETTE.length * 3)
-DOOM_PALETTE.forEach(([r, g, b], i) => MOLTEN.set([Math.min(255, r * 1.18 + (i ? 12 : 0)), g * 0.84, b * 0.8], i * 3))
-;[[255, 222, 128], [255, 234, 166], [255, 243, 202], [255, 251, 232]].forEach((c, k) => MOLTEN.set(c, (TOP - 3 + k) * 3))
-let PAL = MOLTEN
-// "Forge": the two ramps blended. Doom's own orange and gold tint the hot middle of the molten ramp (`tint`, 0..1),
-// and the cool end runs a deeper red (`red`, 0..1). The top steps stay the molten warm white.
-function forgePalette(tint, red) {
-  const out = new Float32Array(MOLTEN.length)
-  const s3 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x))
-  for (let i = 0; i <= TOP; i++) {
-    const s = i / TOP
-    const a = i * 3
-    // Doom comes in across the middle and fades out again under the white-hot top
-    const wt = tint * s3((s - 0.18) / 0.3) * (1 - s3((s - 0.84) / 0.12))
-    let r = MOLTEN[a] + (DOOM[a] - MOLTEN[a]) * wt
-    let g = MOLTEN[a + 1] + (DOOM[a + 1] - MOLTEN[a + 1]) * wt
-    let b = MOLTEN[a + 2] + (DOOM[a + 2] - MOLTEN[a + 2]) * wt
-    // the cool end: less green and blue, a touch more red, so cooling lava reads blood red and not brown
-    const cool = red * (1 - s3(s / 0.5))
-    r = Math.min(255, r * (1 + 0.14 * cool))
-    g *= 1 - 0.42 * cool
-    b *= 1 - 0.5 * cool
-    out[a] = r
-    out[a + 1] = g
-    out[a + 2] = b
-  }
-  return out
-}
-/** The palette colour at a fractional heat, written into out[o..o+2]. */
-function heatColour(hv, out, o) {
-  const v = hv < 0 ? 0 : hv > TOP ? TOP : hv
-  const i0 = v | 0
-  const f = v - i0
-  const a = i0 * 3
-  const b = (i0 < TOP ? i0 + 1 : i0) * 3
-  out[o] = PAL[a] + (PAL[b] - PAL[a]) * f
-  out[o + 1] = PAL[a + 1] + (PAL[b + 1] - PAL[a + 1]) * f
-  out[o + 2] = PAL[a + 2] + (PAL[b + 2] - PAL[a + 2]) * f
-}
-
-export function mulberry32(seed) {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let x = Math.imul(a ^ (a >>> 15), 1 | a)
-    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296
-  }
-}
-function hash2(x, y) {
-  let h = (x * 374761393 + y * 668265263) | 0
-  h = ((h ^ (h >>> 13)) * 1274126177) | 0
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296
-}
-function vnoise(x, y) {
-  const xi = Math.floor(x)
-  const yi = Math.floor(y)
-  const fx = x - xi
-  const fy = y - yi
-  const u = fx * fx * (3 - 2 * fx)
-  const v = fy * fy * (3 - 2 * fy)
-  const a = hash2(xi, yi)
-  const b = hash2(xi + 1, yi)
-  const c = hash2(xi, yi + 1)
-  const d = hash2(xi + 1, yi + 1)
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v
-}
-const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x)
-const sm = (x) => {
-  const c = clamp01(x)
-  return c * c * (3 - 2 * c)
-}
 const lerp = (a, b, t) => a + (b - a) * t
-// The Time of Trial, as the live site runs it (MountDeathfire.vue): how hard it rages, 0 to 1, eased in, held, and let
-// go slowly. Tier 1 is a trial, 2 a great trial, 3 a cataclysm. Nothing flashes.
-export const trialLength = (tier) => 6 + (6 + 8 * tier) + (30 + 10 * tier)
-export function trialLevel(sec, tier) {
-  const rise = 6
-  const hold = 6 + 8 * tier
-  const fall = 30 + 10 * tier
-  const peak = [0, 0.55, 0.8, 1][tier]
-  if (sec < rise) return peak * sm(sec / rise)
-  if (sec < rise + hold) return peak
-  return peak * (1 - sm((sec - rise - hold) / fall))
-}
-/**
- * How stirred up the mountain is, 0 to 1. Prometheus drags at the crust as it nears: nothing for the outer half of its
- * crossing, then a rise to a half at its closest pass (`phase` 0.5). A Time of Trial (`trial`, 0 to 1) comes on top.
- * Everything that quickens with the moon reads this one number: the pulse of eruptions, the river's speed and heat,
- * the lake's inflow, the plume, the sparks, the far volcanoes.
- */
-export function excitement(phase, trial = 0) {
-  const near = Math.sin(Math.PI * clamp01(phase))
-  return clamp01(0.5 * sm((near - 0.7) / 0.3) + trial)
-}
 const css = (c, a = 1) => `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${a.toFixed(3)})`
 /** Linear lookup in a ramp of [position, [r, g, b]] stops. */
 function ramp(stops, s) {
@@ -203,12 +107,13 @@ export function createScene(w, h, o = {}) {
   const stack = phone && Number.isFinite(o.textBottom)
   const dpr = o.dpr ?? 1
   const L = { sky: true, moon: true, plume: true, ridges: true, relief: true, river: true, lake: true, monolith: true, fog: true, embers: true, ash: true, ...(o.layers || {}) }
-  // the tuner's numbers (viewer.js TUNE): read as tn.<key> ?? default
+  // the look's numbers (`o.tune`): read as tn.<key> ?? default
   const tn = o.tune || {}
   // `quiet`: the far ranges stand without their live volcanoes (no pin of light, no wisp, no halo), for pages where small
   // text stands over them. The ranges keep their shape: the notches are still cut and the seeded streams run as before.
   const quietFar = !!o.quiet
-  PAL =o.palette === 'doom' ? DOOM : o.palette === 'molten' ? MOLTEN : forgePalette(tn.lavaTint ?? 0.5, tn.lavaRed ?? 0.5)
+  // the lava's colours, for this scene: "forge" unless asked for one of the two it is blended from
+  const heatColour = heatColourIn(o.palette === 'doom' ? DOOM : o.palette === 'molten' ? MOLTEN : forgePalette(tn.lavaTint ?? 0.5, tn.lavaRed ?? 0.5))
 
   // ---------------------------------------------------------------- the mountain's frame (same numbers as the live hero)
   // The tuner's three numbers for the mountain: peakH (the rim's height as a fraction of the screen), baseW (the half-base

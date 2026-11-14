@@ -5,11 +5,12 @@
 // the recorded ones). A case that differs after a change means the change altered what is drawn.
 //
 // The scene's code is named once, here. The baked pictures sit in ./baked/ beside it.
-const SCENE = '/dev-mock/hero2d/mock.js'
+const SCENE = '/src/lib/deathfire/scene.js'
 
 import { bakeScenes } from './bakeScenes.js'
 
-const { createScene, mulberry32 } = await import(/* @vite-ignore */ SCENE)
+const { createScene } = await import(/* @vite-ignore */ SCENE)
+const { mulberry32 } = await import(/* @vite-ignore */ new URL('./noise.js', new URL(SCENE, location.href)).href)
 const BAKED = new URL('./baked/', new URL(SCENE, location.href))
 
 // the numbers the look was approved with (the mock's tuner at its defaults)

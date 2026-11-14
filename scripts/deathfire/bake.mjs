@@ -1,23 +1,23 @@
-// THROWAWAY MOCK TOOL. Writes the baked pictures to ./baked/: runs bake.html in headless Chrome (one, at low
-// priority), reads the pictures and their measurements out of the page, and saves them.
+// The bake tool. Writes the baked pictures of the hero drawing to src/lib/deathfire/baked/: runs bake.html in headless
+// Chrome (one, at low priority), reads the pictures and their measurements out of the page, and saves them.
 //
-//   node dev-mock/hero2d/bake.mjs            (the mock's dev server must be up on 127.0.0.1:5191)
+//   npm run deathfire:bake            (the dev server must be up on 127.0.0.1:5191)
 //
-// Writes baked/baked.json and the pictures it names: mountain-desktop.webp, mountain-phone.webp, moon.webp. Anything
-// else in baked/ from an earlier bake is removed.
+// Writes baked.json and the pictures it names: mountain-desktop.webp, mountain-phone.webp, moon.webp. Anything else in
+// that folder from an earlier bake is removed. The same code, baked twice, gives the same files byte for byte.
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { dumpDom } from '../../scripts/deathfire/chrome.mjs'
+import { dumpDom } from './chrome.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const url = process.env.BAKE_URL || 'http://127.0.0.1:5191/dev-mock/hero2d/bake.html'
+const url = process.env.BAKE_URL || 'http://127.0.0.1:5191/scripts/deathfire/bake.html'
 
 const dom = await dumpDom(url)
 if (!dom.includes('<title>baked</title>')) throw new Error('the page did not finish baking: is the dev server up on 127.0.0.1:5191?')
 
 const meta = JSON.parse(dom.match(/<script id="meta" type="application\/json">([\s\S]*?)<\/script>/)[1])
-const out = join(here, 'baked')
+const out = join(here, '../../src/lib/deathfire/baked')
 mkdirSync(out, { recursive: true })
 const written = new Set(['baked.json'])
 let total = 0

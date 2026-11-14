@@ -1,4 +1,4 @@
-// THROWAWAY MOCK TOOL. Bakes the parts of the scene that are the same picture for every visitor, so no browser has to
+// The bake tool's page. Bakes the parts of the scene that are the same picture for every visitor, so no browser has to
 // work them out: it paints them with the scene's own code, at the size the look was judged at, and leaves the pictures
 // (WebP) and their measurements in the page for bake.mjs to write out.
 //
@@ -13,9 +13,9 @@
 // 159 KB for desktop and saved about 20 ms of a build: no bargain. The ground is worked out in the browser.
 //
 // The mountain's numbers (base width, crown, rock, columns, planes) are baked in. To change them: put the numbers in
-// TUNE below, bake again. The two scenes it paints are in scripts/deathfire/bakeScenes.js.
-import { createScene } from './mock.js'
-import { bakeScenes } from '../../scripts/deathfire/bakeScenes.js'
+// TUNE below, bake again (`npm run deathfire:bake`). The two scenes it paints are in bakeScenes.js.
+import { createScene } from '../../src/lib/deathfire/scene.js'
+import { bakeScenes } from './bakeScenes.js'
 
 const TUNE = {} // the mountain's numbers to bake with (empty: the scene's own defaults)
 const QUALITY = 0.85

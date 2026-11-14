@@ -19,13 +19,14 @@
 //               so add ?trial= to see one)  ?skyfast=1 (the moon crosses in 30 seconds; a trial still runs at its own
 //               length and carries the moon)
 //               ?trial=1|2|3 (start a Time of Trial of that tier)  ?visit=new (forget this browser's place in the cycle)
-import { createScene, excitement, trialLength, trialLevel } from './mock.js'
+import { createScene } from '../../src/lib/deathfire/scene.js'
+import { excitement, trialLength, trialLevel } from '../../src/lib/deathfire/trial.js'
 
 const q = new URLSearchParams(location.search)
 const LAYERS = ['sky', 'moon', 'plume', 'ridges', 'relief', 'river', 'lake', 'monolith', 'fog', 'embers', 'ash']
 const off = new Set((q.get('off') || '').split(',').filter(Boolean))
 const state = {
-  // the baked pictures (./baked/, written by bake.mjs): 'baked' uses them where there is one for the drawing asked
+  // the baked pictures (written by the bake tool): 'baked' uses them where there is one for the drawing asked
   // for; 'live' paints everything here, as the sliders say
   mtn: q.get('mtn') === 'live' ? 'live' : 'baked',
   mode: q.get('mode') || 'mock',
@@ -58,16 +59,17 @@ const NO_BAKE = new Set((q.get('nobake') || '').split(',')) // ?nobake=moon: pai
 const MOUNTAIN_KEYS = ['baseW', 'crown', 'rock', 'columns', 'planes']
 let bakedNow = 'all painted here' // what the scene on screen was built with
 let bakedList = null
+const BAKED = '/src/lib/deathfire/baked/' // where the baked pictures live, beside the scene's code
 let bakedMoon = null
 const fetching = {}
 async function picture(entry) {
-  const blob = await (await fetch(`./baked/${entry.file}`, { cache: 'no-store' })).blob()
+  const blob = await (await fetch(`${BAKED}${entry.file}`, { cache: 'no-store' })).blob()
   return { image: await createImageBitmap(blob), meta: entry, kb: Math.round(blob.size / 1024) }
 }
 function needBaked(kind) {
   fetching[kind] ??= (async () => {
     try {
-      bakedList ??= fetch('./baked/baked.json', { cache: 'no-store' }).then((r) => r.json())
+      bakedList ??= fetch(`${BAKED}baked.json`, { cache: 'no-store' }).then((r) => r.json())
       const list = await bakedList
       bakedMoon ??= picture(list.moon)
       const [moon, mountain] = await Promise.all([bakedMoon, picture(list[kind].mountain)])
@@ -82,7 +84,7 @@ function needBaked(kind) {
 }
 // At or under this width the page gets the phone drawing and the stack layout. 768 is the live site's own breakpoint.
 const CUT = parseInt(q.get('cut'), 10) || 768
-// The tuner: named numbers handed to the scene as `tune`. To add a knob: add a row here, read `o.tune.<key>` in mock.js.
+// The tuner: named numbers handed to the scene as `tune`. To add a knob: add a row here, read `o.tune.<key>` in scene.js.
 const TUNE = [
   { key: 'peakH', label: 'Peak height', min: 0.5, max: 1.05, step: 0.01, def: 0.72 },
   { key: 'baseW', label: 'Base width', min: 0.4, max: 1.6, step: 0.01, def: 1.35 },

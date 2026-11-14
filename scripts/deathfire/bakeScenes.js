@@ -7,6 +7,9 @@
 // there, beside the mountain.
 const REF = { w: 1596, h: 738, faceX: 0.14 }
 
+/** The numbers of a look that shape the mountain, and so are baked into its pictures. */
+export const mountainNumbers = (look) => ({ baseW: look.baseW, crown: look.crown, rock: look.rock, columns: look.columns, planes: look.planes })
+
 /** `tune`: the mountain's numbers to bake with (empty: the scene's own defaults). `more`: anything else to hand the scene (the painter). */
 export function bakeScenes(createScene, tune = {}, more = {}) {
   function desktop() {

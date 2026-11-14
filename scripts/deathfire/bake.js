@@ -12,13 +12,14 @@
 // What is not, though it was tried (2026-11-14): the ground's plates. As a picture they weighed 71 KB for phones and
 // 159 KB for desktop and saved about 20 ms of a build: no bargain. The ground is worked out in the browser.
 //
-// The mountain's numbers (base width, crown, rock, columns, planes) are baked in. To change them: put the numbers in
-// TUNE below, bake again (`npm run deathfire:bake`). The two scenes it paints are in bakeScenes.js.
+// The mountain's numbers (base width, crown, rock, columns, planes) are baked in. They are read from the approved
+// look (src/lib/deathfire/look.js): to change the mountain, change them there and bake again
+// (`npm run deathfire:bake`). The two scenes it paints are in bakeScenes.js.
 import { createScene } from '../../src/lib/deathfire/scene.js'
 import * as painter from '../../src/lib/deathfire/painters.js'
-import { bakeScenes } from './bakeScenes.js'
+import { LOOK } from '../../src/lib/deathfire/look.js'
+import { bakeScenes, mountainNumbers } from './bakeScenes.js'
 
-const TUNE = {} // the mountain's numbers to bake with (empty: the scene's own defaults)
 const QUALITY = 0.85
 
 const out = {}
@@ -37,7 +38,7 @@ function picture(file, cv) {
   pictures.append(cap, img)
   return { file, px: [cv.width, cv.height] }
 }
-const scenes = bakeScenes(createScene, TUNE, { painter })
+const scenes = bakeScenes(createScene, mountainNumbers(LOOK), { painter })
 for (const kind of ['desktop', 'phone']) {
   const t0 = performance.now()
   const bake = scenes[kind]().info.bake

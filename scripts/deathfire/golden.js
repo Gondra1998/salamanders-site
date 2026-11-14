@@ -7,7 +7,7 @@
 // The scene's code is named once, here. The baked pictures sit in ./baked/ beside it.
 const SCENE = '/src/lib/deathfire/scene.js'
 
-import { bakeScenes } from './bakeScenes.js'
+import { bakeScenes, mountainNumbers } from './bakeScenes.js'
 
 const { createScene } = await import(/* @vite-ignore */ SCENE)
 const beside = (name) => new URL(name, new URL(SCENE, location.href)).href
@@ -16,11 +16,8 @@ const { mulberry32 } = await import(/* @vite-ignore */ beside('./noise.js'))
 const painter = await import(/* @vite-ignore */ beside('./painters.js'))
 const BAKED = new URL('./baked/', new URL(SCENE, location.href))
 
-// the numbers the look was approved with (the mock's tuner at its defaults)
-const TUNE = {
-  peakH: 0.72, baseW: 1.35, crown: 1.25, rock: 1, columns: 1, planes: 0.55, ranges: 1, rangeH: 1, haze: 0.5, lavaTint: 0.5, lavaRed: 0.5,
-  lavaHeat: 1.12, plume: 1.3, embers: 2.3, lake: 1, lakeCrust: 0.3, lakeHeat: 1, lakeStart: 0.3, lakeFill: 5, fog: 1,
-}
+// the numbers of the approved look, from the one place they are kept
+const { LOOK: TUNE } = await import(/* @vite-ignore */ beside('./look.js'))
 const FRAMES = 60
 const realRandom = Math.random
 const seedChance = () => (Math.random = mulberry32(0x601de))
@@ -136,7 +133,7 @@ try {
   out['desktop-painted'] = hash(run({ ...desktop, options: { faceX: 0.14, painter }, frames: 1 }).cv)
 
   // the pictures the bake tool makes
-  const scenes = bakeScenes(createScene, {}, { painter })
+  const scenes = bakeScenes(createScene, mountainNumbers(TUNE), { painter })
   for (const kind of ['desktop', 'phone']) {
     seedChance()
     out[`bake-${kind}`] = hash(scenes[kind]().info.bake.mountain.cv)

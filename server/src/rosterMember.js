@@ -46,5 +46,7 @@ export function memberFacts(raw, guildId) {
     avatar: avatarUrl(raw, guildId),
     bot: raw.user.bot === true,
     roles: new Set(Array.isArray(raw.roles) ? raw.roles.filter((r) => typeof r === 'string') : []),
+    // When their present membership began (Discord's joined_at): a delegation given before it was lost by leaving.
+    joinedAt: typeof raw.joined_at === 'string' ? raw.joined_at : null,
   }
 }

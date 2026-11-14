@@ -7,7 +7,6 @@
 import { computed, defineAsyncComponent, h, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { AREAS, LOCK_TEXT, mayOpen, resolveArea } from '../../lib/deathwatch/areas'
-import { useGates } from '../../lib/deathwatch/useGates'
 import { pageLoader } from '../../lib/deathwatch/pages'
 import { pageTexts } from '../../lib/deathwatch/pageTexts'
 import { useDeathwatch } from '../../stores/deathwatch'
@@ -30,19 +29,18 @@ const sheetOpen = ref(false)
 
 const page = computed(() => resolveArea(route.params))
 const area = computed(() => AREAS[page.value.area])
-// Each area opens to the roles it is given (Manage → Access, else areas.js); anyone else gets the lock in place of
-// the whole area. Manage stays the Watch Commander's. Hidden only: the server refuses them its writes, and the Event
-// Tracker's data, anyway.
-const gates = useGates()
+// Each area opens to the standings it lists (areas.js); anyone else gets the lock in place of the whole area. Hidden
+// only: the server refuses them its writes, and the Event Tracker's data, anyway.
 const who = computed(() => ({ commander: store.commander, held: store.roles }))
-const restricted = computed(() => !mayOpen(gates.value[page.value.area] ?? [], who.value))
-const restrictedText = computed(() => (page.value.area === 'administratum' ? 'Restricted to the Watch Commander.' : LOCK_TEXT[page.value.area]))
+const restricted = computed(() => !mayOpen(area.value.roles, who.value))
+const restrictedText = computed(() => (page.value.area === 'administratum' ? 'Restricted to the Administratum.' : LOCK_TEXT[page.value.area]))
 const currentTab = computed(() => area.value.tabs.find((t) => t.slug === page.value.tab))
 const tabLabel = computed(() => currentTab.value.label)
-// A single tab may list its own (Watch Command): the rest of the area stays open. Hidden only, as above.
+// A single tab may list its own (Watch Command, Enter mission): the rest of the area stays open. Hidden only, as above.
 const locked = computed(() => !!currentTab.value.roles && !mayOpen(currentTab.value.roles, who.value))
-// The texts the open view reads, which the Watch Commander can edit in place ("Edit page"). Hidden only, as above.
-const texts = computed(() => (store.commander ? pageTexts(page.value.area, page.value.tab, page.value.sub) : []))
+// The texts the open view reads, which the Watch Commander and the desk can edit in place ("Edit page"), never over a
+// tab locked for them. Hidden only, as above.
+const texts = computed(() => (store.canEdit && !locked.value ? pageTexts(page.value.area, page.value.tab, page.value.sub) : []))
 
 // While a view's chunk is on its way (after a short delay, so a fast one never flashes it), and if it fails.
 // From 900px the Armouring Hall has no rail (.solo): its views head themselves (HallHead). Where no view does (still
@@ -100,21 +98,21 @@ watch(viewKey, async (key) => {
           </div>
         </header>
         <div class="dw-area-navwrap">
-          <DeathwatchNav :area="page.area" :current="page.tab" :command="store.command" />
+          <DeathwatchNav :area="page.area" :current="page.tab" :who="who" />
         </div>
       </aside>
       <!-- A phone: the bar says which view is open and opens the list of views from the foot of the screen. -->
       <DeathwatchAreaBar class="dw-area-bar" :area-label="area.label" :tab-label="tabLabel" :open="sheetOpen" @open="sheetOpen = true" />
       <DeathwatchNavSheet v-model="sheetOpen" :aria-label="`${area.label} views`">
-        <DeathwatchNav :area="page.area" :current="page.tab" :command="store.command" @navigate="sheetOpen = false" />
+        <DeathwatchNav :area="page.area" :current="page.tab" :who="who" @navigate="sheetOpen = false" />
       </DeathwatchNavSheet>
       <div class="dw-area-main">
         <!-- Keyed on the view, so the whole framed sheet opens again (deathwatch.css) when the tab changes. -->
         <div :key="viewKey" ref="sheet" class="dw-area-sheet dw-panel">
-          <ManageBar v-if="headHere" :tab="page.tab" />
+          <ManageBar v-if="headHere" :tab="page.tab" :can-edit="store.canEdit" />
           <template v-if="locked">
             <HallHead v-if="solo && !headHere" :tab="page.tab" :area="page.area" />
-            <DeathwatchLock class="dw-area-restricted" message="Reserved for the Deathwatch Command." />
+            <DeathwatchLock class="dw-area-restricted" :message="currentTab.lock" />
           </template>
           <component :is="view" v-else :key="viewKey" />
         </div>

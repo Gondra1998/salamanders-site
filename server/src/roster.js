@@ -106,5 +106,11 @@ export function createRoster({
       .sort((a, b) => a.name.localeCompare(b.name))
   }
 
-  return { current, holding }
+  /** → [{ id, name, avatar, joinedAt }] of every member but bots, a fresh copy; null if no roster has ever loaded. */
+  async function members() {
+    if (!(await current())) return null
+    return view.people.map(({ id, name, avatar, joinedAt }) => ({ id, name, avatar, joinedAt }))
+  }
+
+  return { current, holding, members }
 }

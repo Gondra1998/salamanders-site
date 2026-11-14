@@ -1,12 +1,15 @@
 import { describe, it, expect } from 'vitest'
+import * as fc from 'fast-check'
 import {
   COLLECTIONS,
   MAX_DOC_BYTES,
   MAX_BODY_BYTES,
-  MAX_ACTIVE_GRANTS,
+  MAX_ACTIVE_ACCESS,
+  KINDS,
   isDiscordId,
+  isKind,
+  parseAccessBody,
   parseDocWrite,
-  parseGrantBody,
 } from './deathwatchValidate'
 
 const write = (over = {}) => ({ col: 'teams', id: 'alpha', op: 'set', doc: { n: 1 }, ...over })
@@ -17,7 +20,8 @@ describe('limits', () => {
     expect(COLLECTIONS).toEqual(['teams', 'cfg', 'archive'])
     expect(MAX_DOC_BYTES).toBe(1_048_576)
     expect(MAX_BODY_BYTES).toBe(2_097_152)
-    expect(MAX_ACTIVE_GRANTS).toBe(200)
+    expect(MAX_ACTIVE_ACCESS).toBe(1000)
+    expect(KINDS).toEqual(['deathwatch', 'watchcommand', 'desk'])
   })
 })
 
@@ -86,22 +90,47 @@ describe('parseDocWrite', () => {
   })
 })
 
-describe('parseGrantBody', () => {
-  it('accepts 17 to 20 digits and returns only the id', () => {
-    for (const discordId of ['1'.repeat(17), '2'.repeat(18), '3'.repeat(20)]) {
-      expect(parseGrantBody({ discordId, extra: 'ignored' })).toEqual({ discordId })
+describe('parseAccessBody', () => {
+  const ID = '300000000000000001'
+
+  it('accepts a Discord id and a known kind, and returns only those two', () => {
+    for (const kind of ['deathwatch', 'watchcommand', 'desk']) {
+      expect(parseAccessBody({ discordId: ID, kind, extra: 'ignored' })).toEqual({ discordId: ID, kind })
     }
+    for (const discordId of ['1'.repeat(17), '3'.repeat(20)]) expect(parseAccessBody({ discordId, kind: 'desk' })).toEqual({ discordId, kind: 'desk' })
   })
 
-  it('rejects anything else', () => {
-    const bad = ['1'.repeat(16), '1'.repeat(21), 'abc', ' ' + '1'.repeat(18), '1'.repeat(18) + '\n', 123456789012345678, undefined]
-    for (const discordId of bad) expect(isError(parseGrantBody({ discordId }))).toBe(true)
-    for (const b of [null, undefined, [], 'x', {}]) expect(isError(parseGrantBody(b))).toBe(true)
+  it('refuses a body that is not an object', () => {
+    for (const b of [null, undefined, [], 'x', 42]) expect(parseAccessBody(b)).toBe('Malformed request.')
+  })
+
+  it('refuses anything but a 17 to 20 digit id string, before looking at the kind', () => {
+    const bad = ['1'.repeat(16), '1'.repeat(21), ' ' + ID, ID + '\n', 'abc', 300000000000000001, undefined, null]
+    for (const discordId of bad) expect(parseAccessBody({ discordId, kind: 'nope' })).toBe('Enter a Discord user id (17 to 20 digits).')
+  })
+
+  it('refuses any kind but the three, exactly as spelt', () => {
+    for (const kind of ['Desk', 'DESK', ' desk', 'admin', 'deployment', 'command', '', '__proto__', 'toString', ['desk'], { desk: 1 }, null, undefined, 1]) {
+      expect(parseAccessBody({ discordId: ID, kind })).toBe('Unknown access kind.')
+    }
+  })
+})
+
+describe('isKind', () => {
+  it('is true for exactly the three kinds, for any string', () => {
+    fc.assert(fc.property(fc.string(), (k) => isKind(k) === ['deathwatch', 'watchcommand', 'desk'].includes(k)))
+    for (const k of KINDS) expect(isKind(k)).toBe(true)
+  })
+
+  it('is false for anything that is not a string', () => {
+    fc.assert(fc.property(fc.anything().filter((v) => typeof v !== 'string'), (v) => isKind(v) === false))
+    expect(isKind(['desk'])).toBe(false)
+    expect(isKind({ toString: () => 'desk' })).toBe(false)
   })
 })
 
 describe('isDiscordId', () => {
-  it('agrees with the grant rule', () => {
+  it('accepts 17 to 20 digit strings only', () => {
     expect(isDiscordId('1'.repeat(17))).toBe(true)
     expect(isDiscordId('1'.repeat(20))).toBe(true)
     expect(isDiscordId('1'.repeat(16))).toBe(false)

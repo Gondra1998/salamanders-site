@@ -8,20 +8,10 @@ const tab = (slug, label) => ({ slug, label })
 // The Watch Commander opens everything, and a part that lists none is the Watch Commander's alone. A tab's own
 // list replaces its area's. The hub itself opens to everyone the gate lets in; its cards carry these locks.
 // Only what is shown: the server keeps the Event Tracker's data to its readers itself.
-const LEGION = ['legion', 'emissary']
-// The awards that open the Chronicles, each a Discord role of its own. The server also names Deathwatch Kill-Marine
-// (`killmarine`), which opens no part: it is there to be checked for one thing of its own.
-const ACCOLADES = ['xenosbane', 'vigilia']
-
-/** Every role a part can be opened to, in the order Manage → Access lists them, with its name there. */
-export const ROLES = [
-  ['legion', 'Legion'],
-  ['emissary', 'Emissary'],
-  ['deployment', 'Deathwatch Deployment'],
-  ['command', 'Deathwatch Command'],
-  ['xenosbane', 'Xenosbane Sigil'],
-  ['vigilia', 'Vigilia Mortis in Aeternum'],
-]
+// Chronicles, the Hall of Relics and Recruitment list none: the Watch Commander keeps them to himself, as he chose on
+// the old Manage → Access page (2026-11-13). Opening one is listing its roles here; what they were before that choice:
+// Chronicles ['command', 'deployment', 'xenosbane', 'vigilia'], the other two ['legion', 'emissary'].
+// The server also names Deathwatch Kill-Marine (`killmarine`), which opens no part: it is checked for one thing of its own.
 
 /** The lock's words on an area's card and page where they are its own; any other says the lock's "Access restricted." */
 export const LOCK_TEXT = {
@@ -54,14 +44,14 @@ export const AREAS = {
       { slug: 'standard', label: 'Standard', items: ['watchbrother', 'companyheraldry'] },
       { slug: 'specialist', label: 'Specialist', items: ['reclusiarc', 'librarium', 'apothecarion', 'mechanicus'] },
       // Only Deathwatch Command (and the Watch Commander) see this tab (DeathwatchNav) or open it.
-      { slug: 'watch-command', label: 'Watch Command', command: true, roles: ['command'], items: ['watchsergeant', 'watchchaplain', 'watchlibrarian', 'watchapothecary', 'watchtechmarine'] },
+      { slug: 'watch-command', label: 'Watch Command', command: true, roles: ['command'], lock: 'Reserved for the Deathwatch Command.', items: ['watchsergeant', 'watchchaplain', 'watchlibrarian', 'watchapothecary', 'watchtechmarine'] },
       tab('restricted-wargear', 'Restricted Wargear'),
     ],
   },
   chronicles: {
     label: 'Chronicles of Valor',
     blurb: 'Discover the deeds, victories, and honours of the Watch.',
-    roles: ['command', 'deployment', ...ACCOLADES],
+    roles: [],
     tabs: [
       tab('hall-of-champions', 'Hall of Champions'),
       tab('chamber-of-honor', 'Chamber of Honor'),
@@ -74,22 +64,24 @@ export const AREAS = {
   hallofrelics: {
     label: 'Hall of Relics',
     blurb: 'Honour the warriors who shaped the history of Ebonhold.',
-    roles: LEGION,
+    roles: [],
     tabs: [tab('notable-members', 'Notable Members'), tab('fortress-lore', 'Fortress Lore')],
   },
   // The old site's Recruitment, at its old address: the hub's Enlist button goes here.
   recruitment: {
     label: 'Recruitment',
     blurb: 'Terms of Service and requirements for the Watch',
-    roles: LEGION,
+    roles: [],
     tabs: [tab('terms-of-service', 'Terms of Service'), tab('requirements', 'Requirements')],
   },
+  // The Watch Commander's, the desk's (given by hand in Access: runs it) and the guild admins' (see it, change nothing).
+  // The server refuses every write but the Watch Commander's and the desk's, whatever is shown.
   administratum: {
     label: 'Administratum',
     blurb: "The Watch Commander's dashboard",
-    roles: [],
+    roles: ['desk', 'admin'],
     tabs: [
-      tab('enter-mission', 'Enter mission'),
+      { ...tab('enter-mission', 'Enter mission'), roles: ['desk'], lock: 'Reserved for the Watch Commander and the desk.' },
       tab('manage', 'Manage'),
       tab('checks', 'Checks'),
       tab('records', 'Records'),
@@ -115,17 +107,24 @@ export function resolveArea(params) {
   return { area, tab: slug, sub: item, canonical: `/deathwatch/${area}/${slug}${item ? `/${item}` : ''}` }
 }
 
-/** The parts Manage → Access gates: every area but Manage, which stays the Watch Commander's. */
-export const GATED = Object.keys(AREAS).filter((a) => a !== 'administratum')
-
-/**
- * Each gated area's roles: the Watch Commander's choice (the cfg document `g`, area → roles), else the defaults
- * above. A stored list keeps only the roles it knows; one that is not a list falls back to the default.
- */
-export function gatesOf(g) {
-  const known = new Set(ROLES.map(([k]) => k))
-  return Object.fromEntries(GATED.map((a) => [a, Array.isArray(g?.[a]) ? g[a].filter((r) => known.has(r)) : AREAS[a].roles]))
-}
-
 /** Whether someone may open a part that lists `roles`: the Watch Commander, or a holder of any one of them. */
 export const mayOpen = (roles, { commander, held }) => commander === true || roles.some((r) => held.includes(r))
+
+/** Whether someone may change things in the Administratum: the Watch Commander, or the desk. Never an admin. */
+export const canEdit = (who) => mayOpen(['desk'], who)
+
+/** An area's tabs that someone may open: those with no `roles` of their own, and those they hold one of. */
+export const tabsFor = (area, who) => AREAS[area].tabs.filter((t) => !t.roles || mayOpen(t.roles, who))
+
+/**
+ * What a `/deathwatch/me` with no `roles` stands for: a server from before the standings. Its old rule holds: every
+ * part a role opens, so never the Administratum (not the desk or admin) nor the parts the Watch Commander keeps.
+ */
+export const LEGACY_ROLES = ['legion', 'emissary', 'deployment', 'command', 'xenosbane', 'vigilia']
+
+/** What the Watch Commander can give one person in Access (server/src/deathwatchValidate.js KINDS), in page order. */
+export const ACCESS_KINDS = [
+  ['desk', 'Desk'],
+  ['watchcommand', 'Watch Command'],
+  ['deathwatch', 'Deathwatch'],
+]

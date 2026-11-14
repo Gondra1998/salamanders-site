@@ -9,6 +9,7 @@ import { useTracker } from '../../../../lib/deathwatch/useTracker'
 import { COMPANIES, WEIGHT_LABELS, archiveDoc, clone, parseBackup, slotIds } from '../../../../lib/deathwatch/tracker'
 import { download } from '../../../../lib/deathwatch/download'
 import { useDeployment } from '../../../../lib/deathwatch/deployment'
+import { useDeathwatch } from '../../../../stores/deathwatch'
 import TrackerState from '../../../../components/deathwatch/tracker/TrackerState.vue'
 import ResetZone from '../../../../components/deathwatch/tracker/ResetZone.vue'
 
@@ -203,6 +204,9 @@ const SECTIONS = [
 const DATA = ['data', 'Data & Archive', 'M3 4h18v4H3zM5 8v12h14V8M10 12h4']
 // A link from Checks opens where its finding is fixed: ?s= a section, ?t= a team in its editor.
 const q = useRoute().query
+// The Watch Commander and the desk change things here; an admin sees the same desk with every such control disabled.
+// Only what is shown: the server refuses an admin's writes anyway.
+const gate = useDeathwatch()
 const section = ref([...SECTIONS, DATA].some(([k]) => k === q.s) ? q.s : 'teams')
 const editing = ref(q.t ? +q.t : null)
 const edited = computed(() => teams.value.find((t) => t.id === editing.value) ?? null)
@@ -243,14 +247,15 @@ async function resetTeams() {
       </aside>
 
       <div class="mg-main">
+        <p v-if="!gate.canEdit" class="dw-sub">Read only: the Watch Commander and the desk make changes here.</p>
         <template v-if="section === 'tour'">
           <h2 class="dw-plaque">Tour</h2>
           <p v-if="!teams.length" class="dw-empty">No event is running. Name the new tour, then add its Kill Teams.</p>
-          <div class="mg-inline">
+          <fieldset class="dw-ro mg-inline" :disabled="!gate.canEdit">
             <label class="dw-field">Tour name<input v-model="tour.name" autocomplete="off" placeholder="Deathwatch Tour" /></label>
             <button type="button" class="dw-btn primary rm-fade" @click="saveTour">{{ teams.length ? 'Save tour name' : 'Open new tour' }}</button>
             <span class="dw-msg" role="status">{{ tour.msg }}</span>
-          </div>
+          </fieldset>
         </template>
 
         <template v-else-if="section === 'teams'">
@@ -259,7 +264,9 @@ async function resetTeams() {
               <h2 class="dw-plaque">Kill Teams</h2>
               <p class="dw-sub">{{ eventName }}</p>
             </div>
-            <button type="button" class="dw-btn primary rm-fade" @click="addTeam">+ Add Kill Team</button>
+            <fieldset class="dw-ro" :disabled="!gate.canEdit">
+              <button type="button" class="dw-btn primary rm-fade" @click="addTeam">+ Add Kill Team</button>
+            </fieldset>
           </div>
           <p v-if="m2" class="dw-msg bad" role="status">{{ m2 }}</p>
           <dl class="mg-stats">
@@ -290,12 +297,13 @@ async function resetTeams() {
               <datalist id="dw-deployment"><option v-for="m in unplaced" :key="m.id" :value="m.name" /></datalist>
               <div class="mg-ed-head">
                 <h3 id="mg-ed-title">Edit Kill Team</h3>
-                <details class="mg-more">
+                <details v-if="gate.canEdit" class="mg-more">
                   <summary aria-label="More actions">⋯</summary>
                   <button type="button" class="mg-danger-item" @click="forms[edited.id].del = true">Delete Kill Team</button>
                 </details>
                 <button type="button" class="mg-x" aria-label="Close editor" @click="editing = null">×</button>
               </div>
+              <fieldset class="dw-ro" :disabled="!gate.canEdit">
               <label class="dw-field">Team name<input v-model="forms[edited.id].n" /></label>
               <label class="dw-field">Watch Company<select v-model="forms[edited.id].co"><option v-for="c in COMPANIES" :key="c">{{ c }}</option></select></label>
               <h4 class="mg-sub">Operatives</h4>
@@ -321,12 +329,14 @@ async function resetTeams() {
                   <button type="button" class="dw-btn rm-fade danger" @click="deleteTeam(edited)">Delete permanently</button>
                 </div>
               </template>
+              </fieldset>
             </section>
           </div>
         </template>
 
         <template v-else-if="section === 'scoring'">
           <h2 class="dw-plaque">Scoring</h2>
+          <fieldset class="dw-ro" :disabled="!gate.canEdit">
           <fieldset v-for="[g, ws] in WEIGHT_GROUPS" :key="g" class="dw-fieldset">
             <legend>{{ g }}</legend>
             <div class="dw-form">
@@ -337,10 +347,12 @@ async function resetTeams() {
             <button type="button" class="dw-btn primary rm-fade" @click="saveWeights">Save scoring</button>
             <span class="dw-msg" role="status">{{ m1 }}</span>
           </div>
+          </fieldset>
         </template>
 
         <template v-else>
           <h2 class="dw-plaque">Data &amp; Archive</h2>
+          <fieldset class="dw-ro" :disabled="!gate.canEdit">
           <div class="mg-split">
             <section class="mg-card" aria-labelledby="mg-backup">
               <h3 id="mg-backup" class="mg-sub">Restore from backup</h3>
@@ -394,6 +406,7 @@ async function resetTeams() {
             :run="resetTeams"
             @backup="backup"
           />
+          </fieldset>
         </template>
 
         <!-- Always at hand: a copy of everything. -->

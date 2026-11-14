@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { AREAS, GATED, ROLES, gatesOf, mayOpen, resolveArea } from './areas'
+import { ACCESS_KINDS, AREAS, LEGACY_ROLES, canEdit, mayOpen, resolveArea, tabsFor } from './areas'
 
 const tabsOf = (area) => AREAS[area].tabs.map((t) => t.slug)
 
@@ -55,14 +55,14 @@ describe('AREAS', () => {
         tabs: [
           { slug: 'standard', label: 'Standard', items: ['watchbrother', 'companyheraldry'] },
           { slug: 'specialist', label: 'Specialist', items: ['reclusiarc', 'librarium', 'apothecarion', 'mechanicus'] },
-          { slug: 'watch-command', label: 'Watch Command', command: true, roles: ['command'], items: ['watchsergeant', 'watchchaplain', 'watchlibrarian', 'watchapothecary', 'watchtechmarine'] },
+          { slug: 'watch-command', label: 'Watch Command', command: true, roles: ['command'], lock: 'Reserved for the Deathwatch Command.', items: ['watchsergeant', 'watchchaplain', 'watchlibrarian', 'watchapothecary', 'watchtechmarine'] },
           { slug: 'restricted-wargear', label: 'Restricted Wargear' },
         ],
       },
       chronicles: {
         label: 'Chronicles of Valor',
         blurb: 'Discover the deeds, victories, and honours of the Watch.',
-        roles: ['command', 'deployment', 'xenosbane', 'vigilia'],
+        roles: [],
         tabs: [
           { slug: 'hall-of-champions', label: 'Hall of Champions' },
           { slug: 'chamber-of-honor', label: 'Chamber of Honor' },
@@ -74,7 +74,7 @@ describe('AREAS', () => {
       hallofrelics: {
         label: 'Hall of Relics',
         blurb: 'Honour the warriors who shaped the history of Ebonhold.',
-        roles: ['legion', 'emissary'],
+        roles: [],
         tabs: [
           { slug: 'notable-members', label: 'Notable Members' },
           { slug: 'fortress-lore', label: 'Fortress Lore' },
@@ -83,7 +83,7 @@ describe('AREAS', () => {
       recruitment: {
         label: 'Recruitment',
         blurb: 'Terms of Service and requirements for the Watch',
-        roles: ['legion', 'emissary'],
+        roles: [],
         tabs: [
           { slug: 'terms-of-service', label: 'Terms of Service' },
           { slug: 'requirements', label: 'Requirements' },
@@ -92,9 +92,9 @@ describe('AREAS', () => {
       administratum: {
         label: 'Administratum',
         blurb: "The Watch Commander's dashboard",
-        roles: [],
+        roles: ['desk', 'admin'],
         tabs: [
-          { slug: 'enter-mission', label: 'Enter mission' },
+          { slug: 'enter-mission', label: 'Enter mission', roles: ['desk'], lock: 'Reserved for the Watch Commander and the desk.' },
           { slug: 'manage', label: 'Manage' },
           { slug: 'checks', label: 'Checks' },
           { slug: 'records', label: 'Records' },
@@ -227,7 +227,7 @@ describe('mayOpen', () => {
   it('opens everything to the Watch Commander, a part that lists nothing included, and that to nobody else', () => {
     expect(mayOpen([], who([], true))).toBe(true)
     expect(mayOpen(['deployment'], who([], true))).toBe(true)
-    expect(mayOpen([], who(ROLES.map(([k]) => k)))).toBe(false)
+    expect(mayOpen([], who([...LEGACY_ROLES, 'desk', 'admin']))).toBe(false)
   })
 
   it('takes only a plain true for the Watch Commander', () => {
@@ -240,38 +240,86 @@ describe('who opens what, by default', () => {
     ...Object.fromEntries(Object.entries(AREAS).map(([area, a]) => [area, a.roles.includes(role)])),
     watchCommand: AREAS.armouringhall.tabs.find((t) => t.slug === 'watch-command').roles.includes(role),
   })
-  const row = (eventtracker, armouringhall, watchCommand, chronicles, hallofrelics, recruitment) => ({
-    eventtracker, armouringhall, watchCommand, chronicles, hallofrelics, recruitment, administratum: false,
+  const row = (eventtracker, armouringhall, watchCommand, chronicles, hallofrelics, recruitment, administratum = false) => ({
+    eventtracker, armouringhall, watchCommand, chronicles, hallofrelics, recruitment, administratum,
   })
 
   it.each([
-    ['legion', row(false, false, false, false, true, true)],
-    ['emissary', row(false, false, false, false, true, true)],
-    ['deployment', row(true, true, false, true, false, false)],
-    ['command', row(false, true, true, true, false, false)],
-    ['xenosbane', row(false, false, false, true, false, false)],
-    ['vigilia', row(false, false, false, true, false, false)],
+    // Chronicles, the Hall of Relics and Recruitment open to no role: they are the Watch Commander's alone.
+    ['legion', row(false, false, false, false, false, false)],
+    ['emissary', row(false, false, false, false, false, false)],
+    ['deployment', row(true, true, false, false, false, false)],
+    ['command', row(false, true, true, false, false, false)],
+    ['xenosbane', row(false, false, false, false, false, false)],
+    ['vigilia', row(false, false, false, false, false, false)],
     ['killmarine', row(false, false, false, false, false, false)], // checked elsewhere, opens no part
+    // Given by hand, or an admin: the Administratum, and nothing else by itself (the server adds deployment to both).
+    ['desk', row(false, false, false, false, false, false, true)],
+    ['admin', row(false, false, false, false, false, false, true)],
   ])('%s', (role, want) => {
     expect(opens(role)).toEqual(want)
   })
 })
 
-describe('gatesOf', () => {
-  it('gates every area but Manage', () => {
-    expect(GATED).toEqual(['eventtracker', 'armouringhall', 'chronicles', 'hallofrelics', 'recruitment'])
+describe('the Administratum: the Watch Commander, the desk and admins', () => {
+  const who = (held, commander = false) => ({ commander, held })
+  const slugs = (area, w) => tabsFor(area, w).map((t) => t.slug)
+
+  it('opens to the Watch Commander, the desk and admins, and to no other standing', () => {
+    expect(mayOpen(AREAS.administratum.roles, who([], true))).toBe(true)
+    expect(mayOpen(AREAS.administratum.roles, who(['desk']))).toBe(true)
+    expect(mayOpen(AREAS.administratum.roles, who(['admin']))).toBe(true)
+    expect(mayOpen(AREAS.administratum.roles, who(LEGACY_ROLES))).toBe(false)
   })
 
-  it('takes the defaults with no choice made', () => {
-    for (const g of [undefined, null, {}]) expect(gatesOf(g)).toEqual(Object.fromEntries(GATED.map((a) => [a, AREAS[a].roles])))
+  it('lets the Watch Commander and the desk change things, and nobody else, admins included', () => {
+    expect(canEdit(who([], true))).toBe(true)
+    expect(canEdit(who(['deployment', 'desk']))).toBe(true)
+    expect(canEdit(who(['deployment', 'admin']))).toBe(false)
+    expect(canEdit(who(LEGACY_ROLES))).toBe(false)
+    expect(canEdit(who(['desk'], 'true'))).toBe(true)
+    expect(canEdit(who(['Desk'], 'true'))).toBe(false)
   })
 
-  it("takes the Watch Commander's choice per area, known roles only, and the default where the choice is not a list", () => {
-    const g = gatesOf({ eventtracker: ['legion', 'nonsense', 'vigilia'], chronicles: [], recruitment: 'legion', administratum: ['legion'] })
-    expect(g.eventtracker).toEqual(['legion', 'vigilia'])
-    expect(gatesOf({ hallofrelics: ['killmarine'] }).hallofrelics).toEqual([]) // not a role a part can be opened to
-    expect(g.chronicles).toEqual([]) // closed to all but the Watch Commander
-    expect(g.recruitment).toEqual(AREAS.recruitment.roles)
-    expect(g.administratum).toBeUndefined() // never gated here
+  it('lists Enter mission only to those who can change things', () => {
+    const all = AREAS.administratum.tabs.map((t) => t.slug)
+    expect(slugs('administratum', who([], true))).toEqual(all)
+    expect(slugs('administratum', who(['desk']))).toEqual(all)
+    expect(slugs('administratum', who(['admin']))).toEqual(all.filter((t) => t !== 'enter-mission'))
+  })
+
+  it('lists the Watch Command tab only to Deathwatch Command and the Watch Commander', () => {
+    expect(slugs('armouringhall', who(['deployment']))).not.toContain('watch-command')
+    expect(slugs('armouringhall', who(['deployment', 'command']))).toContain('watch-command')
+    expect(slugs('armouringhall', who([], true))).toContain('watch-command')
+  })
+
+  it('names what each restricted tab is reserved for', () => {
+    const lock = (area, slug) => AREAS[area].tabs.find((t) => t.slug === slug).lock
+    expect(lock('armouringhall', 'watch-command')).toBe('Reserved for the Deathwatch Command.')
+    expect(lock('administratum', 'enter-mission')).toBe('Reserved for the Watch Commander and the desk.')
+  })
+
+  it('takes a server from before the standings as every part a role opens: not the Administratum, nor the Commander\'s own', () => {
+    expect(LEGACY_ROLES).toEqual(['legion', 'emissary', 'deployment', 'command', 'xenosbane', 'vigilia'])
+    for (const a of ['eventtracker', 'armouringhall']) expect(mayOpen(AREAS[a].roles, who(LEGACY_ROLES)), a).toBe(true)
+    for (const a of ['chronicles', 'hallofrelics', 'recruitment', 'administratum']) expect(mayOpen(AREAS[a].roles, who(LEGACY_ROLES)), a).toBe(false)
+  })
+
+  it('keeps Chronicles, the Hall of Relics and Recruitment to the Watch Commander, whatever else is held', () => {
+    const everything = [...LEGACY_ROLES, 'killmarine', 'desk', 'admin']
+    for (const a of ['chronicles', 'hallofrelics', 'recruitment']) {
+      expect(mayOpen(AREAS[a].roles, who(everything)), a).toBe(false)
+      expect(mayOpen(AREAS[a].roles, who([], true)), a).toBe(true)
+      for (const t of tabsFor(a, who(everything))) expect(t.roles, `${a}/${t.slug}`).toBeUndefined()
+    }
+  })
+
+  it('offers three kinds of access, in the order the Access page shows them', () => {
+    expect(ACCESS_KINDS).toEqual([
+      ['desk', 'Desk'],
+      ['watchcommand', 'Watch Command'],
+      ['deathwatch', 'Deathwatch'],
+    ])
   })
 })

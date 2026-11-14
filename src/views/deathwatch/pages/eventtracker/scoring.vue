@@ -52,7 +52,7 @@ const signed = (v) => `${v < 0 ? '−' : '+'}${num(Math.abs(v))}`
       <span class="op" aria-hidden="true">=</span>
       <div class="dw-tile total"><p class="dw-tile-label">Total</p><span class="dw-tile-value">{{ num(best.total) }}</span></div>
     </div>
-    <p v-if="gate.commander" class="dw-sub">
+    <p v-if="gate.canEdit" class="dw-sub">
       Gene-Seed and Guardian Relics share {{ SLOTS }} slots. Plus {{ num(S.rev) }} per revive, minus {{ num(S.inc) }} per incapacitation. A Kill Team's event points
       are the sum of all its missions.
     </p>

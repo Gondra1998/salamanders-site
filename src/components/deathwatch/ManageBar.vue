@@ -7,7 +7,8 @@ import { useRoute } from 'vue-router'
 import { resolveArea } from '../../lib/deathwatch/areas'
 import crest from './img/crest.webp'
 
-const props = defineProps({ tab: { type: String, required: true } })
+// `canEdit`: the Watch Commander or the desk. Entering a mission is offered to them only; an admin only looks.
+const props = defineProps({ tab: { type: String, required: true }, canEdit: { type: Boolean, default: false } })
 const route = useRoute()
 const to = (tab) => ({ path: resolveArea({ area: 'administratum', tab }).canonical, query: route.query.scene ? { scene: route.query.scene } : {} })
 const MAIN = [
@@ -38,7 +39,7 @@ watch(
     <nav class="mb-nav" aria-label="Administratum">
       <RouterLink v-for="[t, l] in MAIN" :key="t" class="mb-link" :to="to(t)" :aria-current="t === tab ? 'page' : undefined">{{ l }}</RouterLink>
     </nav>
-    <RouterLink class="mb-enter" :to="to('enter-mission')" :aria-current="tab === 'enter-mission' ? 'page' : undefined">
+    <RouterLink v-if="canEdit" class="mb-enter" :to="to('enter-mission')" :aria-current="tab === 'enter-mission' ? 'page' : undefined">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>Enter mission
     </RouterLink>
     <details ref="settings" class="mb-settings">

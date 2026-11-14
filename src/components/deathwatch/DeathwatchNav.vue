@@ -4,20 +4,21 @@
 // was used (`navigate`), so a sheet around it can close. Each link carries the original's icon for that view,
 // drawn from data (lib/deathwatch/icons.json), never from markup.
 import { computed } from 'vue'
-import { AREAS, resolveArea } from '../../lib/deathwatch/areas'
+import { AREAS, resolveArea, tabsFor } from '../../lib/deathwatch/areas'
 import { iconFor } from '../../lib/deathwatch/icons'
 
 const props = defineProps({
   area: { type: String, required: true },
   // The slug of the tab being shown.
   current: { type: String, required: true },
-  // Whether the viewer holds Deathwatch Command: a tab marked `command` is listed only for them.
-  command: { type: Boolean, default: false },
+  // Who is looking ({ commander, held }): a tab with its own `roles` (Watch Command, Enter mission) is listed only for
+  // those who may open it. Nobody, unless given.
+  who: { type: Object, default: () => ({ commander: false, held: [] }) },
 })
 const emit = defineEmits(['navigate'])
 
 const info = computed(() => AREAS[props.area])
-const tabs = computed(() => info.value.tabs.filter((t) => props.command || !t.command))
+const tabs = computed(() => tabsFor(props.area, props.who))
 </script>
 
 <template>

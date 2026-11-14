@@ -153,7 +153,7 @@ describe('DeathwatchArea', () => {
       const hall = (await mountAt('/deathwatch/armouringhall/specialist')).w
       expect(head(hall).find('[aria-current="page"]').text()).toBe('Specialist')
       expect(hall.find('.dw-area-sheet [role="alert"]').exists()).toBe(true)
-      const tracker = (await mountAt('/deathwatch/chronicles/player-profiles')).w
+      const tracker = (await mountAt('/deathwatch/chronicles/player-profiles', { commander: true })).w
       expect(tracker.find('.dw-area-sheet [role="alert"]').exists()).toBe(true)
       expect(head(tracker).exists()).toBe(false)
     })
@@ -163,7 +163,7 @@ describe('DeathwatchArea', () => {
       vi.useFakeTimers()
       try {
         const hall = (await mountAt('/deathwatch/armouringhall/standard')).w
-        const tracker = (await mountAt('/deathwatch/chronicles/player-profiles')).w
+        const tracker = (await mountAt('/deathwatch/chronicles/player-profiles', { commander: true })).w
         await vi.advanceTimersByTimeAsync(250) // past the loading view's delay
         expect(hall.find('.dw-area-sheet [role="status"]').text()).toBe('Loading…')
         expect(head(hall).exists()).toBe(true)
@@ -191,7 +191,7 @@ describe('DeathwatchArea', () => {
       ['/deathwatch/armouringhall/specialist', 'Armouring Hall', 'Specialist'],
       ['/deathwatch/chronicles/in-memoriam', 'Chronicles of Valor', 'In Memoriam'],
     ]) {
-      const { w } = await mountAt(path)
+      const { w } = await mountAt(path, { commander: true })
       expect(w.find('h1').text(), path).toBe(area)
       expect(w.find('h2').text(), path).toBe(tab)
     }
@@ -243,7 +243,7 @@ describe('DeathwatchArea', () => {
   })
 
   it('offers "Edit page" to nobody but the Watch Commander', async () => {
-    const { w } = await mountAt('/deathwatch/recruitment/requirements', { command: true })
+    const { w } = await mountAt('/deathwatch/armouringhall/specialist/librarium', { command: true })
     expect(w.find('h2').exists()).toBe(true)
     expect(w.find('.pe-open').exists()).toBe(false)
   })
@@ -305,9 +305,7 @@ describe('DeathwatchArea', () => {
     const cases = [
       ['/deathwatch/eventtracker/players', 'deployment'],
       ['/deathwatch/armouringhall/standard', 'command'],
-      ['/deathwatch/chronicles/in-memoriam', 'vigilia'],
-      ['/deathwatch/hallofrelics/fortress-lore', 'emissary'],
-      ['/deathwatch/recruitment/requirements', 'legion'],
+      ['/deathwatch/armouringhall/standard', 'deployment'],
     ]
     for (const [path, role] of cases) {
       const { w } = await mountAt(path, { roles: [role], command: role === 'command' })
@@ -316,23 +314,69 @@ describe('DeathwatchArea', () => {
     }
   })
 
-  it('gates an area as the Watch Commander set it in Access, and opens it to him whatever he set', async () => {
-    const g = { chronicles: ['legion'], eventtracker: [] }
-    expect((await mountAt('/deathwatch/chronicles/in-memoriam', { roles: ['legion'], g })).w.find('.dw-lock').exists()).toBe(false)
-    expect((await mountAt('/deathwatch/chronicles/in-memoriam', { roles: ['xenosbane'], g })).w.find('.dw-lock').exists()).toBe(true)
-    expect((await mountAt('/deathwatch/eventtracker/players', { roles: ALL, g })).w.find('.dw-lock').exists()).toBe(true)
-    expect((await mountAt('/deathwatch/eventtracker/players', { commander: true, g })).w.find('.dw-lock').exists()).toBe(false)
+  // The Watch Commander keeps these to himself (areas.js): every standing there is, the desk and admins too, finds the lock.
+  const HIS = ['/deathwatch/chronicles/in-memoriam', '/deathwatch/hallofrelics/fortress-lore', '/deathwatch/recruitment/requirements']
+
+  it('locks Chronicles, the Hall of Relics and Recruitment away from every standing', async () => {
+    for (const path of HIS) {
+      const { w } = await mountAt(path, { roles: [...ALL, 'desk', 'admin'], command: true })
+      expect(w.find('.dw-lock-msg').text(), path).toBe('Access restricted.')
+      expect(w.find('nav').exists(), path).toBe(false)
+      expect(w.find('.dw-area-sheet').exists(), path).toBe(false)
+    }
+  })
+
+  it('opens Chronicles, the Hall of Relics and Recruitment to the Watch Commander', async () => {
+    for (const path of HIS) {
+      const { w } = await mountAt(path, { commander: true, roles: [] })
+      expect(w.find('.dw-lock').exists(), path).toBe(false)
+      expect(w.find('.dw-area-sheet').exists(), path).toBe(true)
+    }
+  })
+
+  it('pays no heed to gates saved under the old Access page', async () => {
+    const g = { chronicles: ['legion'], hallofrelics: ['legion'], recruitment: ['legion'], eventtracker: [] }
+    for (const path of HIS) expect((await mountAt(path, { roles: ['legion'], g })).w.find('.dw-lock').exists(), path).toBe(true)
+    expect((await mountAt('/deathwatch/chronicles/in-memoriam', { roles: ['legion'], g })).w.find('.dw-lock').exists()).toBe(true)
+    expect((await mountAt('/deathwatch/eventtracker/players', { roles: ALL, g })).w.find('.dw-lock').exists()).toBe(false)
+  })
+
+  it('opens the Administratum to the desk, with Enter mission, and to an admin without it, locked if asked for', async () => {
+    const desk = (await mountAt('/deathwatch/administratum/manage', { roles: ['deployment', 'desk'] })).w
+    expect(desk.find('.dw-area-restricted').exists()).toBe(false)
+    expect(desk.findAll('aside nav a').map((a) => a.text())).toContain('Enter mission')
+    const admin = (await mountAt('/deathwatch/administratum/manage', { roles: ['deployment', 'admin'] })).w
+    expect(admin.find('.dw-area-restricted').exists()).toBe(false)
+    expect(admin.findAll('aside nav a').map((a) => a.text())).not.toContain('Enter mission')
+    expect(admin.find('.mb-enter').exists()).toBe(false)
+    const asked = (await mountAt('/deathwatch/administratum/enter-mission', { roles: ['deployment', 'admin'] })).w
+    expect(asked.text()).toContain('Reserved for the Watch Commander and the desk.')
+    expect(asked.find('h2').exists()).toBe(false)
+  })
+
+  it('offers no "Edit page" over a tab locked for the viewer, as the desk without Deathwatch Command', async () => {
+    const desk = (await mountAt('/deathwatch/armouringhall/watch-command', { roles: ['legion', 'deployment', 'desk'] })).w
+    expect(desk.text()).toContain('Reserved for the Deathwatch Command.')
+    expect(desk.find('.pe-open').exists()).toBe(false)
+    const commander = (await mountAt('/deathwatch/armouringhall/watch-command', { commander: true })).w
+    expect(commander.find('.pe-open').exists()).toBe(true)
+  })
+
+  it('offers "Edit page" to the desk, and not to an admin', async () => {
+    const page = '/deathwatch/armouringhall/specialist/librarium'
+    expect((await mountAt(page, { roles: ['legion', 'deployment', 'desk'] })).w.find('.pe-open').exists()).toBe(true)
+    expect((await mountAt(page, { roles: ['legion', 'deployment', 'admin'] })).w.find('.pe-open').exists()).toBe(false)
   })
 
   it('keeps Manage restricted for Deathwatch Command, who is not the Watch Commander', async () => {
     const { w } = await mountAt('/deathwatch/administratum/checks', { commander: false, command: true })
-    expect(w.text()).toContain('Restricted to the Watch Commander.')
+    expect(w.text()).toContain('Restricted to the Administratum.')
     expect(w.find('nav').exists()).toBe(false)
   })
 
   it('shows anyone else a notice in place of the Manage area, with no way into its views', async () => {
     const { w } = await mountAt('/deathwatch/administratum/checks', { commander: false })
-    expect(w.text()).toContain('Restricted to the Watch Commander.')
+    expect(w.text()).toContain('Restricted to the Administratum.')
     expect(w.find('nav').exists()).toBe(false)
     expect(w.text()).not.toContain('This view is being rebuilt.')
     expect(w.text()).not.toContain('Checks')
@@ -341,7 +385,7 @@ describe('DeathwatchArea', () => {
   })
 
   it('shows the gold crest in the Hall of Relics, as the old site did, the Armouring Hall its own emblem, and the plain one elsewhere', async () => {
-    expect((await mountAt('/deathwatch/hallofrelics/notable-members')).w.get('img.dw-area-crest').attributes('src')).toContain('crest-gold')
+    expect((await mountAt('/deathwatch/hallofrelics/notable-members', { commander: true })).w.get('img.dw-area-crest').attributes('src')).toContain('crest-gold')
     expect((await mountAt('/deathwatch/eventtracker/players')).w.get('img.dw-area-crest').attributes('src')).not.toContain('crest-gold')
     expect((await mountAt('/deathwatch/armouringhall/standard')).w.get('img.dw-area-crest').attributes('src')).toContain('crest-armouringhall')
   })

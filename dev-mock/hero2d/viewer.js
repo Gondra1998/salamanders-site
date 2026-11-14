@@ -119,7 +119,9 @@ const CYCLE_MS = 15 * 60 * 1000
 const sky = {
   clock: !q.has('moon'), // follow the wall clock; dragging the moon, or ?moon=, takes it by hand
   fast: q.get('skyfast') === '1',
-  at: Date.now() / CYCLE_MS, // where the moon is, in crossings: the whole part is which crossing, the rest how far across
+  // where the moon is, in crossings: the whole part is which crossing, the rest how far across. (It starts where
+  // ?moon= puts it, if it does: a trial begun as the page opens must find the moon there, not where the clock has it.)
+  at: q.has('moon') ? Math.min(0.999, Math.max(0, state.moon)) : Date.now() / CYCLE_MS,
   lastCycle: -1, // the crossing whose closest pass has been seen
   trialAt: -1, // seconds into the Time of Trial in progress; -1 when none
   trialTier: 1,

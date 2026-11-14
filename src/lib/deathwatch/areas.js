@@ -8,10 +8,10 @@ const tab = (slug, label) => ({ slug, label })
 // The Watch Commander opens everything, and a part that lists none is the Watch Commander's alone. A tab's own
 // list replaces its area's. The hub itself opens to everyone the gate lets in; its cards carry these locks.
 // Only what is shown: the server keeps the Event Tracker's data to its readers itself.
-const LEGION = ['legion', 'emissary']
-// The awards that open the Chronicles, each a Discord role of its own. The server also names Deathwatch Kill-Marine
-// (`killmarine`), which opens no part: it is there to be checked for one thing of its own.
-const ACCOLADES = ['xenosbane', 'vigilia']
+// Chronicles, the Hall of Relics and Recruitment list none: the Watch Commander keeps them to himself, as he chose on
+// the old Manage → Access page (2026-11-13). Opening one is listing its roles here; what they were before that choice:
+// Chronicles ['command', 'deployment', 'xenosbane', 'vigilia'], the other two ['legion', 'emissary'].
+// The server also names Deathwatch Kill-Marine (`killmarine`), which opens no part: it is checked for one thing of its own.
 
 /** The lock's words on an area's card and page where they are its own; any other says the lock's "Access restricted." */
 export const LOCK_TEXT = {
@@ -51,7 +51,7 @@ export const AREAS = {
   chronicles: {
     label: 'Chronicles of Valor',
     blurb: 'Discover the deeds, victories, and honours of the Watch.',
-    roles: ['command', 'deployment', ...ACCOLADES],
+    roles: [],
     tabs: [
       tab('hall-of-champions', 'Hall of Champions'),
       tab('chamber-of-honor', 'Chamber of Honor'),
@@ -64,14 +64,14 @@ export const AREAS = {
   hallofrelics: {
     label: 'Hall of Relics',
     blurb: 'Honour the warriors who shaped the history of Ebonhold.',
-    roles: LEGION,
+    roles: [],
     tabs: [tab('notable-members', 'Notable Members'), tab('fortress-lore', 'Fortress Lore')],
   },
   // The old site's Recruitment, at its old address: the hub's Enlist button goes here.
   recruitment: {
     label: 'Recruitment',
     blurb: 'Terms of Service and requirements for the Watch',
-    roles: LEGION,
+    roles: [],
     tabs: [tab('terms-of-service', 'Terms of Service'), tab('requirements', 'Requirements')],
   },
   // The Watch Commander's, the desk's (given by hand in Access: runs it) and the guild admins' (see it, change nothing).
@@ -117,9 +117,8 @@ export const canEdit = (who) => mayOpen(['desk'], who)
 export const tabsFor = (area, who) => AREAS[area].tabs.filter((t) => !t.roles || mayOpen(t.roles, who))
 
 /**
- * What a `/deathwatch/me` with no `roles` stands for: a server from before the standings, as just after the site
- * deploys and before the API is rebuilt. Its old rule holds: every part open but the Administratum, so never the
- * desk or admin.
+ * What a `/deathwatch/me` with no `roles` stands for: a server from before the standings. Its old rule holds: every
+ * part a role opens, so never the Administratum (not the desk or admin) nor the parts the Watch Commander keeps.
  */
 export const LEGACY_ROLES = ['legion', 'emissary', 'deployment', 'command', 'xenosbane', 'vigilia']
 

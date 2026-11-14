@@ -62,7 +62,7 @@ describe('AREAS', () => {
       chronicles: {
         label: 'Chronicles of Valor',
         blurb: 'Discover the deeds, victories, and honours of the Watch.',
-        roles: ['command', 'deployment', 'xenosbane', 'vigilia'],
+        roles: [],
         tabs: [
           { slug: 'hall-of-champions', label: 'Hall of Champions' },
           { slug: 'chamber-of-honor', label: 'Chamber of Honor' },
@@ -74,7 +74,7 @@ describe('AREAS', () => {
       hallofrelics: {
         label: 'Hall of Relics',
         blurb: 'Honour the warriors who shaped the history of Ebonhold.',
-        roles: ['legion', 'emissary'],
+        roles: [],
         tabs: [
           { slug: 'notable-members', label: 'Notable Members' },
           { slug: 'fortress-lore', label: 'Fortress Lore' },
@@ -83,7 +83,7 @@ describe('AREAS', () => {
       recruitment: {
         label: 'Recruitment',
         blurb: 'Terms of Service and requirements for the Watch',
-        roles: ['legion', 'emissary'],
+        roles: [],
         tabs: [
           { slug: 'terms-of-service', label: 'Terms of Service' },
           { slug: 'requirements', label: 'Requirements' },
@@ -245,12 +245,13 @@ describe('who opens what, by default', () => {
   })
 
   it.each([
-    ['legion', row(false, false, false, false, true, true)],
-    ['emissary', row(false, false, false, false, true, true)],
-    ['deployment', row(true, true, false, true, false, false)],
-    ['command', row(false, true, true, true, false, false)],
-    ['xenosbane', row(false, false, false, true, false, false)],
-    ['vigilia', row(false, false, false, true, false, false)],
+    // Chronicles, the Hall of Relics and Recruitment open to no role: they are the Watch Commander's alone.
+    ['legion', row(false, false, false, false, false, false)],
+    ['emissary', row(false, false, false, false, false, false)],
+    ['deployment', row(true, true, false, false, false, false)],
+    ['command', row(false, true, true, false, false, false)],
+    ['xenosbane', row(false, false, false, false, false, false)],
+    ['vigilia', row(false, false, false, false, false, false)],
     ['killmarine', row(false, false, false, false, false, false)], // checked elsewhere, opens no part
     // Given by hand, or an admin: the Administratum, and nothing else by itself (the server adds deployment to both).
     ['desk', row(false, false, false, false, false, false, true)],
@@ -299,10 +300,19 @@ describe('the Administratum: the Watch Commander, the desk and admins', () => {
     expect(lock('administratum', 'enter-mission')).toBe('Reserved for the Watch Commander and the desk.')
   })
 
-  it('takes a server from before the standings as every part but the Administratum', () => {
+  it('takes a server from before the standings as every part a role opens: not the Administratum, nor the Commander\'s own', () => {
     expect(LEGACY_ROLES).toEqual(['legion', 'emissary', 'deployment', 'command', 'xenosbane', 'vigilia'])
-    expect(mayOpen(AREAS.administratum.roles, who(LEGACY_ROLES))).toBe(false)
-    for (const a of ['eventtracker', 'armouringhall', 'chronicles', 'hallofrelics', 'recruitment']) expect(mayOpen(AREAS[a].roles, who(LEGACY_ROLES)), a).toBe(true)
+    for (const a of ['eventtracker', 'armouringhall']) expect(mayOpen(AREAS[a].roles, who(LEGACY_ROLES)), a).toBe(true)
+    for (const a of ['chronicles', 'hallofrelics', 'recruitment', 'administratum']) expect(mayOpen(AREAS[a].roles, who(LEGACY_ROLES)), a).toBe(false)
+  })
+
+  it('keeps Chronicles, the Hall of Relics and Recruitment to the Watch Commander, whatever else is held', () => {
+    const everything = [...LEGACY_ROLES, 'killmarine', 'desk', 'admin']
+    for (const a of ['chronicles', 'hallofrelics', 'recruitment']) {
+      expect(mayOpen(AREAS[a].roles, who(everything)), a).toBe(false)
+      expect(mayOpen(AREAS[a].roles, who([], true)), a).toBe(true)
+      for (const t of tabsFor(a, who(everything))) expect(t.roles, `${a}/${t.slug}`).toBeUndefined()
+    }
   })
 
   it('offers three kinds of access, in the order the Access page shows them', () => {

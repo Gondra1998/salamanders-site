@@ -15,6 +15,7 @@
 // The mountain's numbers (base width, crown, rock, columns, planes) are baked in. To change them: put the numbers in
 // TUNE below, bake again (`npm run deathfire:bake`). The two scenes it paints are in bakeScenes.js.
 import { createScene } from '../../src/lib/deathfire/scene.js'
+import * as painter from '../../src/lib/deathfire/painters.js'
 import { bakeScenes } from './bakeScenes.js'
 
 const TUNE = {} // the mountain's numbers to bake with (empty: the scene's own defaults)
@@ -36,7 +37,7 @@ function picture(file, cv) {
   pictures.append(cap, img)
   return { file, px: [cv.width, cv.height] }
 }
-const scenes = bakeScenes(createScene, TUNE)
+const scenes = bakeScenes(createScene, TUNE, { painter })
 for (const kind of ['desktop', 'phone']) {
   const t0 = performance.now()
   const bake = scenes[kind]().info.bake

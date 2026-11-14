@@ -20,6 +20,7 @@
 //               length and carries the moon)
 //               ?trial=1|2|3 (start a Time of Trial of that tier)  ?visit=new (forget this browser's place in the cycle)
 import { createScene } from '../../src/lib/deathfire/scene.js'
+import * as painter from '../../src/lib/deathfire/painters.js'
 import { excitement, trialLength, trialLevel } from '../../src/lib/deathfire/trial.js'
 
 const q = new URLSearchParams(location.search)
@@ -404,6 +405,7 @@ function rebuild() {
   // phones keep one composition for now: the peak a little left of centre
   scene = createScene(w, h, {
     dpr,
+    painter, // (the mock always has the painting code to hand: its rail can ask for the mountain painted here)
     layers: state.layers,
     palette: state.pal,
     phoneMax: CUT,

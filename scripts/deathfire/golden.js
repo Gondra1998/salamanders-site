@@ -10,7 +10,10 @@ const SCENE = '/src/lib/deathfire/scene.js'
 import { bakeScenes } from './bakeScenes.js'
 
 const { createScene } = await import(/* @vite-ignore */ SCENE)
-const { mulberry32 } = await import(/* @vite-ignore */ new URL('./noise.js', new URL(SCENE, location.href)).href)
+const beside = (name) => new URL(name, new URL(SCENE, location.href)).href
+const { mulberry32 } = await import(/* @vite-ignore */ beside('./noise.js'))
+// the painting code: handed to the scene only in the cases that paint (the others prove the scene needs none)
+const painter = await import(/* @vite-ignore */ beside('./painters.js'))
 const BAKED = new URL('./baked/', new URL(SCENE, location.href))
 
 // the numbers the look was approved with (the mock's tuner at its defaults)
@@ -103,10 +106,10 @@ try {
   out['phone-home'] = hash(run({ w: 390, h: 844, dpr: 2, options: { textBottom: 352, ...withPictures('phone') } }).cv)
 
   // no pictures: the mountain and the moon painted here
-  out['desktop-painted'] = hash(run({ ...desktop, options: { faceX: 0.14 }, frames: 1 }).cv)
+  out['desktop-painted'] = hash(run({ ...desktop, options: { faceX: 0.14, painter }, frames: 1 }).cv)
 
   // the pictures the bake tool makes
-  const scenes = bakeScenes(createScene)
+  const scenes = bakeScenes(createScene, {}, { painter })
   for (const kind of ['desktop', 'phone']) {
     seedChance()
     out[`bake-${kind}`] = hash(scenes[kind]().info.bake.mountain.cv)

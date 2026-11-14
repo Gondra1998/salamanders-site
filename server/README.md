@@ -89,34 +89,39 @@ is refused with the position of the fault (`company 3, entry 2`), not the text.
 ## Deathwatch (`/deathwatch/*`)
 
 The Discord-role-gated Deathwatch area ("Watch Fortress Ebonhold"). Design:
-`docs/superpowers/specs/2026-10-20-deathwatch-design.md`. Access is the Watch
-Commander role, or a Deathwatch role, or a user id the Watch Commander has
-granted, or being the guild owner or an Administrator; Commander status comes
-only from the Commander role, never from a grant or from being an admin. Roles
-are asked of Discord live. Reads (`/me`, `/data`) reuse a verdict for 30 seconds;
-every write and grant change checks Discord afresh and drops the cached verdicts.
-Any Discord failure answers 503: the area fails closed.
+`docs/superpowers/specs/2026-10-20-deathwatch-design.md`. Access comes from Discord roles, asked live (the bot only
+reads them: it never gives or removes a role), and from what the Watch Commander gives people by hand in
+Administratum → Access (`deathwatch_access`). Commander status comes only from the Commander role. Reads (`/me`,
+`/data`, `/deployment`, `/members`, `GET /access`) reuse a verdict for 30 seconds; every write checks Discord afresh,
+and every access change drops the cached verdicts. Any Discord failure answers 503: the area fails closed.
+
+Given by hand, per person: `deathwatch` (the general level, `deployment`), `watchcommand` (as the Deathwatch Command
+role) or `desk` (runs the Administratum desk; also `deployment`). It counts only for a guild member whose present
+membership began before it was given: leaving the guild ends it for good, and the server removes it (actor
+`left-guild`) when it notices. Admins (the guild owner, or a role with Administrator; read every five minutes) see
+the Administratum and change nothing.
 
 | Endpoint | Who | Notes |
 |---|---|---|
-| `GET /deathwatch/me` | any signed-in user | `{ access, watchCommander, deathwatchCommand }`; never 403 |
-| `GET /deathwatch/data` | access | `{ teams, cfg, archive }`; `ETag`, 304 on `If-None-Match`; 403 without access |
-| `GET /deathwatch/deployment` | Event Tracker readers | `{ members: [{ id, name, avatar }] }`: who holds `DEATHWATCH_ROLE_ID`, from the roster's member cache (no extra Discord calls); 503 until that has loaded |
-| `POST /deathwatch/doc` | Watch Commander | `{ col, id, op: 'set' \| 'delete', doc }`; JSON content type required |
-| `GET /deathwatch/grants` | Watch Commander | active grants |
-| `POST /deathwatch/grants` | Watch Commander | `{ discordId }`; 201 new, 200 if already active, 409 at 200 active |
-| `DELETE /deathwatch/grants/:discordId` | Watch Commander | revokes; 404 if none is active |
+| `GET /deathwatch/me` | any signed-in user | `{ access, watchCommander, deathwatchCommand, roles }`; never 403 |
+| `GET /deathwatch/data` | access | `{ teams, cfg, archive }`; `ETag`, 304 on `If-None-Match`; 403 without access. `teams` and `archive` only to the Watch Commander and `deployment` |
+| `GET /deathwatch/deployment` | Watch Commander, `deployment` | `{ members, faces }`: who holds `DEATHWATCH_ROLE_ID`, and the Legion/Emissary members the tracker names, from the roster's member cache (no extra Discord calls); 503 until that has loaded |
+| `POST /deathwatch/doc` | Watch Commander, `desk` | `{ col, id, op: 'set' \| 'delete', doc }`; JSON content type required |
+| `GET /deathwatch/members?q=` | Watch Commander | `{ members: [{ id, name, avatar }] }`, at most 10: a 17–20 digit `q` is that member, otherwise 2+ characters of a display name, prefix matches first; from the roster cache; 503 until it has loaded |
+| `GET /deathwatch/access` | Watch Commander, `desk`, `admin` | `{ people: [{ id, kind, name, avatar, grantedBy, grantedAt }] }`; first removes anyone who has left the guild since (not while the roster is still loading) |
+| `POST /deathwatch/access` | Watch Commander | `{ discordId, kind }`; 201 new, 200 if already active, 404 "Not in the server." (asked of Discord live, so a new member is found at once), 409 at 1000 active. Anything given before the person last left the guild is removed first |
+| `DELETE /deathwatch/access/:discordId/:kind` | Watch Commander | removes; 404 if none is active |
 
 Limits: collections `teams`, `cfg`, `archive`; ids match `^[A-Za-z0-9_-]{1,64}$`; a
 document is a JSON object of at most 1 MB with no U+0000 or lone surrogate (Postgres
 `jsonb` cannot store them); a request body is at most 2 MB (the server refuses more than
-12 MB outright); `discordId` is 17 to 20 digits. Document edits and grant changes are
-recorded in `deathwatch_doc_history` and `deathwatch_grant_events`, in the same
-transaction as the change.
+12 MB outright); `discordId` is 17 to 20 digits. Document edits and access changes are
+recorded in `deathwatch_doc_history` and `deathwatch_access_events`, in the same
+transaction as the change. (`deathwatch_grants` and `deathwatch_grant_events` are the old grants, no longer used.)
 
 | Variable | Value |
 |---|---|
-| `DEATHWATCH_ROLE_ID` | the Deathwatch Deployment role id, or several separated by commas with no spaces (a holder of any one is `deployment`, as is Deathwatch Command, a grant, the guild owner or an Administrator) — no default, required |
+| `DEATHWATCH_ROLE_ID` | the Deathwatch Deployment role id, or several separated by commas with no spaces (a holder of any one is `deployment`, as is Deathwatch Command, anything given by hand, the guild owner or an Administrator) — no default, required |
 | `WATCH_COMMANDER_ROLE_ID` | the Watch Commander role id: opens everything — no default, required |
 | `DEATHWATCH_COMMAND_ROLE_ID` | the Deathwatch Command role id (one id, not the Watch Commander's) — optional. Its holders are `command` and `deployment` (and `deathwatchCommand: true`). Unset or not a single id, nobody holds it and nothing else changes |
 | `EMISSARY_ROLE_ID` | the Emissary role id (one id) — optional; its holders are `emissary`. The Legion role (`rosterLadder.js`) gives `legion` |
@@ -125,16 +130,14 @@ transaction as the change.
 | `KILL_MARINE_ROLE_ID` | the Deathwatch Kill-Marine award role id — optional; its holders are `killmarine` |
 
 `GET /deathwatch/me` answers `roles`: the standings the caller holds (`legion`, `emissary`, `deployment`,
-`command`, `xenosbane`, `vigilia`, `killmarine`). Any standing, or the Watch Commander role, lets them into the
-area; which parts open to which standings the Watch Commander sets in Manage → Access (the cfg document `g`,
-area → standings), else the defaults in the site's `src/lib/deathwatch/areas.js`. `GET /deathwatch/data` sends
-the Event Tracker's documents (`teams`, `archive`) only to the Watch Commander and the standings `g.eventtracker`
-lists (by default `deployment`); everyone else gets them empty.
+`command`, `xenosbane`, `vigilia`, `killmarine`, `desk`, `admin`). Any standing, or the Watch Commander role, lets
+them into the area; which parts open to which standings is fixed in the site's `src/lib/deathwatch/areas.js`. The
+server keeps the Event Tracker's documents and every write itself; the site's locks guard only static texts.
 
 Until **both** are set every `/deathwatch/*` route answers 503 "not configured". The role
 ids are supplied at deploy time and never committed. To deploy: set both in `server/.env`,
 apply the schema (idempotent, command in the reports section above) before starting the new
-image, then restart the API. The one-time import of the old site's data is a separate job.
+image, then restart the API. An image with `deathwatch_access` needs `schema.sql` applied first. The one-time import of the old site's data is a separate job.
 
 ## Reliquarium (`/gallery/*`)
 

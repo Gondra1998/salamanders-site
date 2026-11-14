@@ -11,6 +11,6 @@ const gate = useDeathwatch()
 
 <template>
   <TrackerState :status="data.status" :error="data.error" @retry="reload">
-    <GameStatsView :R="R" classes :notes="gate.commander" />
+    <GameStatsView :R="R" classes :notes="gate.canEdit" />
   </TrackerState>
 </template>

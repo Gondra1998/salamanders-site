@@ -9,7 +9,10 @@
 export const COLLECTIONS = ['teams', 'cfg', 'archive']
 export const MAX_DOC_BYTES = 1_048_576
 export const MAX_BODY_BYTES = 2_097_152
-export const MAX_ACTIVE_GRANTS = 200
+// What the Watch Commander can give one person (Administratum → Access): the general level, the Armouring Hall's
+// Watch Command tab, or the Administratum desk. A ceiling on the active rows, far above any real use, only bounds abuse.
+export const KINDS = ['deathwatch', 'watchcommand', 'desk']
+export const MAX_ACTIVE_ACCESS = 1000
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const SNOWFLAKE = /^\d{17,20}$/
@@ -47,9 +50,13 @@ export function parseDocWrite(b) {
   return { col: b.col, id: b.id, op: 'set', doc: b.doc }
 }
 
-/** → { discordId }, or an error message string. */
-export function parseGrantBody(b) {
+// includes() never matches anything but one of these strings.
+export const isKind = (v) => KINDS.includes(v)
+
+/** → { discordId, kind }, or an error message string. */
+export function parseAccessBody(b) {
   if (!isObject(b)) return 'Malformed request.'
   if (!isDiscordId(b.discordId)) return 'Enter a Discord user id (17 to 20 digits).'
-  return { discordId: b.discordId }
+  if (!isKind(b.kind)) return 'Unknown access kind.'
+  return { discordId: b.discordId, kind: b.kind }
 }

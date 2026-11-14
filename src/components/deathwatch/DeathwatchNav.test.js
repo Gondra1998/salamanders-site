@@ -10,17 +10,24 @@ const mountNav = (props) => mount(DeathwatchNav, { props, global: { plugins: [ro
 
 describe('DeathwatchNav', () => {
   it.each(Object.keys(AREAS))('lists the %s tabs in order, as links', (area) => {
-    const w = mountNav({ area, current: AREAS[area].tabs[0].slug, command: true })
+    const w = mountNav({ area, current: AREAS[area].tabs[0].slug, who: { commander: true, held: [] } })
     const tabLinks = w.findAll('a').slice(0, -1) // the last link goes back to the hub
     expect(tabLinks.map((a) => a.text())).toEqual(AREAS[area].tabs.map((t) => t.label))
     // Straight to the canonical address: one the guard would rewrite replaces the history entry, and Back skips a page.
     expect(tabLinks.map((a) => a.attributes('href'))).toEqual(AREAS[area].tabs.map((t) => resolveArea({ area, tab: t.slug }).canonical))
   })
 
-  it('lists a Deathwatch Command tab only for Deathwatch Command', () => {
-    const labels = (command) => mountNav({ area: 'armouringhall', current: 'standard', command }).findAll('a').map((a) => a.text())
-    expect(labels(false)).toEqual(['Standard', 'Specialist', 'Restricted Wargear', 'Back to the Fortress'])
-    expect(labels(true)).toEqual(['Standard', 'Specialist', 'Watch Command', 'Restricted Wargear', 'Back to the Fortress'])
+  it('lists a Deathwatch Command tab only for Deathwatch Command, and Enter mission only for those who can change things', () => {
+    const labels = (area, current, held) => mountNav({ area, current, who: { commander: false, held } }).findAll('a').map((a) => a.text())
+    expect(labels('armouringhall', 'standard', ['deployment'])).toEqual(['Standard', 'Specialist', 'Restricted Wargear', 'Back to the Fortress'])
+    expect(labels('armouringhall', 'standard', ['deployment', 'command'])).toEqual(['Standard', 'Specialist', 'Watch Command', 'Restricted Wargear', 'Back to the Fortress'])
+    expect(labels('administratum', 'manage', ['admin'])).not.toContain('Enter mission')
+    expect(labels('administratum', 'manage', ['desk'])).toContain('Enter mission')
+  })
+
+  it('lists nothing restricted with no viewer given', () => {
+    const labels = mount(DeathwatchNav, { props: { area: 'armouringhall', current: 'standard' }, global: { plugins: [router()] } }).findAll('a').map((a) => a.text())
+    expect(labels).not.toContain('Watch Command')
   })
 
   it('draws an icon on every link, from the original\'s set, hidden from assistive technology', () => {

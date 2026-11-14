@@ -161,6 +161,28 @@ create table if not exists deathwatch_grant_events (
   created_at        timestamptz not null default now()
 );
 
+-- People the Watch Commander gives access by hand (Administratum → Access), one row per person and kind. The old
+-- deathwatch_grants above is no longer used. At most one active row per (person, kind). A removal is a person's id,
+-- or 'left-guild' when the server finds the person has left the guild since (server/src/deathwatchAccess.js).
+create table if not exists deathwatch_access (
+  discord_id  text not null check (discord_id ~ '^\d{17,20}$'),
+  kind        text not null check (kind in ('deathwatch', 'watchcommand', 'desk')),
+  granted_by  text not null,
+  granted_at  timestamptz not null default now(),
+  revoked_at  timestamptz,
+  revoked_by  text
+);
+create unique index if not exists deathwatch_access_active on deathwatch_access (discord_id, kind) where revoked_at is null;
+
+create table if not exists deathwatch_access_events (
+  id                bigserial primary key,
+  discord_id        text not null,
+  kind              text not null,
+  actor_discord_id  text not null,
+  action            text not null check (action in ('added', 'removed')),
+  created_at        timestamptz not null default now()
+);
+
 -- The Companies page's Notable Server Members: real members' names and short write-ups. They live here and nowhere
 -- in the repo or the client bundle; GET /company-notables sends them to signed-in guild members only. One row per
 -- company, entries = [[name, ...blurb lines], ...]. Filled by src/seedNotables.js.

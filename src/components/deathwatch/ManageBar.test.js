@@ -4,11 +4,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import ManageBar from './ManageBar.vue'
 
-async function mountBar(tab, query = '') {
+// The Watch Commander's bar unless a test says otherwise: an admin's has no Enter mission.
+async function mountBar(tab, query = '', canEdit = true) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:rest(.*)*', component: { template: '<div />' } }] })
   router.push(`/deathwatch/administratum/${tab}${query}`)
   await router.isReady()
-  const w = mount(ManageBar, { props: { tab }, global: { plugins: [router] }, attachTo: document.body })
+  const w = mount(ManageBar, { props: { tab, canEdit }, global: { plugins: [router] }, attachTo: document.body })
   return w
 }
 const hrefs = (w, sel) => w.findAll(sel).map((a) => a.attributes('href'))
@@ -19,6 +20,14 @@ describe('ManageBar', () => {
     expect(w.get('.mb-home').attributes('href')).toBe('/deathwatch')
     expect(w.findAll('.mb-link').map((a) => a.text())).toEqual(['Manage', 'Checks', 'Records'])
     expect(w.get('.mb-enter').text()).toBe('Enter mission')
+    expect(w.findAll('.mb-mi').map((a) => a.text())).toEqual(['Page Texts', 'Access'])
+    w.unmount()
+  })
+
+  it('offers Enter mission only to those who can change things', async () => {
+    const w = await mountBar('manage', '', false)
+    expect(w.find('.mb-enter').exists()).toBe(false)
+    expect(w.findAll('.mb-link').map((a) => a.text())).toEqual(['Manage', 'Checks', 'Records'])
     expect(w.findAll('.mb-mi').map((a) => a.text())).toEqual(['Page Texts', 'Access'])
     w.unmount()
   })

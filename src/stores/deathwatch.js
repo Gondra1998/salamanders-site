@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { getMe } from '../lib/deathwatch/api'
 import { loadFixture } from '../lib/deathwatch/fixture'
-import { ROLES } from '../lib/deathwatch/areas'
+import { LEGACY_ROLES, canEdit } from '../lib/deathwatch/areas'
 
 // Whether the signed-in user may see the Deathwatch area, whether they are the Watch Commander, and whether they
 // hold the Deathwatch Command role (the Armouring Hall's Watch Command tab), and which standings they hold (the
@@ -21,6 +21,10 @@ const statusOf = (err) => (err?.status === 401 ? 'signin' : err?.status === 403 
 
 export const useDeathwatch = defineStore('deathwatch', {
   state: () => ({ status: 'idle', commander: false, command: false, roles: [] }),
+  getters: {
+    // Whether the Administratum's controls are live: the Watch Commander's and the desk's. The server checks again.
+    canEdit: (s) => canEdit({ commander: s.commander, held: s.roles }),
+  },
   actions: {
     async load(token) {
       const mine = ++seq
@@ -51,7 +55,7 @@ export const useDeathwatch = defineStore('deathwatch', {
         // An answer with no `roles` at all is a server from before them, as just after the site deploys and before the
         // API is rebuilt: its old rule holds, every part open but the Administratum. A `roles` that is no list fails
         // closed.
-        const roles = !allowed ? [] : me.roles === undefined ? ROLES.map(([r]) => r) : Array.isArray(me.roles) ? me.roles.filter((r) => typeof r === 'string') : []
+        const roles = !allowed ? [] : me.roles === undefined ? LEGACY_ROLES : Array.isArray(me.roles) ? me.roles.filter((r) => typeof r === 'string') : []
         this.$patch({ status: allowed ? 'allowed' : 'denied', commander, command: commander || (allowed && me.deathwatchCommand === true), roles })
       } catch (err) {
         if (mine !== seq) return

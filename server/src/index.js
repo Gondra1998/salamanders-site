@@ -38,6 +38,7 @@ import { createPerksHandler } from './perks.js'
 import { createPrivileges } from './privileges.js'
 import { createReportsHandler } from './reports.js'
 import { createRoster } from './roster.js'
+import { createAdminCheck } from './deathwatchAdmins.js'
 import { LEGION_ROLE } from './rosterLadder.js'
 import { createRosterHandler } from './rosterHandler.js'
 import { createRosterPublicHandler } from './rosterPublicHandler.js'
@@ -112,6 +113,8 @@ const deathwatch = createDeathwatchHandler({
   access: createDeathwatchAccess({
     roles,
     store: deathwatchStore,
+    // The guild's admins, read once every five minutes: they see the Administratum, read only.
+    admins: createAdminCheck({ roles }),
     deathwatchRoleId: process.env.DEATHWATCH_ROLE_ID,
     commanderRoleId: process.env.WATCH_COMMANDER_ROLE_ID,
     deathwatchCommandRoleId: process.env.DEATHWATCH_COMMAND_ROLE_ID,
@@ -124,6 +127,8 @@ const deathwatch = createDeathwatchHandler({
   store: deathwatchStore,
   // The Deployment list: members holding DEATHWATCH_ROLE_ID, from the roster's cache (no extra Discord calls).
   roster,
+  // Access → add: whether the person is in the guild, and since when, asked live.
+  memberOf: (id) => roles.memberOf(id),
   deploymentRoleIds: (process.env.DEATHWATCH_ROLE_ID || '').split(',').filter(Boolean),
   // The faces: Legion and Emissary members the Event Tracker names, for their pictures there.
   faceRoleIds: [LEGION_ROLE, process.env.EMISSARY_ROLE_ID].filter(Boolean),

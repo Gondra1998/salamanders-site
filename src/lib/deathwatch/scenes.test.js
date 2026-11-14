@@ -5,7 +5,7 @@ import { AREAS, mayOpen } from './areas'
 describe('SCENES', () => {
   it('names the everyday member, the Commander, one scene per standing, the gate states and the two data scenes', () => {
     expect(SCENES).toEqual([
-      'allowed', 'commander', 'legion', 'emissary', 'deployment', 'command', 'accolade',
+      'allowed', 'commander', 'legion', 'emissary', 'deployment', 'command', 'accolade', 'desk', 'admin',
       'denied', 'signin', 'checking', 'unavailable', 'empty', 'active-event',
     ])
   })
@@ -20,6 +20,8 @@ describe('sceneOf', () => {
     ['deployment', 'allowed', false, false, ['legion', 'deployment']],
     ['command', 'allowed', false, true, ['legion', 'deployment', 'command']],
     ['accolade', 'allowed', false, false, ['legion', 'xenosbane']],
+    ['desk', 'allowed', false, false, ['legion', 'deployment', 'desk']],
+    ['admin', 'allowed', false, false, ['deployment', 'admin']],
     ['denied', 'denied', false, false, []],
     ['signin', 'signin', false, false, []],
     ['checking', 'checking', false, false, []],
@@ -45,8 +47,8 @@ describe('sceneOf', () => {
 })
 
 describe('the access list, scene by scene', () => {
-  // What each scene opens, read through the same rules the pages use (areas.js), against the list as given: Legion is
-  // every member's base, so each scene but the guest's (emissary) opens the Hall of Relics and Enlist Now too.
+  // What each scene opens, read through the same rules the pages use (areas.js), against the list as given. Chronicles,
+  // the Hall of Relics and Recruitment (Enlist Now) are the Watch Commander's alone, so only his scene opens them.
   const opens = (name) => {
     const s = sceneOf(name)
     const who = { commander: s.commander, held: s.roles }
@@ -66,11 +68,13 @@ describe('the access list, scene by scene', () => {
   })
 
   it.each([
-    ['legion', row(false, false, false, false, true, true)],
-    ['emissary', row(false, false, false, false, true, true)],
-    ['deployment', row(true, true, false, true, true, true)],
-    ['command', row(true, true, true, true, true, true)],
-    ['accolade', row(false, false, false, true, true, true)],
+    ['legion', row(false, false, false, false, false, false)],
+    ['emissary', row(false, false, false, false, false, false)],
+    ['deployment', row(true, true, false, false, false, false)],
+    ['command', row(true, true, true, false, false, false)],
+    ['accolade', row(false, false, false, false, false, false)],
+    ['desk', row(true, true, false, false, false, false, true)],
+    ['admin', row(true, true, false, false, false, false, true)],
     ['commander', row(true, true, true, true, true, true, true)],
   ])('%s', (name, want) => {
     expect(opens(name)).toEqual(want)

@@ -298,3 +298,34 @@ describe('holding', () => {
     expect(await make(discord({ status: 500, body: '' })).roster.holding(['R1'])).toBeNull()
   })
 })
+
+describe('members', () => {
+  const joined = (m, at) => ({ ...m, joined_at: at })
+  const bot = (id) => ({ ...member(id, ['R1']), user: { id, username: 'bot', bot: true } })
+
+  it('is null while no roster has loaded', async () => {
+    expect(await make(discord({ status: 500, body: '' })).roster.members()).toBeNull()
+  })
+
+  it('lists every member but bots, as id, name, avatar and when they joined', async () => {
+    const d = discord([joined(member(A, ['R1'], 'Zed'), '2025-01-01T00:00:00.000Z'), member(B, [], 'Abe'), bot(C)])
+    const { roster } = make(d)
+    expect(await roster.members()).toEqual([
+      { id: A, name: 'Zed', avatar: null, joinedAt: '2025-01-01T00:00:00.000Z' },
+      { id: B, name: 'Abe', avatar: null, joinedAt: null },
+    ])
+  })
+
+  it('hands out a copy: changing it changes nothing the next caller sees', async () => {
+    const { roster } = make(discord([member(A, ['R1'], 'Zed')]))
+    const first = await roster.members()
+    first[0].name = 'changed'
+    first.push({ id: B })
+    expect(await roster.members()).toEqual([{ id: A, name: 'Zed', avatar: null, joinedAt: null }])
+  })
+
+  it('holding() still answers id, name and avatar only', async () => {
+    const { roster } = make(discord([joined(member(A, ['R1'], 'Zed'), '2025-01-01T00:00:00.000Z')]))
+    expect(await roster.holding(['R1'])).toEqual([{ id: A, name: 'Zed', avatar: null }])
+  })
+})

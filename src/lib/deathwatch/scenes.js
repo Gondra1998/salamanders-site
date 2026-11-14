@@ -4,13 +4,15 @@
  *   commander    signed in, and the Watch Commander: everything open, Manage included
  * One scene per standing, as members hold them: Legion is the base every member has, so each other scene holds
  * Legion as well; an Emissary is a guest and holds only that. Each line of the access list (areas.js) can be seen. The
- * hub opens to every one of them, with the cards of the areas it does not open locked:
- *   legion       an everyday member: the Hall of Relics and Recruitment (Enlist Now)
+ * hub opens to every one of them, with the cards of the areas it does not open locked. Chronicles, the Hall of Relics
+ * and Recruitment (Enlist Now) are the Watch Commander's alone, so they are locked in every scene but his:
+ *   legion       an everyday member: the hub, every card locked
  *   emissary     a guest: the same as legion
- *   deployment   and the Event Tracker, the Armouring Hall (not its Watch Command tab) and the Chronicles
+ *   deployment   and the Event Tracker and the Armouring Hall (not its Watch Command tab)
  *   command      as deployment, and, as Deathwatch Command (not the Watch Commander), the Watch Command tab too
- *   accolade     and, with an award role (here Xenosbane Sigil; Vigilia Mortis in Aeternum opens the same by
- *                default), the Chronicles
+ *   accolade     and an award role (here Xenosbane Sigil), which opens nothing while the Chronicles are his
+ *   desk         as deployment, and given the Administratum desk by hand: runs it as the Watch Commander does
+ *   admin        a guild admin: deployment, and the Administratum to look at, changing nothing
  * The gate's other states:
  *   denied       signed in, but holding none of them
  *   signin       signed out
@@ -29,6 +31,8 @@ export const SCENES = [
   'deployment',
   'command',
   'accolade',
+  'desk',
+  'admin',
   'denied',
   'signin',
   'checking',
@@ -50,6 +54,9 @@ const SHAPES = {
   // The server counts Deathwatch Command as deployed too (deathwatchAccess.js).
   command: holding('legion', 'deployment', 'command'),
   accolade: holding('legion', 'xenosbane'),
+  desk: holding('legion', 'deployment', 'desk'),
+  // The server gives admins deployment as well (deathwatchAccess.js).
+  admin: holding('deployment', 'admin'),
   denied: { status: 'denied', ...NONE },
   signin: { status: 'signin', ...NONE },
   checking: { status: 'checking', ...NONE },

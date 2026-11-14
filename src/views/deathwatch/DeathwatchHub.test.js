@@ -37,7 +37,7 @@ describe('DeathwatchHub', () => {
   })
 
   it('offers the four areas, each straight to its first tab', () => {
-    expect(cards(mountHub())).toEqual([
+    expect(cards(mountHub({ commander: true }))).toEqual([
       { title: 'Event Tracker', href: '/deathwatch/eventtracker/standings' },
       { title: 'Armouring Hall', href: '/deathwatch/armouringhall/standard/watchbrother' },
       { title: 'Chronicles of Valor', href: '/deathwatch/chronicles/hall-of-champions' },
@@ -54,7 +54,7 @@ describe('DeathwatchHub', () => {
   })
 
   it('paints each area card with its own picture, dimensioned and lazy, with no alt text (the card names it)', () => {
-    const arts = mountHub().findAll('a.dw-card img.dw-card-art')
+    const arts = mountHub({ commander: true }).findAll('a.dw-card img.dw-card-art')
     expect(arts.map((i) => i.attributes('src').match(/card-[a-z]+/)[0])).toEqual(['card-tracker', 'card-armouring', 'card-chronicles', 'card-relics'])
     for (const img of arts) {
       expect(img.attributes('alt')).toBe('')
@@ -65,7 +65,7 @@ describe('DeathwatchHub', () => {
   })
 
   it('calls to enlist under the area cards, with a button to Recruitment', () => {
-    const w = mountHub()
+    const w = mountHub({ commander: true })
     const call = w.get('.dw-call')
     expect(call.get('.dw-call-t').text()).toBe('The Watch needs you')
     const btn = call.get('a.dw-call-btn')
@@ -79,12 +79,15 @@ describe('DeathwatchHub', () => {
     expect(mountHub().find('.dw-legal').exists()).toBe(false)
   })
 
-  it('shows the Administratum button to the Watch Commander only', () => {
-    expect(mountHub({ commander: false }).find('a.dw-manage').exists()).toBe(false)
+  it('shows the Administratum button to the Watch Commander, the desk and admins, and to nobody else', () => {
+    for (const roles of [['legion', 'deployment', 'command'], ['legion']]) expect(mountHub({ roles }).find('a.dw-manage').exists()).toBe(false)
     const manage = mountHub({ commander: true }).find('a.dw-manage')
     expect(manage.text()).toBe('Administratum')
     expect(manage.attributes('href')).toBe('/deathwatch/administratum/enter-mission')
     expect(manage.find('svg').attributes('aria-hidden')).toBe('true')
+    expect(mountHub({ roles: ['deployment', 'desk'] }).find('a.dw-manage').attributes('href')).toBe('/deathwatch/administratum/enter-mission')
+    // An admin cannot enter a mission: the button opens the desk, to look at.
+    expect(mountHub({ roles: ['deployment', 'admin'] }).find('a.dw-manage').attributes('href')).toBe('/deathwatch/administratum/manage')
     expect(cards(mountHub({ commander: true })).map((c) => c.title)).not.toContain('Administratum')
   })
 })
@@ -124,30 +127,41 @@ describe('DeathwatchHub styles', () => {
 describe('DeathwatchHub, locked cards', () => {
   const locked = (w) => w.findAll('.dw-card.is-locked').map((c) => c.find('.dw-card-title').text())
 
+  // Chronicles and the Hall of Relics are the Watch Commander's alone (areas.js).
+  const HIS = ['Chronicles of Valor', 'Hall of Relics']
+  const ALL4 = ['Event Tracker', 'Armouring Hall', ...HIS]
+
   it('locks, on the hub, the card of every area the viewer may not open, and links the rest', () => {
+    // A standing that opens no card at all still gets the hub, every card locked: never a dead end without a word.
     const legion = mountHub({ roles: ['legion'] })
-    expect(locked(legion)).toEqual(['Event Tracker', 'Armouring Hall', 'Chronicles of Valor'])
-    expect(cards(legion)).toEqual([{ title: 'Hall of Relics', href: '/deathwatch/hallofrelics/notable-members' }])
+    expect(locked(legion)).toEqual(ALL4)
+    expect(cards(legion)).toEqual([])
     const deployed = mountHub({ roles: ['legion', 'deployment'] })
-    expect(locked(deployed)).toEqual([])
-    expect(cards(deployed)).toHaveLength(4)
-    expect(locked(mountHub({ roles: ['emissary', 'xenosbane'] }))).toEqual(['Event Tracker', 'Armouring Hall'])
-    // One standing that opens no card at all still gets the hub, every card locked: never a dead end without a word.
-    expect(locked(mountHub({ roles: ['xenosbane'] }))).toEqual(['Event Tracker', 'Armouring Hall', 'Hall of Relics'])
-    expect(locked(mountHub({ roles: ['deployment'] }))).toEqual(['Hall of Relics'])
-    expect(locked(mountHub({ commander: true, roles: [] }))).toEqual([])
+    expect(locked(deployed)).toEqual(HIS)
+    expect(cards(deployed)).toEqual([
+      { title: 'Event Tracker', href: '/deathwatch/eventtracker/standings' },
+      { title: 'Armouring Hall', href: '/deathwatch/armouringhall/standard/watchbrother' },
+    ])
+    expect(locked(mountHub({ roles: ['emissary', 'xenosbane'] }))).toEqual(ALL4)
+    expect(locked(mountHub({ roles: ['command'] }))).toEqual(['Event Tracker', ...HIS])
+    expect(locked(mountHub({ roles: ['deployment'] }))).toEqual(HIS)
+    const everything = ['legion', 'emissary', 'deployment', 'command', 'xenosbane', 'vigilia', 'killmarine', 'desk', 'admin']
+    expect(locked(mountHub({ roles: everything }))).toEqual(HIS)
+    const commander = mountHub({ commander: true, roles: [] })
+    expect(locked(commander)).toEqual([])
+    expect(cards(commander)).toHaveLength(4)
   })
 
-  it('locks the cards as the Watch Commander set them in Access, over the defaults', () => {
-    const g = { eventtracker: ['legion'], hallofrelics: ['deployment'], recruitment: [] }
-    expect(locked(mountHub({ roles: ['legion'], g }))).toEqual(['Armouring Hall', 'Chronicles of Valor', 'Hall of Relics'])
-    const w = mountHub({ roles: ['legion'], g })
-    expect(w.find('.dw-call').classes()).toContain('is-locked') // Recruitment opened to nobody but him
-    expect(locked(mountHub({ commander: true, roles: [], g }))).toEqual([])
+  it('pays no heed to gates saved under the old Access page', () => {
+    const opening = { eventtracker: ['legion'], chronicles: ['legion'], hallofrelics: ['legion'], recruitment: ['legion'] }
+    expect(locked(mountHub({ roles: ['legion'], g: opening }))).toEqual(ALL4)
+    expect(mountHub({ roles: ['legion'], g: opening }).find('.dw-call').classes()).toContain('is-locked')
+    const closing = { eventtracker: [], armouringhall: [] }
+    expect(locked(mountHub({ roles: ['deployment'], g: closing }))).toEqual(HIS)
   })
 
   it('gives a locked card no link and the lock over it, and an open one neither lock nor blur', () => {
-    const w = mountHub({ roles: ['legion'] })
+    const w = mountHub({ roles: ['legion', 'command'] })
     const card = w.find('.dw-card.is-locked')
     expect(card.element.tagName).toBe('DIV')
     expect(card.attributes('href')).toBeUndefined()
@@ -165,17 +179,16 @@ describe('DeathwatchHub, locked cards', () => {
 })
 
 describe('DeathwatchHub, the call to enlist', () => {
-  it('opens to the Legion, Emissaries and the Watch Commander, as Recruitment does', () => {
-    for (const opts of [{ roles: ['legion'] }, { roles: ['emissary'] }, { commander: true, roles: [] }]) {
-      const w = mountHub(opts)
-      expect(w.find('.dw-call').classes(), JSON.stringify(opts)).not.toContain('is-locked')
-      expect(w.find('a.dw-call-btn').attributes('href')).toBe('/deathwatch/recruitment/terms-of-service')
-      expect(w.find('.dw-call .dw-lock').exists()).toBe(false)
-    }
+  it('opens to the Watch Commander alone, as Recruitment does', () => {
+    const w = mountHub({ commander: true, roles: [] })
+    expect(w.find('.dw-call').classes()).not.toContain('is-locked')
+    expect(w.find('a.dw-call-btn').attributes('href')).toBe('/deathwatch/recruitment/terms-of-service')
+    expect(w.find('.dw-call .dw-lock').exists()).toBe(false)
   })
 
   it('is locked for anyone else, with no link, while the hub and its cards stay', () => {
-    for (const roles of [['deployment'], ['command'], ['xenosbane']]) {
+    const everything = ['legion', 'emissary', 'deployment', 'command', 'xenosbane', 'vigilia', 'killmarine', 'desk', 'admin']
+    for (const roles of [['legion'], ['emissary'], ['deployment'], ['command'], ['xenosbane'], everything]) {
       const w = mountHub({ roles })
       const call = w.find('.dw-call')
       expect(call.classes(), roles[0]).toContain('is-locked')

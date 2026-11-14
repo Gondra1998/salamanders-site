@@ -458,3 +458,53 @@ describe('Manage', () => {
     expect(manage.find('.mg-editor input').element.value).toBe(t.n)
   })
 })
+
+describe('the desk and admins', () => {
+  const as = (roles) => useDeathwatch().$patch({ status: 'allowed', commander: false, roles })
+  // Every control on the desk that could change something, in the section open. Opening a team to look at it, closing
+  // the editor and exporting a backup change nothing.
+  const changers = (w) =>
+    w.findAll('.mg-main input, .mg-main select, .mg-main textarea, .mg-main button').filter((e) => !['mg-row', 'mg-x', 'mg-link'].some((c) => e.classes().includes(c)))
+  const SECTION_LABELS = ['Tour', 'Kill Teams', 'Scoring', 'Data & Archive']
+  // Whether a control is off as a browser has it: its own attribute, or a disabled fieldset around it.
+  const off = (e) => e.element.matches(':disabled')
+
+  it('shows an admin the whole desk, with every control that changes something disabled', async () => {
+    as(['deployment', 'admin'])
+    const { w } = await mountPage('administratum/manage')
+    expect(w.text()).toContain('Read only: the Watch Commander and the desk make changes here.')
+    await w.find('.mg-row').trigger('click') // a team opens, to be looked at
+    expect(w.find('.mg-editor').exists()).toBe(true)
+    expect(w.find('.mg-danger-item').exists()).toBe(false)
+    for (const label of SECTION_LABELS) {
+      await section(w, label)
+      if (label === 'Kill Teams') await w.find('.mg-row').trigger('click')
+      expect(changers(w).length, label).toBeGreaterThan(0)
+      expect(changers(w).filter((e) => !off(e)).map((e) => e.html().slice(0, 60)), label).toEqual([])
+    }
+    expect(off(w.find('.mg-link'))).toBe(false) // Export backup
+  })
+
+  it('lets the desk change everything the Watch Commander can, without the read-only note', async () => {
+    as(['deployment', 'desk'])
+    const { w } = await mountPage('administratum/manage')
+    expect(w.text()).not.toContain('Read only')
+    await w.find('.mg-row').trigger('click')
+    expect(w.find('.mg-danger-item').exists()).toBe(true)
+    for (const label of SECTION_LABELS) {
+      await section(w, label)
+      if (label === 'Kill Teams') await w.find('.mg-row').trigger('click')
+      expect(changers(w).filter((e) => off(e) && !e.classes().includes('danger')).map((e) => e.html().slice(0, 60)), label).toEqual([])
+    }
+  })
+
+  it('offers "Delete from archive" to the desk, and not to an admin', async () => {
+    const archived = Object.keys(useDeathwatchData().archive)[0]
+    as(['deployment', 'desk'])
+    const desk = (await mountPage('eventtracker/archive', { e: archived })).w
+    expect(desk.findAll('button').map((b) => b.text())).toContain('Delete from archive')
+    as(['deployment', 'admin'])
+    const admin = (await mountPage('eventtracker/archive', { e: archived })).w
+    expect(admin.findAll('button').map((b) => b.text())).not.toContain('Delete from archive')
+  })
+})

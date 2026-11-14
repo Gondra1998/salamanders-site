@@ -45,7 +45,8 @@ const USERS = {
   // The Deathwatch Command role: with a Deathwatch role, and on its own (deployed all the same).
   'test-command-token': { id: '200000000000000007', username: 'command-tester' },
   'test-command-only-token': { id: '200000000000000008', username: 'command-only-tester' },
-  // Not in the guild at all: the spec gives this id a grant and takes it away again.
+  // In the guild with no role (in MEMBERS, so the Watch Commander's search finds them): the spec gives them the
+  // desk, then they leave the guild and come back, which ends it for good.
   'test-granted-token': { id: '200000000000000003', username: 'granted-tester' },
   // Reliquarium curator (e2e/tests/gallery-api.spec.js): an invented id, here and in GALLERY_MEMBERS.
   'test-curator-token': { id: '200000000000000302', username: 'curator-tester' },
@@ -102,7 +103,13 @@ const MEMBERS = {
   '100000000000000024': { roles: [LEGION_ROLE, SCOUT_ROLE, THIRD_COMPANY_ROLE], nick: 'E2E Leaver' },
   '100000000000000025': { roles: [LEGION_ROLE], nick: 'E2E Servitor', bot: true },
   '100000000000000026': { roles: [LEGION_ROLE, LORD_OF_DRAKES_ROLE], nick: 'E2E Lord' },
+  // No role at all, so no roster or count can show them: the Deathwatch spec's delegate (test-granted-token).
+  '200000000000000003': { roles: [], nick: 'E2E Delegate' },
 }
+// When every member joined, unless a rejoin (below) says otherwise: long before anything the specs give them.
+const JOINED = '2025-01-01T00:00:00.000000+00:00'
+// Who left by the leave hook, so the rejoin hook can bring them back as they were.
+const LEFT = {}
 
 // --- The Reliquarium: the clips channel, the CDN and R2, all in memory ---
 
@@ -280,6 +287,7 @@ Bun.serve({
       const list = Object.entries(MEMBERS).map(([id, m]) => ({
         nick: m.nick ?? null,
         roles: m.roles,
+        joined_at: m.joined_at ?? JOINED,
         user: { id, username: byId[id]?.username ?? `user-${id}`, global_name: null, ...(m.bot ? { bot: true } : {}) },
       }))
       return withCors(Response.json(list))
@@ -290,7 +298,7 @@ Bun.serve({
     const memberMatch = url.pathname.match(/^\/v10\/guilds\/[^/]+\/members\/([^/]+)$/)
     if (memberMatch) {
       const member = MEMBERS[memberMatch[1]] ?? DEATHWATCH_MEMBERS[memberMatch[1]] ?? GALLERY_MEMBERS[memberMatch[1]]
-      return withCors(member ? Response.json(member) : Response.json({ message: 'Unknown Member' }, { status: 404 }))
+      return withCors(member ? Response.json({ joined_at: JOINED, ...member }) : Response.json({ message: 'Unknown Member' }, { status: 404 }))
     }
 
     // The wiki bake, standing in for raw.githubusercontent.com (BAKE_BASE_URL).
@@ -300,8 +308,17 @@ Bun.serve({
     // Test hook: a member leaves the guild (the leaver spec).
     const leave = url.pathname.match(/^\/__test\/leave\/(\d+)$/)
     if (leave && request.method === 'POST') {
+      LEFT[leave[1]] = MEMBERS[leave[1]]
       delete MEMBERS[leave[1]]
       return withCors(Response.json({ left: leave[1] }))
+    }
+
+    // Test hook: a member who left comes back, joining now (the Deathwatch spec: leaving ends what was given).
+    const rejoin = url.pathname.match(/^\/__test\/rejoin\/(\d+)$/)
+    if (rejoin && request.method === 'POST' && LEFT[rejoin[1]]) {
+      MEMBERS[rejoin[1]] = { ...LEFT[rejoin[1]], joined_at: new Date().toISOString() }
+      delete LEFT[rejoin[1]]
+      return withCors(Response.json({ rejoined: rejoin[1] }))
     }
 
     // The clips channel, as the bot reads it (server/src/galleryDiscord.js). Any other channel is unknown.

@@ -10,8 +10,10 @@ const SITE = 'http://localhost:5173'
 
 const DEATHWATCH = 'test-deathwatch-token'
 const COMMANDER = 'test-commander-token'
-const GRANTED = 'test-granted-token'
-const GRANTED_ID = '200000000000000003'
+// In the guild with no role, as 'E2E Delegate': the Watch Commander gives them the desk.
+const DELEGATE = 'test-granted-token'
+const DELEGATE_ID = '200000000000000003'
+const MOCK = 'http://discord-mock:4400'
 const DOC = { col: 'teams', id: 'e2e-alpha', op: 'set', doc: { name: 'Alpha', score: 3 } }
 
 const as = (token, headers = {}) => ({ headers: { Authorization: `Bearer ${token}`, ...headers } })
@@ -29,8 +31,8 @@ test.describe('Deathwatch API', () => {
     expect(await me(DEATHWATCH)).toEqual(out(true, false, false, ['deployment']))
     // DEATHWATCH_ROLE_ID lists two roles; a holder of the second one is as welcome as a holder of the first.
     expect(await me('test-deathwatch-second-token')).toEqual(out(true, false, false, ['deployment']))
-    // The guild owner and an Administrator are deployed too, but they are not the Commander or Deathwatch Command.
-    for (const who of ['test-owner-token', 'test-admin-token']) expect(await me(who), who).toEqual(out(true, false, false, ['deployment']))
+    // The guild owner and an Administrator are admins: deployed, and the Administratum to look at; never the Commander.
+    for (const who of ['test-owner-token', 'test-admin-token']) expect(await me(who), who).toEqual(out(true, false, false, ['deployment', 'admin']))
     expect(await me(COMMANDER)).toEqual(out(true, true, false, []))
     // DEATHWATCH_COMMAND_ROLE_ID is its own standing, and deploys its holder too, even without a Deathwatch role.
     expect(await me('test-command-token')).toEqual(out(true, false, true, ['deployment', 'command']))
@@ -49,12 +51,14 @@ test.describe('Deathwatch API', () => {
     await send(request, 'POST', '/deathwatch/doc', COMMANDER, { col: DOC.col, id: DOC.id, op: 'delete' })
     expect((await get(request, '/deathwatch/data', 'test-norole-token')).status()).toBe(403)
     // Deathwatch Command is not the Watch Commander: the Commander-only routes stay closed to it.
-    expect((await get(request, '/deathwatch/grants', 'test-command-token')).status()).toBe(403)
+    expect((await get(request, '/deathwatch/members?q=e2e', 'test-command-token')).status()).toBe(403)
     expect((await send(request, 'POST', '/deathwatch/doc', 'test-command-token', DOC)).status()).toBe(403)
     for (const who of ['test-owner-token', 'test-admin-token']) {
       expect((await get(request, '/deathwatch/data', who)).status(), who).toBe(200)
-      expect((await get(request, '/deathwatch/grants', who)).status(), who).toBe(403)
+      expect((await get(request, '/deathwatch/members?q=e2e', who)).status(), who).toBe(403)
     }
+    // The old grants are gone.
+    expect((await get(request, '/deathwatch/grants', COMMANDER)).status()).toBe(404)
   })
 
   test('the Commander edits documents and readers poll them by ETag', async ({ request }) => {
@@ -119,27 +123,57 @@ test.describe('Deathwatch API', () => {
     expect(res.status()).toBe(413)
   })
 
-  test('a grant opens the area for someone outside the guild, and revoking closes it at once', async ({ request }) => {
-    // A valid Discord token that is not in the guild and has no grant: refused. That refusal is now cached.
-    expect((await get(request, '/deathwatch/data', GRANTED)).status()).toBe(403)
-    expect(await (await get(request, '/deathwatch/me', GRANTED)).json()).toEqual({ access: false, watchCommander: false, deathwatchCommand: false, roles: [] })
-    // Only the Commander manages grants.
-    expect((await get(request, '/deathwatch/grants', DEATHWATCH)).status()).toBe(403)
+  test('the Watch Commander finds a member by name and gives them the desk, which works at once', async ({ request }) => {
+    // A member with no role: refused, and that refusal is now cached.
+    expect((await get(request, '/deathwatch/data', DELEGATE)).status()).toBe(403)
+    expect(await (await get(request, '/deathwatch/me', DELEGATE)).json()).toEqual({ access: false, watchCommander: false, deathwatchCommand: false, roles: [] })
+    // Only the Watch Commander searches and gives; the list is for the Administratum.
+    expect((await get(request, '/deathwatch/members?q=dele', DEATHWATCH)).status()).toBe(403)
+    expect((await send(request, 'POST', '/deathwatch/access', DEATHWATCH, { discordId: DELEGATE_ID, kind: 'desk' })).status()).toBe(403)
+    expect((await get(request, '/deathwatch/access', DEATHWATCH)).status()).toBe(403)
 
-    expect((await send(request, 'POST', '/deathwatch/grants', COMMANDER, { discordId: GRANTED_ID })).status()).toBe(201)
-    expect((await send(request, 'POST', '/deathwatch/grants', COMMANDER, { discordId: GRANTED_ID })).status()).toBe(200)
-    expect((await send(request, 'POST', '/deathwatch/grants', COMMANDER, { discordId: '12' })).status()).toBe(400)
+    const found = await (await get(request, '/deathwatch/members?q=e2e%20dele', COMMANDER)).json()
+    expect(found.members.map((m) => [m.id, m.name])).toEqual([[DELEGATE_ID, 'E2E Delegate']])
+    expect((await (await get(request, `/deathwatch/members?q=${DELEGATE_ID}`, COMMANDER)).json()).members.map((m) => m.id)).toEqual([DELEGATE_ID])
 
-    // At once, despite the cached refusal; view only, and never Commander.
-    expect((await get(request, '/deathwatch/data', GRANTED)).status()).toBe(200)
-    expect(await (await get(request, '/deathwatch/me', GRANTED)).json()).toEqual({ access: true, watchCommander: false, deathwatchCommand: false, roles: ['deployment'] })
-    expect((await send(request, 'POST', '/deathwatch/doc', GRANTED, DOC)).status()).toBe(403)
-    const listed = await (await get(request, '/deathwatch/grants', COMMANDER)).json()
-    expect(listed.grants.map((g) => g.discordId)).toContain(GRANTED_ID)
+    expect((await send(request, 'POST', '/deathwatch/access', COMMANDER, { discordId: DELEGATE_ID, kind: 'desk' })).status()).toBe(201)
+    expect((await send(request, 'POST', '/deathwatch/access', COMMANDER, { discordId: DELEGATE_ID, kind: 'desk' })).status()).toBe(200)
+    expect((await send(request, 'POST', '/deathwatch/access', COMMANDER, { discordId: '200000000000000099', kind: 'desk' })).status()).toBe(404)
+    expect((await send(request, 'POST', '/deathwatch/access', COMMANDER, { discordId: DELEGATE_ID, kind: 'admin' })).status()).toBe(400)
 
-    expect((await send(request, 'DELETE', `/deathwatch/grants/${GRANTED_ID}`, COMMANDER)).status()).toBe(200)
-    expect((await send(request, 'DELETE', `/deathwatch/grants/${GRANTED_ID}`, COMMANDER)).status()).toBe(404)
-    expect((await get(request, '/deathwatch/data', GRANTED)).status()).toBe(403)
+    // At once, despite the cached refusal: the desk reads the Event Tracker and writes, and changes no access.
+    expect(await (await get(request, '/deathwatch/me', DELEGATE)).json()).toEqual({ access: true, watchCommander: false, deathwatchCommand: false, roles: ['deployment', 'desk'] })
+    expect((await send(request, 'POST', '/deathwatch/doc', DELEGATE, DOC)).status()).toBe(200)
+    expect((await data(request, DELEGATE)).teams).toHaveProperty(DOC.id)
+    expect((await send(request, 'POST', '/deathwatch/access', DELEGATE, { discordId: DELEGATE_ID, kind: 'watchcommand' })).status()).toBe(403)
+    const list = await (await get(request, '/deathwatch/access', DELEGATE)).json()
+    expect(list.people.map((p) => [p.id, p.kind, p.name])).toEqual([[DELEGATE_ID, 'desk', 'E2E Delegate']])
+    await send(request, 'POST', '/deathwatch/doc', COMMANDER, { col: DOC.col, id: DOC.id, op: 'delete' })
+  })
+
+  test('an admin sees the Administratum and changes nothing', async ({ request }) => {
+    expect(await (await get(request, '/deathwatch/me', 'test-admin-token')).json()).toEqual({ access: true, watchCommander: false, deathwatchCommand: false, roles: ['deployment', 'admin'] })
+    expect((await get(request, '/deathwatch/access', 'test-admin-token')).status()).toBe(200)
+    expect((await send(request, 'POST', '/deathwatch/doc', 'test-admin-token', DOC)).status()).toBe(403)
+    expect((await send(request, 'POST', '/deathwatch/access', 'test-admin-token', { discordId: DELEGATE_ID, kind: 'deathwatch' })).status()).toBe(403)
+  })
+
+  test('leaving the guild ends what was given for good: coming back does not bring it back', async ({ request }) => {
+    expect((await send(request, 'POST', '/deathwatch/doc', DELEGATE, DOC)).status()).toBe(200)
+    expect((await request.post(`${MOCK}/__test/leave/${DELEGATE_ID}`)).status()).toBe(200)
+    expect((await send(request, 'POST', '/deathwatch/doc', DELEGATE, DOC)).status()).toBe(403)
+    expect((await request.post(`${MOCK}/__test/rejoin/${DELEGATE_ID}`)).status()).toBe(200)
+    // Back in the guild, joined after the desk was given: it is void, and the server removes it.
+    expect((await send(request, 'POST', '/deathwatch/doc', DELEGATE, DOC)).status()).toBe(403)
+    expect(await (await get(request, '/deathwatch/me', DELEGATE)).json()).toEqual({ access: false, watchCommander: false, deathwatchCommand: false, roles: [] })
+    expect((await (await get(request, '/deathwatch/access', COMMANDER)).json()).people.map((p) => p.id)).not.toContain(DELEGATE_ID)
+    // Given again, it works again.
+    expect((await send(request, 'POST', '/deathwatch/access', COMMANDER, { discordId: DELEGATE_ID, kind: 'desk' })).status()).toBe(201)
+    expect((await send(request, 'POST', '/deathwatch/doc', DELEGATE, DOC)).status()).toBe(200)
+    expect((await send(request, 'DELETE', `/deathwatch/access/${DELEGATE_ID}/desk`, COMMANDER)).status()).toBe(200)
+    expect((await send(request, 'DELETE', `/deathwatch/access/${DELEGATE_ID}/desk`, COMMANDER)).status()).toBe(404)
+    expect((await send(request, 'POST', '/deathwatch/doc', DELEGATE, DOC)).status()).toBe(403)
+    await send(request, 'POST', '/deathwatch/doc', COMMANDER, { col: DOC.col, id: DOC.id, op: 'delete' })
   })
 
   test('CORS: the preflight allows If-None-Match and the response exposes the ETag', async ({ request }) => {

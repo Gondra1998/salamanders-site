@@ -66,7 +66,7 @@ async function remove() {
   <TrackerState :status="data.status" :error="data.error" @retry="reload">
     <template v-if="!ev">
       <h2 class="dw-plaque">Archive</h2>
-      <p v-if="gate.commander" class="dw-sub">Finished events, newest first. Open one to see its final standings, points progression, honours and players.</p>
+      <p v-if="gate.canEdit" class="dw-sub">Finished events, newest first. Open one to see its final standings, points progression, honours and players.</p>
       <div v-if="list.length" class="dw-tiles">
         <RouterLink v-for="[k, a] in list" :key="k" class="dw-tile ev" :to="archived(k).view('standings')">
           <span class="dw-tile-label">{{ a.name }}</span>
@@ -75,7 +75,7 @@ async function remove() {
           <span class="dw-tile-note">{{ date(a) }} · {{ a.sum?.nt ?? '?' }} Kill Teams · {{ a.sum?.nm ?? '?' }} missions</span>
         </RouterLink>
       </div>
-      <p v-else class="dw-empty">No archived events yet.<template v-if="gate.commander"> Use “Archive &amp; reset” under Manage when the event is over.</template></p>
+      <p v-else class="dw-empty">No archived events yet.<template v-if="gate.canEdit"> Use “Archive &amp; reset” under Manage when the event is over.</template></p>
     </template>
     <template v-else>
       <p><RouterLink class="dw-link" :to="all()">← All events</RouterLink></p>
@@ -89,7 +89,7 @@ async function remove() {
       <PlayersView v-else-if="view === 'players'" :R="R" :player="q('p')" :to="to" @pick="pickPlayer" />
       <HonourRollView v-else-if="view === 'honour-roll'" :R="R" :to="to" />
       <GameStatsView v-else :R="R" />
-      <div v-if="gate.commander" class="dw-actions">
+      <div v-if="gate.canEdit" class="dw-actions">
         <button type="button" class="dw-btn rm-fade" @click="backup">Download backup</button>
         <button type="button" class="dw-btn rm-fade danger" @click="remove">{{ armed ? 'Tap again to delete' : 'Delete from archive' }}</button>
         <span class="dw-msg bad" role="status">{{ msg }}</span>

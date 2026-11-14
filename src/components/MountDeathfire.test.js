@@ -237,3 +237,131 @@ describe('the page\'s text', () => {
     expect(lastEnv().calm(300, 320)).toBeGreaterThan(0.1)
   })
 })
+
+describe('what the live mountain did, and this one must', () => {
+  const setHidden = (value) => Object.defineProperty(document, 'hidden', { value, configurable: true })
+  afterEach(() => {
+    delete document.hidden // (back to jsdom's own)
+  })
+
+  it('opened in a hidden tab, draws nothing until it is shown, and time does not leap when it is', async () => {
+    setHidden(true)
+    await start()
+    pass(5000)
+    expect(scene().draw).not.toHaveBeenCalled()
+    setHidden(false)
+    document.dispatchEvent(new Event('visibilitychange'))
+    pass(50)
+    expect(scene().draw).toHaveBeenCalled()
+    const [, t, , env] = scene().draw.mock.calls[0]
+    expect(t).toBeLessThan(0.2)
+    expect(env.lakeLevel).toBeLessThan(0.31)
+  })
+
+  it('stops drawing while the tab is hidden', async () => {
+    await start()
+    pass(1000)
+    const drawn = scene().draw.mock.calls.length
+    setHidden(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    pass(3000)
+    expect(scene().draw.mock.calls.length).toBe(drawn)
+  })
+
+  it('with reduced motion, draws one still frame, and draws it again on a page change and a resize', async () => {
+    motionAllowed.mockReturnValue(false)
+    await start()
+    expect(wrapper.find('.deathfire').attributes('data-mode')).toBe('still')
+    expect(scene().draw).toHaveBeenCalledTimes(1)
+    expect(scene().draw.mock.calls[0][1]).toBe(2.5)
+    pass(5000)
+    expect(scene().draw).toHaveBeenCalledTimes(1)
+    expect(scene().erupt).not.toHaveBeenCalled()
+
+    // another page: the same scene, drawn again for it, with that page's text measured
+    const measured = measureCalm.mock.calls.length
+    await router.push('/builds')
+    await settle()
+    expect(createScene).toHaveBeenCalledTimes(1)
+    expect(scene().draw).toHaveBeenCalledTimes(2)
+    expect(lastEnv()).toMatchObject({ mirror: true, quiet: true })
+    expect(measureCalm.mock.calls.length).toBe(measured + 1)
+
+    // another size: a new scene, and its one frame
+    setWindow(1000, 700)
+    window.dispatchEvent(new Event('resize'))
+    pass(50)
+    await settle()
+    expect(createScene).toHaveBeenCalledTimes(2)
+    expect(scene().draw).toHaveBeenCalledTimes(1)
+    expect(scene().draw.mock.calls[0][1]).toBe(2.5)
+    for (const made of scenes) for (const call of made.draw.mock.calls) expect(call[3].trial).toBe(0)
+  })
+
+  it('lets ash fall behind the rock and in front of it', async () => {
+    await start()
+    pass(50)
+    // 460 flakes to 1600 x 1000 px: 265 in this window, two fifths of them in front
+    const main = wrapper.find('canvas.deathfire-canvas').element.getContext('2d')
+    expect(fake.calls('fillRect', main)).toHaveLength(106)
+    expect(main.fillStyle).toBe('#6b6560')
+    // the scene is handed the rest, to draw behind the mountain when it gets there
+    const behind = { fillRect: vi.fn() }
+    lastEnv().behindRock(behind)
+    expect(behind.fillRect).toHaveBeenCalledTimes(159)
+    // and in front means over the scene, in the page's own left and right: after the scene has drawn
+    expect(fake.calls('setTransform', main).at(-1)).toEqual([1, 0, 0, 1, 0, 0])
+  })
+
+  it('on a page marked ashOver, lets the front ash fall over the page instead, a shade lighter', async () => {
+    await start({ path: '/accolades', routes: [{ path: '/accolades', component: Page, meta: { ashOver: true } }] })
+    pass(50)
+    const veil = wrapper.find('canvas.deathfire-veil').element
+    const over = veil.getContext('2d')
+    const main = wrapper.find('canvas.deathfire-canvas').element.getContext('2d')
+    expect(veil.style.display).not.toBe('none')
+    expect([veil.width, veil.height]).toEqual([1280, 720])
+    expect(fake.calls('clearRect', over).at(-1)).toEqual([0, 0, 1280, 720])
+    expect(fake.calls('fillRect', over)).toHaveLength(106)
+    expect(over.fillStyle).toBe('#9a928a')
+    expect(fake.calls('fillRect', main)).toHaveLength(0)
+  })
+
+  it('keeps the veil out of the way on a page that is not', async () => {
+    await start()
+    pass(50)
+    const veil = wrapper.find('canvas.deathfire-veil').element
+    expect(veil.style.display).toBe('none')
+    expect(fake.calls('fillRect', veil.getContext('2d'))).toHaveLength(0)
+  })
+
+  it('in a Time of Trial, throws the trial\'s own blasts', async () => {
+    window.history.replaceState(null, '', '/?trial=3')
+    await start()
+    pass(8000)
+    const blasts = scene().erupt.mock.calls.filter((call) => call[1] === 0.4)
+    expect(blasts.length).toBeGreaterThanOrEqual(2)
+    for (const [scale] of blasts) {
+      expect(scale).toBeGreaterThan(0.9 + 1.2 * 0.2)
+      expect(scale).toBeLessThanOrEqual(2.1)
+    }
+    expect(scene().draw.mock.calls.some((call) => call[3].trial > 0.9)).toBe(true)
+  })
+
+  it('cleans up when it goes: no more frames, no more building, and the scene\'s memory handed back', async () => {
+    await start()
+    pass(100)
+    const made = scene()
+    const drawn = made.draw.mock.calls.length
+    wrapper.unmount()
+    wrapper = null
+    expect(made.dispose).toHaveBeenCalledTimes(1)
+    pass(2000)
+    expect(made.draw.mock.calls.length).toBe(drawn)
+    setWindow(900, 600)
+    window.dispatchEvent(new Event('resize'))
+    pass(100)
+    await settle()
+    expect(createScene).toHaveBeenCalledTimes(1)
+  })
+})

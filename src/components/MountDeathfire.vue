@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { motionAllowed } from '../lib/doomfire'
 import { deathfireHeat } from '../lib/deathfireHeat'
 import { loadBaked } from '../lib/deathfire/baked.js'
+import { createAsh } from '../lib/deathfire/ash.js'
 import { calmFactor, measureCalm } from '../lib/deathfire/calm.js'
 import { compose } from '../lib/deathfire/compose.js'
 import { createSky } from '../lib/deathfire/crossing.js'
@@ -22,7 +23,9 @@ import { excitement } from '../lib/deathfire/trial.js'
  *   - how full the lake is (lakeLevel.js)
  *   - where the page's reading text lies, so the lava steps aside under it (calm.js)
  *   - when to erupt
- * and it publishes the mountain's heat for the Archive plaque, which breathes with it (deathfireHeat.js).
+ * It also draws the ash that falls through it all (ash.js): behind the mountain and in front of it, or, on pages
+ * marked `ashOver`, over the page itself.
+ * And it publishes the mountain's heat for the Archive plaque, which breathes with it (deathfireHeat.js).
  *
  * The mountain and the moon come as baked pictures, fetched for this kind of device only (baked.js). If they cannot
  * be had, the painting code is fetched instead and the mountain is painted here. The scene's own code is fetched
@@ -51,6 +54,8 @@ let scene = null // the drawing, built for this window
 let sceneKey = '' // what it was built for (compose's key)
 let wanted = '' // the key of a scene being fetched for or built
 let ctx = null
+let dpr = 1
+let ash = null // the falling ash, for this window: { back, front, fall }
 let view = { mirror: false, quiet: false } // how a frame is drawn on this page
 let sky = null // the visitor's crossing: the moon's place, the Time of Trial
 let lake = null // how full the lake is: it outlives a rebuild
@@ -98,25 +103,27 @@ function kitFor(kind) {
  * One scene serves every page, so most calls find nothing to do. It is built again only when the window changes.
  * The canvas is sized in the same breath as the new scene is built, so the old scene goes on drawing at its own size
  * until then.
+ * Resolves to true when it built a scene.
  */
 async function layout() {
   const cv = canvas.value
-  if (!cv) return
+  if (!cv) return false
   const w = window.innerWidth
   const h = window.innerHeight
   lastW = w
   lastH = h
-  const dpr = Math.min(window.devicePixelRatio || 1, 2)
-  const plan = compose({ w, h, dpr, path: route.path })
-  if (!plan) return
+  const ratio = Math.min(window.devicePixelRatio || 1, 2)
+  const plan = compose({ w, h, dpr: ratio, path: route.path })
+  if (!plan) return false
   view = { mirror: plan.mirror, quiet: plan.quiet }
-  if (plan.key === sceneKey || plan.key === wanted) return
+  if (plan.key === sceneKey || plan.key === wanted) return false
   wanted = plan.key
   const kit = await kitFor(plan.kind)
   // (the component may have gone, or the window changed again, while the pictures were on their way)
-  if (stopped || wanted !== plan.key) return
+  if (stopped || wanted !== plan.key) return false
   wanted = ''
 
+  dpr = ratio
   cv.width = Math.ceil(w * dpr)
   cv.height = Math.ceil(h * dpr)
   cv.style.width = `${w}px`
@@ -134,8 +141,11 @@ async function layout() {
     ...(layersOff.length ? { layers: Object.fromEntries(layersOff.map((name) => [name, false])) } : {}),
   })
   sceneKey = plan.key
+  // Ash is weather: as thick per screen area at every size, half as thick on a phone.
+  ash = createAsh(w, h, { density: LOOK.ash, phone: plan.kind === 'phone' })
   calmAt = -1
   if (mode.value === 'still') still()
+  return true
 }
 
 /**
@@ -161,7 +171,7 @@ function relayout() {
  */
 function draw(dt, secs, live) {
   if (!scene || !ctx) return
-  const { phase, trial } = sky.step(secs, live)
+  const { phase, trial, blast } = sky.step(secs, live)
   const stirred = excitement(phase, trial)
   // the mountain's own pulse: the more stirred, the oftener. Most are spits; about one in five is an eruption
   // proper, and a stirred mountain throws more of those.
@@ -169,6 +179,8 @@ function draw(dt, secs, live) {
     scene.erupt(Math.random() < 0.2 + 0.25 * stirred ? 1.5 + Math.random() : 0.55 + 0.5 * Math.random())
     nextPulse = t + (2.5 + 6.5 * Math.random()) / (1 + 1.6 * stirred)
   }
+  // in a Time of Trial the blast keeps throwing: every one an eruption proper, cut short so they stand apart
+  if (blast) scene.erupt(0.9 + 1.2 * trial, 0.4)
   water = lake.step(secs, stirred, { fillMinutes: LOOK.lakeFill, start: LOOK.lakeStart })
   // the page's text is measured a few times a second, and followed between whiles as the page scrolls
   if (calmAt < 0 || t - calmAt > 0.4) {
@@ -187,7 +199,20 @@ function draw(dt, secs, live) {
     spill: water.spill,
     mirror: view.mirror,
     quiet: view.quiet,
+    // the far ash falls behind the mountain: the scene calls this when it has drawn the sky and is about to draw the rock
+    behindRock: (c) => ash.fall(c, ash.back, dt),
   })
+  // The near ash falls in front of everything. On a page marked ashOver it falls over the page itself, on the veil
+  // canvas, a shade lighter and a touch larger, or it would vanish against the dark panels there.
+  const over = ashOver.value && veil.value ? veil.value.getContext('2d') : null
+  if (over) {
+    over.setTransform(dpr, 0, 0, dpr, 0, 0)
+    over.clearRect(0, 0, lastW, lastH)
+    ash.fall(over, ash.front, dt, true)
+  } else {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0) // (the scene may have been drawing mirrored)
+    ash.fall(ctx, ash.front, dt)
+  }
   // the Archive plaque breathes and flares with the mountain
   const heat = scene.heatNow()
   deathfireHeat.breathe = heat.breathe
@@ -218,7 +243,11 @@ const onVisibility = () => (hidden = document.hidden)
 
 watch(
   () => route.path,
-  () => layout(),
+  async () => {
+    const built = await layout()
+    // (a still frame is not on a loop: it is drawn again for the new page, whose text lies elsewhere)
+    if (!built && mode.value === 'still') still()
+  },
 )
 
 onMounted(() => {
@@ -258,8 +287,11 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
   document.removeEventListener('visibilitychange', onVisibility)
+  sky?.endTrial()
+  scene?.dispose()
   scene = null
   ctx = null
+  ash = null
 })
 </script>
 

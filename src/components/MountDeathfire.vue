@@ -187,6 +187,8 @@ async function layout() {
     ...(layersOff.length ? { layers: Object.fromEntries(layersOff.map((name) => [name, false])) } : {}),
   })
   sceneKey = plan.key
+  // (dev server only: the scene where it can be looked at. `scene.info.timing` is what each part of the build cost.)
+  if (import.meta.env.DEV) window.__deathfire = { scene }
   // (a second scene for the same size of window is one stood again under hero text that moved: count it)
   if (w === builtW && h === builtH) retries++
   builtW = w
@@ -354,6 +356,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility)
   sky?.endTrial()
   scene?.dispose()
+  if (import.meta.env.DEV) delete window.__deathfire
   scene = null
   ctx = null
   ash = null

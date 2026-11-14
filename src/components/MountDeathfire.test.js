@@ -644,3 +644,18 @@ describe('a desktop, where the hero text stands beside the mountain', () => {
     expect(measureCalm).toHaveBeenLastCalledWith(document, window, { stacked: false })
   })
 })
+
+describe('on the dev server', () => {
+  it('leaves the scene where it can be looked at, for measuring what a build and a frame cost', async () => {
+    await start()
+    expect(window.__deathfire.scene).toBe(scene())
+    setWindow(1000, 700)
+    window.dispatchEvent(new Event('resize'))
+    pass(50)
+    await settle()
+    expect(window.__deathfire.scene).toBe(scene())
+    wrapper.unmount()
+    wrapper = null
+    expect(window.__deathfire).toBeUndefined()
+  })
+})

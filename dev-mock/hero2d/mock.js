@@ -102,17 +102,6 @@ export function trialLevel(sec, tier) {
   return peak * (1 - sm((sec - rise - hold) / fall))
 }
 /**
- * How much of the moon's own drift is held back at `sec` seconds into a trial, 1 to 0. The moon is what drives a
- * trial, so it does not sail on while the mountain is still answering it: it hangs where the trial found it (its
- * closest pass) through the trial's rise and hold, then drifts on over the trial's fall, and is back where the clock
- * has it as the trial ends. The moon's pass and the trial are one sequence, the same length.
- */
-export function trialHang(sec, tier) {
-  const held = 6 + (6 + 8 * tier)
-  const fall = 30 + 10 * tier
-  return sec <= held ? 1 : 1 - sm((sec - held) / fall)
-}
-/**
  * How stirred up the mountain is, 0 to 1. Prometheus drags at the crust as it nears: nothing for the outer half of its
  * crossing, then a rise to a half at its closest pass (`phase` 0.5). A Time of Trial (`trial`, 0 to 1) comes on top.
  * Everything that quickens with the moon reads this one number: the pulse of eruptions, the river's speed and heat,

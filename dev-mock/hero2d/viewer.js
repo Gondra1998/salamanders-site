@@ -15,9 +15,9 @@
 //               ?spill=0..1 (hold the spill at this much; use with ?lvl=1)
 //               ?mtn=live (paint the mountain here instead of using the baked picture)
 //               ?moon=0..1 also stops the sky's clock (0.5 is the closest pass and brings a Time of Trial, as on the live
-//               site)  ?skyfast=1 (the moon crosses in 30 seconds, but a trial still runs at its own length)
+//               site)  ?skyfast=1 (the moon crosses in 30 seconds; a trial still runs at its own length and carries the moon)
 //               ?trial=1|2|3 (start a Time of Trial of that tier)
-import { createScene, excitement, trialHang, trialLength, trialLevel } from './mock.js'
+import { createScene, excitement, trialLength, trialLevel } from './mock.js'
 
 const q = new URLSearchParams(location.search)
 const LAYERS = ['sky', 'moon', 'plume', 'ridges', 'relief', 'river', 'lake', 'monolith', 'fog', 'embers', 'ash']
@@ -111,55 +111,49 @@ const SPILL_SECS = 90
 // The sky. Prometheus crosses once every 15 minutes on the wall clock, as on the live site, so every visitor sees the
 // same moon. At its closest pass (mid-crossing) it brings the Time of Trial, its size drawn by chance. The viewer owns
 // the clock and the trial (the live component does); the scene is told the moon's place and how hard the trial rages.
+//
+// While a Time of Trial is on, the trial is the moon's clock, and that is all: the moon is where the trial found it,
+// carried on by the trial's own seconds at the sky's true pace. Nothing else moves it, whichever clock was running
+// before. When the trial ends the moon goes on from where the trial left it.
 const CYCLE_MS = 15 * 60 * 1000
 const sky = {
   clock: !q.has('moon'), // follow the wall clock; dragging the moon, or ?moon=, takes it by hand
   fast: q.get('skyfast') === '1',
-  byHand: 0, // by hand there is no clock to count crossings: each time the handle comes back below half-way is a new one
-  high: false,
+  at: Date.now() / CYCLE_MS, // where the moon is, in crossings: the whole part is which crossing, the rest how far across
   lastCycle: -1, // the crossing whose closest pass has been seen
   trialAt: -1, // seconds into the Time of Trial in progress; -1 when none
   trialTier: 1,
   trialClock: 0, // seconds until the blast throws again
   trial: 0, // how hard it rages now, 0 to 1
-  hangFrom: null, // where the moon was when the trial in progress began: it hangs there (see trialHang)
-  own: Date.now() / CYCLE_MS, // the speeded-up clock, in crossings: the viewer's own, carried on from the wall clock
+  trialFrom: null, // where the moon was (in crossings) when the trial in progress began
 }
 function startTrial(tier) {
   const roll = Math.random()
   sky.trialTier = tier || (roll < 0.05 ? 3 : roll < 0.3 ? 2 : 1)
   sky.trialAt = 0
   sky.trialClock = 0
-  sky.hangFrom = null
+  sky.trialFrom = null
 }
 /** Move the sky on by `secs`: the moon's place, and the Time of Trial. Returns the moon's phase. */
 function skyStep(secs) {
-  // Where the clock has the moon. There are three clocks, and on each of them a trial runs in real time, so the
-  // moon's drift through a trial is the same whichever is in use:
-  const onTrial = sky.trialAt >= 0
-  let cycle = sky.byHand
-  let phase = state.moon
-  if (sky.clock && !sky.fast) {
-    // the wall clock every visitor shares
-    const now = Date.now()
-    cycle = Math.floor(now / CYCLE_MS)
-    phase = (now % CYCLE_MS) / CYCLE_MS
-    sky.own = now / CYCLE_MS
+  if (sky.trialAt >= 0) {
+    // a trial is on: it is the moon's clock
+    if (sky.trialFrom === null) sky.trialFrom = sky.at
+    sky.at = sky.trialFrom + (sky.trialAt * 1000) / CYCLE_MS
+  } else if (sky.clock && !sky.fast) {
+    sky.at = Date.now() / CYCLE_MS // the wall clock every visitor shares
   } else if (sky.clock) {
-    // speeded up, to skip the waiting between passes: 30 times as fast, but at the true pace while a trial is on
-    // (a trial is as long as it is; a moon that crossed three times during one would have nothing to do with it)
-    sky.own += (secs * 1000 * (onTrial ? 1 : FAST)) / CYCLE_MS
-    cycle = Math.floor(sky.own)
-    phase = sky.own - cycle
+    sky.at += (secs * 1000 * FAST) / CYCLE_MS // speeded up, to skip the waiting between passes
   } else {
-    // by hand: the moon stays where it is put, but a trial still carries it on at the clock's pace
-    if (onTrial) state.moon = (state.moon + (secs * 1000) / CYCLE_MS) % 1
-    phase = state.moon
-    if (phase < 0.5 && sky.high) cycle = ++sky.byHand
-    sky.high = phase >= 0.5
+    // by hand: the moon is where the handle is. Each time the handle comes back below half-way is a new crossing.
+    let turn = Math.floor(sky.at)
+    if (state.moon < 0.5 && sky.at - turn >= 0.5) turn++
+    sky.at = turn + state.moon
   }
-  if (sky.clock) state.moon = phase
-  if (document.activeElement !== moonEl) moonEl.value = state.moon
+  const cycle = Math.floor(sky.at)
+  const phase = sky.at - cycle
+  state.moon = phase
+  if (document.activeElement !== moonEl) moonEl.value = phase
   if (phase >= 0.5 && sky.lastCycle !== cycle) {
     sky.lastCycle = cycle
     // only if the pass is seen: a page opened long after it has nothing to catch
@@ -172,6 +166,7 @@ function skyStep(secs) {
     if (sky.trialAt > trialLength(sky.trialTier)) {
       sky.trialAt = -1
       sky.trial = 0
+      sky.trialFrom = null
     } else if (sky.trial > 0.2 && scene) {
       // the blast keeps throwing
       sky.trialClock -= secs
@@ -181,15 +176,6 @@ function skyStep(secs) {
       }
     }
   }
-  // The moon keeps the trial's time: it hangs where the trial found it while the trial rises and holds, drifts on as
-  // it falls, and is back on the clock when it ends. So from the trial's first second to its last the moon is never
-  // behind where the trial found it and never ahead of the clock, and its drift is exactly as long as the trial.
-  if (sky.trialAt >= 0) {
-    if (sky.hangFrom === null) sky.hangFrom = phase
-    const ranOn = ((phase - sky.hangFrom + 1.5) % 1) - 0.5 // how far the clock has carried it since
-    const held = Math.min(1, Math.max(0, trialHang(sky.trialAt, sky.trialTier)))
-    phase = (phase - Math.max(0, ranOn) * held + 1) % 1
-  } else sky.hangFrom = null
   return phase
 }
 let tuneTimer = 0
@@ -589,8 +575,9 @@ const showSky = () => {
 // dragging the moon takes it off the clock
 moonEl.addEventListener('input', () => {
   sky.clock = false
-  sky.hangFrom = null
   state.moon = parseFloat(moonEl.value)
+  // (in the middle of a trial the hand moves the moon, and the trial carries it on from where it is put)
+  if (sky.trialAt >= 0) sky.trialFrom = Math.floor(sky.at) + state.moon - (sky.trialAt * 1000) / CYCLE_MS
   showSky()
 })
 moonEl.addEventListener('change', () => moonEl.blur())

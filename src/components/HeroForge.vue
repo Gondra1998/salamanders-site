@@ -145,9 +145,23 @@ const isMember = computed(() => auth.member?.isMember === true)
   height: 20px;
 }
 
+/* Phones: the text starts under the nav instead of centring in the screen, and the block closes up a little, so
+   Mount Deathfire can stand below the buttons with its whole crown in view. (The canvas behind the page measures
+   where the lower button ends: MountDeathfire.vue.) The buttons keep their size. */
 @media (max-width: 768px) {
   .hero {
-    padding: 5rem 1.25rem 3rem;
+    align-items: flex-start;
+    padding: 1.5rem 1.25rem 3rem;
+  }
+  .hero-mark {
+    margin-top: 0.9rem;
+  }
+  .tagline {
+    margin-top: 0.6rem;
+  }
+  .cta-row {
+    margin-top: 1.4rem;
+    gap: 0.6rem;
   }
 }
 

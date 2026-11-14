@@ -6,7 +6,7 @@ import { deathfireHeat } from '../lib/deathfireHeat'
 import { loadBaked } from '../lib/deathfire/baked.js'
 import { createAsh } from '../lib/deathfire/ash.js'
 import { calmFactor, measureCalm } from '../lib/deathfire/calm.js'
-import { compose } from '../lib/deathfire/compose.js'
+import { PHONE_MAX, compose } from '../lib/deathfire/compose.js'
 import { createSky } from '../lib/deathfire/crossing.js'
 import { createLakeLevel } from '../lib/deathfire/lakeLevel.js'
 import { LOOK } from '../lib/deathfire/look.js'
@@ -23,6 +23,8 @@ import { excitement } from '../lib/deathfire/trial.js'
  *   - how full the lake is (lakeLevel.js)
  *   - where the page's reading text lies, so the lava steps aside under it (calm.js)
  *   - when to erupt
+ * On a phone the mountain stands under the home page's hero text, so the host measures where that text ends and
+ * builds again if it moves (a font arriving).
  * It also draws the ash that falls through it all (ash.js): behind the mountain and in front of it, or, on pages
  * marked `ashOver`, over the page itself.
  * And it publishes the mountain's heat for the Archive plaque, which breathes with it (deathfireHeat.js).
@@ -61,6 +63,11 @@ let ctx = null
 let dpr = 1
 let ash = null // the falling ash, for this window: { back, front, fall }
 let view = { mirror: false, quiet: false } // how a frame is drawn on this page
+// A phone stands the mountain under the home page's hero text, the tip of its spire a little below the lower button.
+let heroText = null // where that text ends, px down the page, once it has been measured (kept for the other pages)
+let stacked = false // this is a phone on the home page: the hero's text is above the mountain, not over its lava
+let retries = 0 // how many times the mountain has been stood again because the text moved, at this window size
+const RETRIES = 12 // then it stays put: a page whose text never settles must not rebuild for ever
 let sky = null // the visitor's crossing: the moon's place, the Time of Trial
 let lake = null // how full the lake is: it outlives a rebuild
 let water = { level: LOOK.lakeStart, spill: 0 }
@@ -71,6 +78,8 @@ let relayoutPending = 0
 let resizeObserver = null
 let lastW = 0
 let lastH = 0
+let builtW = 0 // the window size the scene on screen was built for
+let builtH = 0
 
 // Dev switches in the URL, on the dev server only: ?moon=0..1 holds the moon there, ?trial=1|2|3 starts a Time of
 // Trial, ?visit=new forgets this browser's crossing, ?calm=0 measures no text, ?off=plume,fog leaves layers out.
@@ -101,6 +110,25 @@ function kitFor(kind) {
   })())
 }
 
+/** Where the home page's hero text ends: the bottom of its lowest button, in px down the page. Null if it is not there. */
+function measureHero() {
+  let bottom = 0
+  for (const el of document.querySelectorAll('.hero .cta-row > *')) bottom = Math.max(bottom, el.getBoundingClientRect().bottom)
+  return bottom ? bottom + window.scrollY : null
+}
+
+/**
+ * The hero's text can move after the mountain was stood under it (a font arrives and the lines reflow). If it has
+ * moved by more than a couple of px, stand the mountain again. Only on a phone's home page, and only so many times.
+ */
+function followHero() {
+  // (not while a scene is already on its way: one thing at a time)
+  if (!stacked || retries >= RETRIES || wanted) return
+  const now = measureHero()
+  if (now === null || Math.abs(now - heroText) <= 2) return
+  layout()
+}
+
 /**
  * Make sure the scene on screen is the one this window and page call for.
  *
@@ -115,12 +143,25 @@ async function layout() {
   if (!cv || !known) return false
   const w = window.innerWidth
   const h = window.innerHeight
+  if (w !== lastW || h !== lastH) {
+    // a new size of window: what was measured in the old one no longer holds
+    heroText = null
+    retries = 0
+  }
   lastW = w
   lastH = h
+  const home = route.path === '/'
+  const phone = w <= PHONE_MAX
+  if (phone && home) {
+    const now = measureHero()
+    if (now !== null && (heroText === null || Math.abs(now - heroText) > 2)) heroText = now
+  }
   const ratio = Math.min(window.devicePixelRatio || 1, 2)
-  const plan = compose({ w, h, dpr: ratio, path: route.path, shows: shows.value })
+  // (pages with no hero text keep the home page's mountain: where its text was measured, or where it usually ends)
+  const plan = compose({ w, h, dpr: ratio, path: route.path, shows: shows.value, hero: heroText === null ? null : { text: heroText } })
   if (!plan) return false
   view = { mirror: plan.mirror, quiet: plan.quiet }
+  stacked = phone && home
   if (plan.key === sceneKey || plan.key === wanted) return false
   wanted = plan.key
   const kit = await kitFor(plan.kind)
@@ -146,6 +187,10 @@ async function layout() {
     ...(layersOff.length ? { layers: Object.fromEntries(layersOff.map((name) => [name, false])) } : {}),
   })
   sceneKey = plan.key
+  // (a second scene for the same size of window is one stood again under hero text that moved: count it)
+  if (w === builtW && h === builtH) retries++
+  builtW = w
+  builtH = h
   // Ash is weather: as thick per screen area at every size, half as thick on a phone.
   ash = createAsh(w, h, { density: LOOK.ash, phone: plan.kind === 'phone' })
   calmAt = -1
@@ -189,7 +234,9 @@ function draw(dt, secs, live) {
   water = lake.step(secs, stirred, { fillMinutes: LOOK.lakeFill, start: LOOK.lakeStart })
   // the page's text is measured a few times a second, and followed between whiles as the page scrolls
   if (calmAt < 0 || t - calmAt > 0.4) {
-    calm = measureCalm(document, window, {})
+    if (live) followHero()
+    // (on a phone's home page the hero's own text is above the mountain: it is not text the lava must step aside for)
+    calm = measureCalm(document, window, { stacked })
     if (dev?.get('calm') === '0') calm = { ...calm, rects: [] }
     calmAt = t
   }
@@ -285,6 +332,8 @@ onMounted(async () => {
   if (!motionAllowed()) {
     mode.value = 'still'
     layout()
+    // (no loop is watching the hero's text here: look once more when the page's fonts have come)
+    document.fonts?.ready?.then(() => !stopped && followHero())
     return
   }
 

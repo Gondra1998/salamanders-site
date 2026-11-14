@@ -525,3 +525,122 @@ describe('a page opened directly, before the router knows which page it is', () 
     expect(lastEnv()).toMatchObject({ mirror: true, quiet: true })
   })
 })
+
+describe('a phone, where the mountain stands under the home page\'s hero text', () => {
+  let buttons
+  /** Put the home page's hero on the page, its two buttons ending where the test says (px down the window). */
+  function hero(...bottoms) {
+    const section = document.createElement('section')
+    section.className = 'hero'
+    section.innerHTML = '<div class="cta-row"><a>Join</a><a>Perk builder</a></div>'
+    buttons = [...section.querySelectorAll('a')]
+    buttons.forEach((el, i) => (el.getBoundingClientRect = () => ({ bottom: bottoms[i] })))
+    document.body.appendChild(section)
+    return section
+  }
+  const moveTo = (bottom) => (buttons[1].getBoundingClientRect = () => ({ bottom }))
+  const textBottoms = () => createScene.mock.calls.map((call) => call[2].textBottom)
+  beforeEach(() => setWindow(390, 844))
+
+  it('builds the mountain under the lower button, wherever the page is scrolled to', async () => {
+    hero(266, 321)
+    setScroll(40) // the buttons are 40 px further down the page than down the window
+    await start()
+    const options = createScene.mock.calls[0][2]
+    expect(options.textBottom).toBe(361)
+    expect(options.faceX).toBeUndefined()
+    pass(50)
+    // the hero's own text is above the mountain now, so it is not text the lava must step aside for
+    expect(measureCalm).toHaveBeenLastCalledWith(document, window, { stacked: true })
+  })
+
+  it('follows the hero text if it moves after the build, as it does when a font arrives', async () => {
+    hero(300, 352)
+    await start()
+    expect(textBottoms()).toEqual([352])
+    moveTo(380)
+    pass(600)
+    await settle()
+    expect(textBottoms()).toEqual([352, 380])
+    expect(scenes[0].dispose).toHaveBeenCalledTimes(1)
+    // a move of a pixel or two is not worth a new mountain
+    moveTo(381.5)
+    pass(1500)
+    await settle()
+    expect(textBottoms()).toEqual([352, 380])
+  })
+
+  it('gives up on a page whose text never settles: twelve tries for one size of window, and twelve more for the next', async () => {
+    let bottom = 352
+    hero(300, 352)
+    buttons[1].getBoundingClientRect = () => ({ bottom: (bottom += 5) })
+    await start()
+    for (let i = 0; i < 40; i++) {
+      pass(500)
+      await settle()
+    }
+    expect(createScene).toHaveBeenCalledTimes(13)
+    setWindow(360, 740)
+    window.dispatchEvent(new Event('resize'))
+    for (let i = 0; i < 40; i++) {
+      pass(500)
+      await settle()
+    }
+    expect(createScene).toHaveBeenCalledTimes(26)
+  })
+
+  it('keeps the home page\'s mountain on the other pages, which have no hero text', async () => {
+    const section = hero(309, 361)
+    await start()
+    expect(textBottoms()).toEqual([361])
+    section.remove()
+    await router.push('/builds')
+    await settle()
+    pass(1500)
+    await settle()
+    expect(textBottoms()).toEqual([361])
+    expect(measureCalm).toHaveBeenLastCalledWith(document, window, { stacked: false })
+  })
+
+  it('opened on another page, takes where the hero\'s text usually ends, and the real place on reaching home', async () => {
+    await start({ path: '/builds' })
+    expect(textBottoms()).toEqual([352])
+    hero(309, 361)
+    await router.push('/')
+    await settle()
+    pass(600)
+    await settle()
+    expect(textBottoms()).toEqual([352, 361])
+  })
+
+  it('with reduced motion, stands the mountain again once the page\'s fonts have come', async () => {
+    motionAllowed.mockReturnValue(false)
+    let fontsCome
+    Object.defineProperty(document, 'fonts', { value: { ready: new Promise((resolve) => (fontsCome = resolve)) }, configurable: true })
+    hero(300, 352)
+    await start()
+    expect(textBottoms()).toEqual([352])
+    moveTo(371)
+    fontsCome()
+    await settle()
+    expect(textBottoms()).toEqual([352, 371])
+    expect(scene().draw).toHaveBeenCalledTimes(1)
+    delete document.fonts
+  })
+})
+
+describe('a desktop, where the hero text stands beside the mountain', () => {
+  it('does not measure the hero for the mountain, and keeps the lava calm under the hero\'s text', async () => {
+    const section = document.createElement('section')
+    section.className = 'hero'
+    section.innerHTML = '<div class="cta-row"><a>Join</a></div>'
+    section.querySelector('a').getBoundingClientRect = () => ({ bottom: 580 })
+    document.body.appendChild(section)
+    await start()
+    pass(600)
+    await settle()
+    expect(createScene).toHaveBeenCalledTimes(1)
+    expect(createScene.mock.calls[0][2].textBottom).toBeUndefined()
+    expect(measureCalm).toHaveBeenLastCalledWith(document, window, { stacked: false })
+  })
+})

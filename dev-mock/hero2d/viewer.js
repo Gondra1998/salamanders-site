@@ -10,12 +10,22 @@
 //               ?inner=left|right (where the mountain stands on pages other than home, desktop only; default right)
 //               ?tn=key:value,key:value (tuner values that differ from their defaults; the rail writes this for you)
 //               ?dw=1 (draw the mountain on Deathwatch pages too; without it they show no mountain: Deathwatch is off planet)
-import { createScene } from './mock.js'
+//               ?lvl=0..1 (hold the lake at this level; without it the lake starts at the tuner's "Lake start" and grows)
+//               ?grow=0|1 (force the growth off or on)  ?fast=1 (the lake fills 30 times as fast, to watch it)
+//               ?spill=0..1 (hold the spill at this much; use with ?lvl=1)
+//               ?mtn=live (paint the mountain here instead of using the baked picture)
+//               ?moon=0..1 also stops the sky's clock (0.5 is the closest pass and brings a Time of Trial, as on the live
+//               site)  ?skyfast=1 (the moon crosses in 30 seconds, but a trial still runs at its own length)
+//               ?trial=1|2|3 (start a Time of Trial of that tier)
+import { createScene, excitement, trialHang, trialLength, trialLevel } from './mock.js'
 
 const q = new URLSearchParams(location.search)
-const LAYERS = ['sky', 'moon', 'plume', 'ridges', 'relief', 'river', 'lake', 'monolith', 'embers', 'ash']
+const LAYERS = ['sky', 'moon', 'plume', 'ridges', 'relief', 'river', 'lake', 'monolith', 'fog', 'embers', 'ash']
 const off = new Set((q.get('off') || '').split(',').filter(Boolean))
 const state = {
+  // the mountain: 'baked' draws the ready-made picture (./baked/, written by bake.mjs) where there is one for the
+  // drawing asked for; 'live' paints it here, as the sliders say
+  mtn: q.get('mtn') === 'live' ? 'live' : 'baked',
   mode: q.get('mode') || 'mock',
   size: q.get('size') || 'full',
   moon: q.has('moon') ? parseFloat(q.get('moon')) : 0.42,
@@ -35,7 +45,25 @@ const state = {
   inner: q.get('inner') === 'left' ? 'left' : 'right',
 }
 const COMPS = { a: { faceX: 0.29, flip: false }, b: { faceX: 0.14, flip: true } }
-const INNER_RIGHT = { faceX: 0.86, flip: false }
+// The baked mountain: one picture for desktop and one for phones, each with where its peak and rim are. The sliders
+// that shape the mountain are baked in, so moving any of them off its default paints the mountain live again.
+const baked = { desktop: null, phone: null }
+const MOUNTAIN_KEYS = ['baseW', 'crown', 'rock', 'columns', 'planes']
+let mtnNow = 'live' // what the scene on screen was built with
+async function loadBaked() {
+  try {
+    const meta = await (await fetch('./baked/mountain.json', { cache: 'no-store' })).json()
+    for (const kind of ['desktop', 'phone']) {
+      if (!meta[kind]) continue
+      const blob = await (await fetch(`./baked/mountain-${kind}.webp`, { cache: 'no-store' })).blob()
+      baked[kind] = { image: await createImageBitmap(blob), meta: meta[kind], kb: Math.round(blob.size / 1024) }
+    }
+  } catch {
+    // none baked yet: everything is painted live
+  }
+  showMtn()
+  rebuild()
+}
 // At or under this width the page gets the phone drawing and the stack layout. 768 is the live site's own breakpoint.
 const CUT = parseInt(q.get('cut'), 10) || 768
 // The tuner: named numbers handed to the scene as `tune`. To add a knob: add a row here, read `o.tune.<key>` in mock.js.
@@ -43,6 +71,9 @@ const TUNE = [
   { key: 'peakH', label: 'Peak height', min: 0.5, max: 1.05, step: 0.01, def: 0.72 },
   { key: 'baseW', label: 'Base width', min: 0.4, max: 1.6, step: 0.01, def: 1.35 },
   { key: 'crown', label: 'Crown size', min: 0.6, max: 1.8, step: 0.02, def: 1.25 },
+  { key: 'rock', label: 'Rock texture', min: 0, max: 2, step: 0.05, def: 1 },
+  { key: 'columns', label: 'Basalt columns', min: 0, max: 2, step: 0.05, def: 1 },
+  { key: 'planes', label: 'Big planes', min: 0, max: 1.5, step: 0.05, def: 0.55 },
   { key: 'ranges', label: 'Far peaks', min: 0, max: 3, step: 0.05, def: 1 },
   { key: 'rangeH', label: 'Far peak height', min: 0.4, max: 2, step: 0.02, def: 1 },
   { key: 'haze', label: 'Haze', min: 0, max: 1, step: 0.02, def: 0.5 },
@@ -52,11 +83,114 @@ const TUNE = [
   { key: 'plume', label: 'Plume', min: 0, max: 2, step: 0.05, def: 1.3 },
   { key: 'embers', label: 'Embers', min: 0, max: 3, step: 0.05, def: 2.3 },
   { key: 'lake', label: 'Lake size', min: 0.6, max: 1.8, step: 0.02, def: 1 },
+  { key: 'lakeCrust', label: 'Lake crust', min: 0, max: 1, step: 0.02, def: 0.3 },
+  { key: 'lakeHeat', label: 'Lake heat', min: 0.6, max: 1.4, step: 0.02, def: 1 },
+  { key: 'lakeStart', label: 'Lake start', min: 0, max: 1, step: 0.01, def: 0.3 },
+  { key: 'lakeFill', label: 'Fill time (min)', min: 0.5, max: 20, step: 0.5, def: 5 },
+  { key: 'fog', label: 'Fog', min: 0, max: 2, step: 0.05, def: 1 },
 ]
 const tuneState = Object.fromEntries(TUNE.map((d) => [d.key, d.def]))
 for (const pair of (q.get('tn') || '').split(',')) {
   const [k, v] = pair.split(':')
   if (k in tuneState && Number.isFinite(parseFloat(v))) tuneState[k] = parseFloat(v)
+}
+// The lake's level: how much lava the basin holds, 0 (only the pool at the inlet) to 1 (to the brim). The viewer owns
+// it, so it outlives every rebuild (a tuner drag, a resize, a change of page). It rises with time, as the river pours
+// in: "Fill time" is the minutes from empty to the brim, and "Lake start" is where it stands when the page opens.
+const unit = (x) => (x < 0 ? 0 : x > 1 ? 1 : x)
+const lakeState = {
+  level: q.has('lvl') ? unit(parseFloat(q.get('lvl')) || 0) : tuneState.lakeStart,
+  grow: q.has('grow') ? q.get('grow') === '1' : !q.has('lvl'),
+  fast: q.get('fast') === '1',
+  // once the lake is full it spills, and this rises from 0 to 1: the stream runs out to the edge over the first
+  // tenth, then the light under it grows as the lava gathers below (about a minute and a half in all)
+  spill: q.has('spill') ? unit(parseFloat(q.get('spill')) || 0) : 0,
+}
+const FAST = 30
+const SPILL_SECS = 90
+// The sky. Prometheus crosses once every 15 minutes on the wall clock, as on the live site, so every visitor sees the
+// same moon. At its closest pass (mid-crossing) it brings the Time of Trial, its size drawn by chance. The viewer owns
+// the clock and the trial (the live component does); the scene is told the moon's place and how hard the trial rages.
+const CYCLE_MS = 15 * 60 * 1000
+const sky = {
+  clock: !q.has('moon'), // follow the wall clock; dragging the moon, or ?moon=, takes it by hand
+  fast: q.get('skyfast') === '1',
+  byHand: 0, // by hand there is no clock to count crossings: each time the handle comes back below half-way is a new one
+  high: false,
+  lastCycle: -1, // the crossing whose closest pass has been seen
+  trialAt: -1, // seconds into the Time of Trial in progress; -1 when none
+  trialTier: 1,
+  trialClock: 0, // seconds until the blast throws again
+  trial: 0, // how hard it rages now, 0 to 1
+  hangFrom: null, // where the moon was when the trial in progress began: it hangs there (see trialHang)
+  own: Date.now() / CYCLE_MS, // the speeded-up clock, in crossings: the viewer's own, carried on from the wall clock
+}
+function startTrial(tier) {
+  const roll = Math.random()
+  sky.trialTier = tier || (roll < 0.05 ? 3 : roll < 0.3 ? 2 : 1)
+  sky.trialAt = 0
+  sky.trialClock = 0
+  sky.hangFrom = null
+}
+/** Move the sky on by `secs`: the moon's place, and the Time of Trial. Returns the moon's phase. */
+function skyStep(secs) {
+  // Where the clock has the moon. There are three clocks, and on each of them a trial runs in real time, so the
+  // moon's drift through a trial is the same whichever is in use:
+  const onTrial = sky.trialAt >= 0
+  let cycle = sky.byHand
+  let phase = state.moon
+  if (sky.clock && !sky.fast) {
+    // the wall clock every visitor shares
+    const now = Date.now()
+    cycle = Math.floor(now / CYCLE_MS)
+    phase = (now % CYCLE_MS) / CYCLE_MS
+    sky.own = now / CYCLE_MS
+  } else if (sky.clock) {
+    // speeded up, to skip the waiting between passes: 30 times as fast, but at the true pace while a trial is on
+    // (a trial is as long as it is; a moon that crossed three times during one would have nothing to do with it)
+    sky.own += (secs * 1000 * (onTrial ? 1 : FAST)) / CYCLE_MS
+    cycle = Math.floor(sky.own)
+    phase = sky.own - cycle
+  } else {
+    // by hand: the moon stays where it is put, but a trial still carries it on at the clock's pace
+    if (onTrial) state.moon = (state.moon + (secs * 1000) / CYCLE_MS) % 1
+    phase = state.moon
+    if (phase < 0.5 && sky.high) cycle = ++sky.byHand
+    sky.high = phase >= 0.5
+  }
+  if (sky.clock) state.moon = phase
+  if (document.activeElement !== moonEl) moonEl.value = state.moon
+  if (phase >= 0.5 && sky.lastCycle !== cycle) {
+    sky.lastCycle = cycle
+    // only if the pass is seen: a page opened long after it has nothing to catch
+    if (phase < 0.56 && sky.trialAt < 0 && state.mode === 'mock') startTrial()
+  }
+  sky.trial = 0
+  if (sky.trialAt >= 0) {
+    sky.trialAt += secs
+    sky.trial = trialLevel(sky.trialAt, sky.trialTier)
+    if (sky.trialAt > trialLength(sky.trialTier)) {
+      sky.trialAt = -1
+      sky.trial = 0
+    } else if (sky.trial > 0.2 && scene) {
+      // the blast keeps throwing
+      sky.trialClock -= secs
+      if (sky.trialClock <= 0) {
+        scene.erupt(0.9 + 1.2 * sky.trial, 0.4) // every one an eruption proper, cut short so they stand apart
+        sky.trialClock = 2.8 - sky.trial * 1.5
+      }
+    }
+  }
+  // The moon keeps the trial's time: it hangs where the trial found it while the trial rises and holds, drifts on as
+  // it falls, and is back on the clock when it ends. So from the trial's first second to its last the moon is never
+  // behind where the trial found it and never ahead of the clock, and its drift is exactly as long as the trial.
+  if (sky.trialAt >= 0) {
+    if (sky.hangFrom === null) sky.hangFrom = phase
+    const ranOn = ((phase - sky.hangFrom + 1.5) % 1) - 0.5 // how far the clock has carried it since
+    const held = Math.min(1, Math.max(0, trialHang(sky.trialAt, sky.trialTier)))
+    phase = (phase - Math.max(0, ranOn) * held + 1) % 1
+  } else sky.hangFrom = null
+  return phase
 }
 let tuneTimer = 0
 // What the stack layout asks of the real page: the hero starts under the nav instead of centring in the screen.
@@ -81,8 +215,10 @@ let t = q.has('t') ? parseFloat(q.get('t')) : 0
 let last = 0
 let nextPulse = 3
 let calmRects = []
+let navBottom = 0
 let calmAt = -1
 let costAvg = 0
+let costMax = 0 // the worst recent frame (it decays): the lake repaints a few times a second, so the mean hides its cost
 let stacked = false // the stack layout is on in the frame right now
 let built = null // the hero measurement the scene was built from (stack only)
 let relayouts = 0
@@ -131,6 +267,8 @@ function measureCalm() {
     }
   }
   calmRects = out
+  // where the nav bar ends: what lies under it is hidden by it
+  navBottom = doc.querySelector('header.nav')?.getBoundingClientRect().bottom ?? 0
 }
 const sstep = (x) => {
   const c = x < 0 ? 0 : x > 1 ? 1 : x
@@ -203,6 +341,14 @@ function rebuild() {
   syncStackStyle(stacked)
   built = stacked ? measureHero() : null
   measureCalm()
+  // The pages other than home show the home scene mirrored (the mountain on the right), unless asked to keep it left.
+  const home = framePath() === '/' || state.inner === 'left'
+  // The mountain ready-made, when there is a picture for this drawing: the home composition, the mountain's sliders
+  // where they were when it was baked, and the relief on.
+  const kind = w > CUT ? 'desktop' : 'phone'
+  const asBaked = MOUNTAIN_KEYS.every((k) => tuneState[k] === TUNE.find((d) => d.key === k).def)
+  const ready = state.mtn === 'baked' && baked[kind] && asBaked && state.comp === 'b' && state.layers.relief ? baked[kind] : null
+  mtnNow = ready ? 'baked' : 'live'
   // phones keep one composition for now: the peak a little left of centre
   scene = createScene(w, h, {
     dpr,
@@ -211,10 +357,12 @@ function rebuild() {
     phoneMax: CUT,
     quiet: framePath() !== '/', // no live far volcanoes behind the small text of the other pages
     tune: { ...tuneState },
-    ...(w > CUT ? (framePath() === '/' || state.inner === 'left' ? comp : INNER_RIGHT) : { flip: comp.flip, ...(q.has('px') ? { faceX: Math.min(0.9, Math.max(0.1, parseFloat(q.get('px')) || 0.36)) } : {}) }),
+    lakeLevel: lakeState.level,
+    ...(ready ? { mountain: ready, riverU: ready.meta.riverU } : {}),
+    ...(w > CUT ? { ...comp, mirror: !home } : { flip: comp.flip, ...(q.has('px') ? { faceX: Math.min(0.9, Math.max(0.1, parseFloat(q.get('px')) || 0.36)) } : {}) }),
     ...(built ? { textBottom: built.text, titleBottom: built.title, textGap: q.has('gap') ? parseFloat(q.get('gap')) : undefined } : {}),
   })
-  window.__mock = { scene, w, h }
+  window.__mock = { scene, w, h, lake: lakeState }
   if (q.get('debug') === '1') debugLines = debugFor(w, h)
   calmAt = -1
 }
@@ -272,10 +420,16 @@ function tick(now) {
   if (elapsed < 1000 / 30) return
   last = now
   const dt = state.frozen ? 0 : Math.min(elapsed / 16.7, 3)
-  if (!state.frozen) t += Math.min(elapsed, 100) / 1000
+  const secs = state.frozen ? 0 : Math.min(elapsed, 100) / 1000
+  t += secs
+  // the sky's clock: where Prometheus is, whether a Time of Trial is on, and how stirred that leaves the mountain
+  const phase = skyStep(secs)
+  const stirred = excitement(phase, sky.trial)
+  // the mountain's own pulse: the more stirred, the oftener
   if (!state.frozen && t >= nextPulse) {
-    scene.erupt()
-    nextPulse = t + 2.5 + Math.random() * 6.5
+    // most are spits; about one in five is an eruption proper, and a stirred mountain throws more of those
+    scene.erupt(Math.random() < 0.2 + 0.25 * stirred ? 1.5 + Math.random() : 0.55 + Math.random() * 0.5)
+    nextPulse = t + (2.5 + Math.random() * 6.5) / (1 + 1.6 * stirred)
   }
   if (calmAt < 0 || t - calmAt > 0.4 || state.frozen) {
     measureCalm()
@@ -291,8 +445,19 @@ function tick(now) {
       }
     }
   }
+  // The lake fills as the river pours in: "Fill time" is the minutes from where it starts to full, with the mountain
+  // at rest (a stirred mountain fills it up to twice as fast). Full, it spills, and the spill builds. It is not
+  // remembered: every visit starts again at "Lake start".
+  if (!state.frozen && lakeState.grow) {
+    const pace = secs * (lakeState.fast ? FAST : 1) * (1 + stirred)
+    if (lakeState.level < 1) lakeState.level = Math.min(1, lakeState.level + (pace * Math.max(0.05, 1 - tuneState.lakeStart)) / (tuneState.lakeFill * 60))
+    else lakeState.spill = Math.min(1, lakeState.spill + pace / SPILL_SECS)
+    showLake()
+  }
+  // (a lake pulled back from full stops spilling, quickly)
+  if (lakeState.level < 1 && lakeState.spill > 0 && !q.has('spill')) lakeState.spill = Math.max(0, lakeState.spill - secs / 4)
   const t0 = performance.now()
-  scene.draw(ctx, t, dt, { calm, moonPhase: state.moon })
+  scene.draw(ctx, t, dt, { calm, navBottom, moonPhase: phase, trial: sky.trial, lakeLevel: lakeState.level, spill: lakeState.spill })
   if (debugLines) {
     const info = scene.info
     ctx.save()
@@ -314,7 +479,12 @@ function tick(now) {
     ctx.restore()
   }
   costAvg = costAvg * 0.95 + (performance.now() - t0) * 0.05
-  note.textContent = `draw ${costAvg.toFixed(2)} ms · t ${t.toFixed(1)} s`
+  costMax = Math.max(costMax * 0.995, performance.now() - t0)
+  note.textContent = `draw ${costAvg.toFixed(2)} ms (worst ${costMax.toFixed(1)}) · t ${t.toFixed(1)} s\nbuild ${scene.info.timing.total} ms, mountain ${mtnNow}`
+  skyOut.textContent =
+    `moon ${phase.toFixed(3)}${sky.clock ? (sky.fast ? ' (clock x30)' : ' (clock)') : ' (by hand)'}\nstirred ${Math.round(stirred * 100)}%` +
+    (sky.trialAt >= 0 ? `\ntrial ${'I'.repeat(sky.trialTier)} ${Math.round(sky.trial * 100)}%, ${Math.round(sky.trialAt)} of ${trialLength(sky.trialTier)} s` : '')
+  window.__mock.sky = { phase, stirred, trial: sky.trial, tier: sky.trialTier, at: sky.trialAt, clock: sky.clock }
 }
 
 // ---- rail
@@ -381,6 +551,20 @@ for (const b of document.querySelectorAll('#phones button')) {
   })
 }
 markPhone()
+const mtnOut = document.getElementById('mtn-out')
+function showMtn() {
+  for (const b of document.querySelectorAll('#mtns button')) b.setAttribute('aria-pressed', String(b.dataset.mtn === state.mtn))
+  const have = ['desktop', 'phone'].filter((k) => baked[k])
+  mtnOut.textContent = have.length ? have.map((k) => `${k} ${baked[k].kb} KB`).join(', ') : 'no baked picture: run bake.mjs'
+}
+for (const b of document.querySelectorAll('#mtns button')) {
+  b.addEventListener('click', () => {
+    state.mtn = b.dataset.mtn
+    showMtn()
+    rebuild()
+  })
+}
+showMtn()
 const markInner = () => {
   for (const b of document.querySelectorAll('#inners button')) b.setAttribute('aria-pressed', String(b.dataset.inner === state.inner))
 }
@@ -395,20 +579,77 @@ for (const b of document.querySelectorAll('#inners button')) {
 markInner()
 const moonEl = document.getElementById('moon')
 moonEl.value = state.moon
-moonEl.addEventListener('input', () => (state.moon = parseFloat(moonEl.value)))
+const skyOut = document.getElementById('sky-out')
+const skyClockEl = document.getElementById('sky-clock')
+const skyFastEl = document.getElementById('sky-fast')
+const showSky = () => {
+  skyClockEl.setAttribute('aria-pressed', String(sky.clock))
+  skyFastEl.setAttribute('aria-pressed', String(sky.fast))
+}
+// dragging the moon takes it off the clock
+moonEl.addEventListener('input', () => {
+  sky.clock = false
+  sky.hangFrom = null
+  state.moon = parseFloat(moonEl.value)
+  showSky()
+})
+moonEl.addEventListener('change', () => moonEl.blur())
+skyClockEl.addEventListener('click', () => {
+  sky.clock = !sky.clock
+  showSky()
+})
+skyFastEl.addEventListener('click', () => {
+  sky.fast = !sky.fast
+  if (sky.fast) sky.clock = true
+  showSky()
+})
+for (const b of document.querySelectorAll('#trials button')) b.addEventListener('click', () => startTrial(parseInt(b.dataset.trial, 10)))
+if (q.has('trial')) startTrial(Math.min(3, Math.max(1, parseInt(q.get('trial'), 10) || 1)))
+showSky()
 const freezeEl = document.getElementById('freeze')
 freezeEl.setAttribute('aria-pressed', String(state.frozen))
 freezeEl.addEventListener('click', () => {
   state.frozen = !state.frozen
   freezeEl.setAttribute('aria-pressed', String(state.frozen))
 })
-document.getElementById('erupt').addEventListener('click', () => scene?.erupt())
+document.getElementById('erupt').addEventListener('click', () => scene?.erupt(2.2)) // a big one, to look at
+// the lake: a level you can drag, the growth on or off, a fast-forward to watch it fill, and back to the start
+const lakeEl = document.getElementById('lake-level')
+const lakeOut = document.getElementById('lake-out')
+const lakeGrowEl = document.getElementById('lake-grow')
+const lakeFastEl = document.getElementById('lake-fast')
+function showLake() {
+  if (document.activeElement !== lakeEl) lakeEl.value = lakeState.level
+  lakeOut.textContent = `${Math.round(lakeState.level * 100)}%${lakeState.level >= 1 ? `, over the edge ${Math.round(lakeState.spill * 100)}%` : ''}`
+  lakeGrowEl.setAttribute('aria-pressed', String(lakeState.grow))
+  lakeFastEl.setAttribute('aria-pressed', String(lakeState.fast))
+}
+lakeEl.addEventListener('input', () => {
+  lakeState.level = unit(parseFloat(lakeEl.value))
+  showLake()
+})
+lakeEl.addEventListener('change', () => lakeEl.blur()) // let the growth move the handle again once the drag is over
+lakeGrowEl.addEventListener('click', () => {
+  lakeState.grow = !lakeState.grow
+  showLake()
+})
+lakeFastEl.addEventListener('click', () => {
+  lakeState.fast = !lakeState.fast
+  showLake()
+})
+document.getElementById('lake-refill').addEventListener('click', () => {
+  lakeState.level = tuneState.lakeStart
+  lakeState.spill = 0
+  showLake()
+})
+showLake()
 window.addEventListener('resize', sizeFrame)
 
 markSize()
 sizeFrame()
 frame.addEventListener('load', attach, { once: true })
 frame.src = q.get('path') || '/'
+loadBaked()
 
 // ---- tuner
 function tuneChanged() {
@@ -437,6 +678,11 @@ for (const d of TUNE) {
   d.input.addEventListener('input', () => {
     tuneState[d.key] = parseFloat(d.input.value)
     d.val.textContent = d.input.value
+    // dragging "Lake start" shows that level at once
+    if (d.key === 'lakeStart') {
+      lakeState.level = tuneState.lakeStart
+      showLake()
+    }
     tuneChanged()
   })
   row.append(name, d.val, d.input)

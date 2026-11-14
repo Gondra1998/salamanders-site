@@ -89,6 +89,39 @@ const sm = (x) => {
   return c * c * (3 - 2 * c)
 }
 const lerp = (a, b, t) => a + (b - a) * t
+// The Time of Trial, as the live site runs it (MountDeathfire.vue): how hard it rages, 0 to 1, eased in, held, and let
+// go slowly. Tier 1 is a trial, 2 a great trial, 3 a cataclysm. Nothing flashes.
+export const trialLength = (tier) => 6 + (6 + 8 * tier) + (30 + 10 * tier)
+export function trialLevel(sec, tier) {
+  const rise = 6
+  const hold = 6 + 8 * tier
+  const fall = 30 + 10 * tier
+  const peak = [0, 0.55, 0.8, 1][tier]
+  if (sec < rise) return peak * sm(sec / rise)
+  if (sec < rise + hold) return peak
+  return peak * (1 - sm((sec - rise - hold) / fall))
+}
+/**
+ * How much of the moon's own drift is held back at `sec` seconds into a trial, 1 to 0. The moon is what drives a
+ * trial, so it does not sail on while the mountain is still answering it: it hangs where the trial found it (its
+ * closest pass) through the trial's rise and hold, then drifts on over the trial's fall, and is back where the clock
+ * has it as the trial ends. The moon's pass and the trial are one sequence, the same length.
+ */
+export function trialHang(sec, tier) {
+  const held = 6 + (6 + 8 * tier)
+  const fall = 30 + 10 * tier
+  return sec <= held ? 1 : 1 - sm((sec - held) / fall)
+}
+/**
+ * How stirred up the mountain is, 0 to 1. Prometheus drags at the crust as it nears: nothing for the outer half of its
+ * crossing, then a rise to a half at its closest pass (`phase` 0.5). A Time of Trial (`trial`, 0 to 1) comes on top.
+ * Everything that quickens with the moon reads this one number: the pulse of eruptions, the river's speed and heat,
+ * the lake's inflow, the plume, the sparks, the far volcanoes.
+ */
+export function excitement(phase, trial = 0) {
+  const near = Math.sin(Math.PI * clamp01(phase))
+  return clamp01(0.5 * sm((near - 0.7) / 0.3) + trial)
+}
 const css = (c, a = 1) => `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${a.toFixed(3)})`
 /** Linear lookup in a ramp of [position, [r, g, b]] stops. */
 function ramp(stops, s) {
@@ -162,6 +195,14 @@ const WARM = [
 ]
 
 export function createScene(w, h, o = {}) {
+  // how long each part of the build takes, in ms (info.timing): what is worth baking ahead of time is read from this
+  const timing = {}
+  let markAt = performance.now()
+  const mark = (k) => {
+    const now = performance.now()
+    timing[k] = Math.round(((timing[k] || 0) + now - markAt) * 10) / 10
+    markAt = now
+  }
   const seed = o.seed ?? 0x5a1a
   const R = mulberry32(seed)
   const rr = (a, b) => a + R() * (b - a)
@@ -172,7 +213,7 @@ export function createScene(w, h, o = {}) {
   // button ends, so the whole mountain stands below it and nothing of the river lies under reading text.
   const stack = phone && Number.isFinite(o.textBottom)
   const dpr = o.dpr ?? 1
-  const L = { sky: true, moon: true, plume: true, ridges: true, relief: true, river: true, lake: true, monolith: true, embers: true, ash: true, ...(o.layers || {}) }
+  const L = { sky: true, moon: true, plume: true, ridges: true, relief: true, river: true, lake: true, monolith: true, fog: true, embers: true, ash: true, ...(o.layers || {}) }
   // the tuner's numbers (viewer.js TUNE): read as tn.<key> ?? default
   const tn = o.tune || {}
   // `quiet`: the far ranges stand without their live volcanoes (no pin of light, no wisp, no halo), for pages where small
@@ -191,7 +232,10 @@ export function createScene(w, h, o = {}) {
   // on a phone the page text sets the height (the stack block below), so peakH does not act there
   let H = stack ? Math.max(40, Math.min(690 * (h / 1000), h * 0.7)) : Math.max(40, h * peakFrac)
   const peakX = w * (o.faceX ?? (phone ? 0.36 : 0.29))
-  const chOf = (hh) => Math.max(18, Math.min(hh * 0.13, w * 0.11))
+  // (the crater is a share of the mountain's height and nothing else, so the mountain is the same shape at every
+  // window size: that is what lets one baked picture of it serve them all. On a phone the share is the one the old
+  // width cap gave at 390 px.)
+  const chOf = (hh) => Math.max(18, hh * (phone ? 0.121 : 0.13))
   let chb = chOf(H) // the crater before the crown multiplier: the river keeps its width whatever the crown does
   let ch = chb * crown
   if (stack) {
@@ -211,7 +255,7 @@ export function createScene(w, h, o = {}) {
   }
   const rimY = h - H
   // The half-base: baseW heights. A phone is only as wide as it is, so there it takes a little over half of that.
-  const halfBase = Math.max(w * 0.22, H * baseW * (phone ? 0.62 : 1))
+  const halfBase = H * baseW * (phone ? 0.62 : 1)
   // The rim is as wide as the crown's tower is thick: the crown is a touch broader than it is tall, so it carries weight
   const rw = ch * 1.2
   const shoreY = h - groundH
@@ -317,41 +361,61 @@ export function createScene(w, h, o = {}) {
   }
   const breach = { x: peakX - 0.26 * rw * mx, y: rimY - 0.04 * ch }
 
-  // the lake: a wide flat basin at the mountain's foot, its near half below the bottom edge. Tuner `lake` sets how much
-  // of it shows: its depth up the screen (`vis`, px; the far shore rises over the mountain's foot) and, with it, its
-  // width. The mountain's rim does not move. The shore is an ellipse with a ragged edge, kept as one outline so the
-  // river, the monolith and the lake's own pixels all agree on where the water stops.
+  // The ground the mountain stands on. Its line wobbles a little everywhere, and bows toward the viewer under the
+  // mountain, as the foot of a cone does.
+  const groundTopAt = (x) => shoreY - 2 + (vnoise(x * 0.012, 6.6) - 0.5) * 9 + 0.16 * groundH * Math.exp(-(((x - peakX) / (0.45 * halfBase)) ** 2))
+  // The lake lies flat on that ground. Its far shore runs along the mountain's base, a few px out from the rock, in
+  // small coves and points. Where the mountain ends the shore leaves it and runs down toward the far bottom corner of
+  // the window, so the lake tapers to a point there. Its near shore is the window's bottom edge. Tuner `lake` is how
+  // far along the bottom edge that point lies (1 is the corner).
   const lakeK = Math.max(0.6, Math.min(1.8, tn.lake ?? 1))
   const lake = (() => {
-    const vis = groundH * (phone ? 0.4 + 0.75 * lakeK : 0.45 + lakeK)
-    const rx = (phone ? w * 0.66 : Math.min(w * 0.235, 380)) * (0.55 + 0.45 * lakeK)
-    const ry = vis * 1.12
-    const foot = P(riverLine.u[Math.round(ROWS * 0.8)], 0.8)
-    const cx = phone ? w * 0.5 : foot.x - (rx / (0.55 + 0.45 * lakeK)) * 0.18 * mx
-    const cy = h - vis + ry * 0.97
-    return { rx, ry, cx, cy, vis }
-  })()
-  // how far out the ragged shore stands at an angle, as a fraction of the ellipse
-  const shoreAt = (ang) => {
-    const c = Math.cos(ang)
-    const s = Math.sin(ang)
-    return 0.97 + 0.1 * (vnoise(c * 2.3 + 5, s * 2.3 + 1) - 0.5) + 0.03 * (vnoise(c * 9 + 3, s * 9 + 8) - 0.5)
-  }
-  const SHORE_N = 240
-  const shore = Array.from({ length: SHORE_N }, (_, i) => {
-    const a = (i / SHORE_N) * TAU
-    const k = shoreAt(a)
-    return { x: lake.cx + Math.cos(a) * lake.rx * k, y: lake.cy + Math.sin(a) * lake.ry * k, a }
-  })
-  /** The far shore's y at x (the lake's top edge there); the side shore's y where x is past the ends. */
-  const lakeTopAt = (x) => {
-    // the top half runs from angle PI to TAU: left to right
-    const lo = SHORE_N / 2
-    if (x <= shore[lo].x) return shore[lo].y
-    for (let i = lo + 1; i < SHORE_N; i++) {
-      if (shore[i].x >= x) return lerp(shore[i - 1].y, shore[i].y, (x - shore[i - 1].x) / (shore[i].x - shore[i - 1].x || 1))
+    const dir = peakX < w / 2 ? 1 : -1 // the way the open ground lies, away from the mountain
+    const edgeX = dir > 0 ? 0 : w // the window's edge on the mountain's side
+    const cornerX = dir > 0 ? w : 0
+    // where the mountain's flank on the open side comes down to the ground
+    const side = dir > 0 ? right : left
+    let footEnd = side[ROWS].x
+    for (let i = 1; i <= ROWS; i++) {
+      if (side[i].y >= groundTopAt(side[i].x)) {
+        footEnd = side[i].x
+        break
+      }
     }
-    return shore[SHORE_N - 1].y
+    // (on a phone that foot can lie outside the window: then the shore keeps to the base all the way across)
+    const tipX = footEnd + (cornerX - footEnd) * lakeK
+    // The brim: for a stretch past the mountain's end the lake's far shore is the edge of the shelf the mountain stands
+    // on. When the lake is full the lava comes right up to that edge and goes over it, out of sight. (None where the
+    // mountain's far foot is outside the window, as on a phone: there the lake only fills.)
+    const reachB = Math.max(110, Math.min(220, 0.2 * Math.abs(cornerX - footEnd)))
+    const b0 = footEnd + dir * 14
+    const b1 = b0 + dir * reachB
+    const brim = Math.min(b0, b1) < 12 || Math.max(b0, b1) > w - 12 || Math.abs(tipX - footEnd) < 150 ? null : { x0: b0, x1: b1 }
+    return { dir, edgeX, footEnd, tipX, brim, vis: groundH * 0.84 }
+  })()
+  /** The lake's far shore where it lies on the ground, short of the shelf's edge: its y at x. */
+  const groundShoreAt = (x) => {
+    const base = groundTopAt(x) + 6 + 8 * (vnoise(x * 0.021, 3.3) - 0.5)
+    // past the mountain's end (and the brim, where there is one) the shore runs down toward the far bottom corner
+    const from = lake.brim ? lake.brim.x1 : lake.footEnd
+    const along = (x - from) * lake.dir
+    const run = (lake.tipX - from) * lake.dir
+    if (along <= 0 || run <= 0) return base
+    const k = Math.min(1, along / run)
+    return lerp(base, h + 3, k * (0.7 + 0.3 * k))
+  }
+  /** How much of a brim there is at x: 1 along the stretch where the lake comes to the shelf's edge, 0 elsewhere. */
+  const brimAt = (x) => {
+    if (!lake.brim) return 0
+    const a = (x - lake.brim.x0) * lake.dir
+    const len = (lake.brim.x1 - lake.brim.x0) * lake.dir
+    return sm(a / 26) * (1 - sm((a - len + 40) / 40))
+  }
+  /** The lake's far shore when it is full: its y at x. Along the brim that is the edge of the shelf itself. */
+  const lakeTopAt = (x) => {
+    const s = groundShoreAt(x)
+    const b = brimAt(x)
+    return b > 0 ? lerp(s, groundTopAt(x) + 0.5, b) : s
   }
 
   const river = (() => {
@@ -395,19 +459,11 @@ export function createScene(w, h, o = {}) {
   })()
   // the dry land above the lake: levees and shoulders are clipped to it, so the channel crosses the shore and never
   // shows a cut end on the lake
+  // (everything above the shore, less a few px, so the levees stop short of the lava and do not run over it)
   const aboveLake = new Path2D()
-  aboveLake.rect(0, 0, w, h)
-  // the shore, pushed out a little so the levees stop at the basin's rim and do not run over it
-  shore.forEach((p, i) => {
-    if (i % 3) return
-    const gx = (p.x - lake.cx) / (lake.rx * lake.rx)
-    const gy = (p.y - lake.cy) / (lake.ry * lake.ry)
-    const gl = Math.hypot(gx, gy) || 1
-    const x = p.x + (gx / gl) * 7
-    const y = p.y + (gy / gl) * 7
-    if (i) aboveLake.lineTo(x, y)
-    else aboveLake.moveTo(x, y)
-  })
+  aboveLake.moveTo(-10, -10)
+  aboveLake.lineTo(w + 10, -10)
+  for (let x = w + 10; x >= -10; x -= 6) aboveLake.lineTo(x, lakeTopAt(x) - 7)
   aboveLake.closePath()
   const riverXAt = (y) => {
     const p = river.pts
@@ -462,6 +518,7 @@ export function createScene(w, h, o = {}) {
   // tuner `lavaHeat`: every heat is read a little higher (or lower) up the palette, so crust stays dark and the hot lava
   // runs toward gold. The lake takes it too, so its open lava still matches the river where the two meet.
   const lavaHeatK = Math.max(0.5, Math.min(1.5, tn.lavaHeat ?? 1))
+  mark('geometry')
   const lava = (() => {
     const cell = 2 // a fine grain, as the title's fire has
     const rows = Math.max(40, Math.round(river.length / cell))
@@ -522,8 +579,20 @@ export function createScene(w, h, o = {}) {
         }
       }
     }
-    // already burning when the page opens: the river is full from the first frame
-    for (let i = 0; i < rows * 1.6; i++) {
+    // Already burning when the page opens: the river is full from the first frame. Every cell starts near where it
+    // would settle, with crust at every stage of healing in about the share the fire keeps; then the fire runs long
+    // enough for the tongues off the breach to form. (Running it from cold, as it did, took as many steps as the river
+    // has rows, and a quarter of the whole build.)
+    for (let y = 0; y < rows; y++) {
+      const settle = mean[y] - 2.5
+      const crusted = 1 - Math.exp(-2 * speck[y] * Math.max(1, (settle - 4.5) / (2 * heal[y])))
+      for (let x = 0; x < cols; x++) {
+        let v = mean[y] - 0.5 + (Math.random() - 0.5) * 3
+        if (Math.abs(x - mid) < span[y] && Math.random() < crusted) v = 2 + Math.random() * Math.max(1, settle - 2)
+        fire.cells[y * cols + x] = Math.max(0, Math.round(v))
+      }
+    }
+    for (let i = 0; i < Math.min(rows, 90); i++) {
       fire.stokeCoals(i * 0.1, WAVE, 0.6)
       step()
     }
@@ -647,14 +716,15 @@ export function createScene(w, h, o = {}) {
     const PO = Float32Array.from(po)
     let acc = 0
     const RATE = o.lavaRate ?? 12 // fire steps a second (24 px): lava is thick, so far slower than the title's flames
-    const paint = (secs, t, flare) => {
+    const paint = (secs, t, flare, stir = 0) => {
       acc += secs * RATE
       let guard = 0
       while (acc >= 1 && guard++ < 4) {
         acc -= 1
         prev.set(fire.cells)
         // an eruption sends hotter lava out of the breach, and the surge travels down with the fire
-        fire.maxHeat = SOURCE + 2 * flare
+        // (and a stirred mountain runs hotter all the time)
+        fire.maxHeat = Math.min(TOP, SOURCE + 2 * flare + 1.5 * stir)
         fire.stokeCoals(t, WAVE * (1 - flare), 0.6)
         step()
       }
@@ -683,10 +753,11 @@ export function createScene(w, h, o = {}) {
     return { cv, x0, y0, bw, bh, paint, rows, cols, n }
   })()
 
+  mark('riverFire')
   // ---------------------------------------------------------------- light on the rock
   // `n` is how far a plane leans, -1 facing left to 1 facing right; 0 is flat to the viewer. Light falls off fast: this
   // is a forge at night, and only the rock near the lava is lit.
-  const fall = Math.max(34, w * 0.034)
+  const fall = Math.max(34, o.fall ?? w * 0.034)
   const lightAt = (x, y, n, f) => {
     const d = x - riverXAt(y)
     const toward = d > 0 ? -1 : 1 // the way a plane must lean to see the river
@@ -746,6 +817,9 @@ export function createScene(w, h, o = {}) {
   //   on: what it rises from (-1 the flank, or an earlier shoulder's far side)   fc: where on that line the col is
   //   out: how far the summit stands out from that line   rise: how far above the col   reach: how far the far side
   //   runs out at the ground. All in mountain heights.
+  // (where the title stands across the window: a bake hands in the span as it lies beside the mountain at the size the
+  // look was judged at)
+  const [titleX0, titleX1] = o.titleSpan ?? [w * 0.2, w * 0.8]
   const shoulders = (() => {
     const SR = mulberry32(seed ^ 0x5b0c) // its own stream, so the flanks and the relief keep their rolls
     const sr = (a, b) => a + SR() * (b - a)
@@ -777,7 +851,7 @@ export function createScene(w, h, o = {}) {
       const col = { x: c0.x - d * 0.012 * H, y: c0.y }
       const sx = c0.x + d * s.out * H
       // the summit, kept out of the title block whatever the sliders say
-      const so = { x: sx, y: sx > w * 0.2 && sx < w * 0.8 ? Math.max(c0.y - s.rise * H, h * 0.585) : c0.y - s.rise * H }
+      const so = { x: sx, y: sx > titleX0 && sx < titleX1 ? Math.max(c0.y - s.rise * H, h * 0.585) : c0.y - s.rise * H }
       const bottom = h + 30
       // The far side runs from the summit to the ground in segments, each at its own slant (sheer, then a bench, then
       // sheer again, easing out toward the foot): never a straight edge and never a horizontal tread.
@@ -835,10 +909,79 @@ export function createScene(w, h, o = {}) {
     return made
   })()
 
+  // ---------------------------------------------------------------- cells: a plane broken into jittered plates
+  // (used by the ground's old lava plates and by the mountain's broken rock)
+  const SITES = 64
+  const siteR = mulberry32(seed ^ 0x1ac3)
+  const SJX = new Float32Array(SITES * SITES)
+  const SJY = new Float32Array(SITES * SITES)
+  const SW = new Float32Array(SITES * SITES)
+  const ST = new Float32Array(SITES * SITES)
+  const SR = new Float32Array(SITES * SITES)
+  for (let i = 0; i < SITES * SITES; i++) {
+    SJX[i] = 0.1 + 0.8 * siteR()
+    SJY[i] = 0.1 + 0.8 * siteR()
+    SW[i] = 0.35 * siteR() // a weight, so some plates are big and some small
+    ST[i] = siteR() // the plate's tone
+    SR[i] = siteR() // the seam's rank: far from the inlet only some seams show, so old plates read as big ones
+  }
+  const PLATE = new Float32Array(3) // the last lookup: px to the seam, the plate's tone, the seam's rank
+  /**
+   * The two nearest plate sites at (u, v) in plate units. iw2 and ih2 are the squared px-per-unit the plane has across
+   * and down here, so the distance to the seam comes out in screen px along the seam's own normal, and a seam is the
+   * same hairline whichever way it runs.
+   */
+  const crustAt = (u, v, iw2, ih2) => {
+    const ui = Math.floor(u)
+    const vi = Math.floor(v)
+    let d1 = 99
+    let d2 = 99
+    let i1 = 0
+    let i2 = 0
+    let x1 = 0
+    let y1 = 0
+    let x2 = 0
+    let y2 = 0
+    for (let j = -1; j <= 1; j++) {
+      const cy = vi + j
+      const row = (cy & 63) << 6
+      const oy = cy - v
+      for (let i = -1; i <= 1; i++) {
+        const cx = ui + i
+        const ci = row | (cx & 63)
+        const dx = cx + SJX[ci] - u
+        const dy = oy + SJY[ci]
+        const d = dx * dx + dy * dy - SW[ci]
+        if (d < d1) {
+          d2 = d1
+          i2 = i1
+          x2 = x1
+          y2 = y1
+          d1 = d
+          i1 = ci
+          x1 = dx
+          y1 = dy
+        } else if (d < d2) {
+          d2 = d
+          i2 = ci
+          x2 = dx
+          y2 = dy
+        }
+      }
+    }
+    const lx = x1 - x2
+    const ly = y1 - y2
+    PLATE[0] = (d2 - d1) / (2 * Math.sqrt(lx * lx * iw2 + ly * ly * ih2) + 1e-6)
+    PLATE[1] = ST[i1]
+    const r = SR[i1] + SR[i2]
+    PLATE[2] = r >= 1 ? r - 1 : r
+  }
+
   // ---------------------------------------------------------------- baked layers
   const sky = makeCanvas(w, h, dpr)
   const land = makeCanvas(w, h, dpr)
   const fore = makeCanvas(w, h, dpr)
+  const hills = makeCanvas(w, h, dpr) // the nearest range of far hills: fog and the spill's light lie between it and the mountain
 
   const paintSky = () => {
     const g = sky.g
@@ -904,6 +1047,7 @@ export function createScene(w, h, o = {}) {
   // baked into the sky layer, behind the moon and the plume. A few far cones are alive: a pin of light in the notch and a
   // thin thread of smoke leaning with the same wind as the main plume.
   // Tuner: `ranges` is the density (0 none, 1 the default look, 3 crowded), `rangeH` the height, `haze` the wash between bands.
+  mark('setup')
   const far = (() => {
     const density = Math.max(0, Math.min(3, tn.ranges ?? 1))
     const heightK = Math.max(0.2, Math.min(2.5, tn.rangeH ?? 1))
@@ -1351,6 +1495,12 @@ export function createScene(w, h, o = {}) {
   }
 
   const paintMountain = (g) => {
+    const rockK = Math.max(0, Math.min(2, tn.rock ?? 1))
+    const colK = Math.max(0, Math.min(2, tn.columns ?? 1))
+    // tuner `planes`: how strongly the big planes stand off from one another (their lean to the light, their tints,
+    // the lit lines on their crests). At 1 they read as long strips from crown to foot; lower, the rock's own breaks
+    // carry the face and the planes are only its large form.
+    const planeK = Math.max(0, Math.min(1.5, tn.planes ?? 0.55))
     // silhouette
     const trace = () => {
       g.beginPath()
@@ -1389,7 +1539,7 @@ export function createScene(w, h, o = {}) {
       const A = lines[j]
       const B = lines[j + 1]
       const facing = A.crest ? 1 : -1
-      const tint = 0.88 + R() * 0.24
+      const tint = 1 + (R() * 0.24 - 0.12) * planeK
       g.beginPath()
       for (let e = -CR; e <= ROWS; e++) {
         const p = PE(ue(A, e), e)
@@ -1411,12 +1561,13 @@ export function createScene(w, h, o = {}) {
         const c = PE((ue(A, e) + ue(B, e)) / 2, e)
         // up the crown the lean eases from the flank's value to one that still reads in the dark
         const lc = e >= 0 ? lean(jj, f) : l0 + (0.2 + 0.5 * vnoise((-e / CR) * 2.1 + jj * 2.9, 3.1) - l0) * sm(-e / 4)
-        grd.addColorStop(clamp01((c.y - top) / (bot - top)), css(rockColour(c.x, c.y, facing * lc, f, tint)))
+        grd.addColorStop(clamp01((c.y - top) / (bot - top)), css(rockColour(c.x, c.y, facing * lc * planeK, f, tint)))
       }
       g.fillStyle = grd
       g.fill()
-      // rills: two broken lines down each plane, one dark and one faintly light
-      for (const [k, style] of [[0.36, 'rgba(0,0,0,0.3)'], [0.7, 'rgba(255,214,170,0.045)']]) {
+      // rills: two broken lines down each plane, one dark and one faintly light. Kept faint: long lines down smooth
+      // planes are what made the rock read as wood grain; the surface below carries the detail now.
+      for (const [k, style] of [[0.36, 'rgba(0,0,0,0.12)'], [0.7, 'rgba(255,214,170,0.018)']]) {
         g.beginPath()
         for (let i = 3; i <= ROWS; i++) {
           const p = P(lerp(A.u[i], B.u[i], k + (vnoise(i * 0.4, j * 5.1) - 0.5) * 0.3), i / ROWS)
@@ -1431,7 +1582,8 @@ export function createScene(w, h, o = {}) {
       g.setLineDash([])
     }
     // cliff bands: where the face breaks in a step, a line of shadow under the lip and a little caught light on it
-    for (const fb of [0.34, 0.56]) {
+    // (only when the rock has no skin: the skin carries its own ledges, tier on tier, and these two would cut across them)
+    for (const fb of rockK > 0.01 ? [] : [0.34, 0.56]) {
       const shadow = []
       for (let k = 0; k <= 60; k++) {
         const u = -0.97 + (k / 60) * 1.94
@@ -1466,7 +1618,7 @@ export function createScene(w, h, o = {}) {
         const c = PE(ue(C, e), e)
         const d = c.x - riverXAt(c.y)
         const { warm } = lightAt(c.x, c.y, d > 0 ? -1 : 1, f)
-        const edge = warm * 0.5 * (1 - 0.6 * sm((f - 0.72) / 0.25)) * (0.2 + 0.8 * lean(j >> 1, f))
+        const edge = warm * 0.5 * (1 - 0.6 * sm((f - 0.72) / 0.25)) * (0.2 + 0.8 * lean(j >> 1, f)) * (0.35 + 0.65 * planeK)
         grd.addColorStop(clamp01((c.y - top) / (bot - top)), `rgba(255,170,96,${edge.toFixed(3)})`)
       }
       g.beginPath()
@@ -1527,6 +1679,250 @@ export function createScene(w, h, o = {}) {
       [rimY + ch * 0.3, 'rgba(186,80,30,0)'],
     ])
     g.restore()
+    mark('mountainRelief')
+    // The rock's surface. The planes above are smooth, and long smooth planes read as carved wood; smooth lumps lit
+    // from one side (the first try at a skin) read as a bump map from an old render. Rock at this size reads from how
+    // it breaks, so the skin is built from breaks, worked out per pixel, once:
+    //   - The face is stacked in tiers, as a volcano is built: flow on flow. Each tier ends in a ledge (its edge catches
+    //     a little light, the rock under it is in shadow).
+    //   - Under a ledge the rock stands in columns, as thick basalt does when it cools: long shafts side by side, each
+    //     one face to the light and one away, each ending at its own height. Not all the way along: a tier has columns
+    //     here and none there. The spire and the crown are columns from the tip down.
+    //   - Everything else is broken rock: angular blocks, each a flat face turned its own way (so it is lit or not as a
+    //     whole, with a hard edge), dark cracks between some of them, smaller breaks on the blocks, and smooth patches
+    //     of scree and ash where the breaks fade out.
+    //   - It all follows the mountain: the columns and blocks fan out and grow from the summit down, as the flanks do.
+    // The skin is laid on with 'overlay', which on dark rock is a multiply: it adds no light of its own, it only breaks
+    // up the light already there. Rock too dark to show it is skipped (most of the mountain). Tuner \`rock\` is how
+    // strong it is, \`columns\` how much of each tier the columns take (0 none).
+    if (rockK > 0.01) {
+      const xs = [...left.outline, ...right.outline, ...crownPts].map((p) => p.x)
+      const bx0 = Math.max(0, Math.floor(Math.min(...xs)) - 1)
+      const bx1 = Math.min(w, Math.ceil(Math.max(...xs)) + 1)
+      const by0 = Math.max(0, Math.floor(tipY) - 2)
+      const bw = Math.max(2, bx1 - bx0)
+      const bh = Math.max(2, Math.ceil(h) - by0)
+      // texels per px: 1 as a rule; a bake asks for as many as the picture's own pixels, so the skin is as sharp as the
+      // lines drawn over it. Every distance below is still in px.
+      const rs = Math.max(1, Math.min(3, o.rockRes ?? 1))
+      const tw = Math.ceil(bw * rs)
+      const th = Math.ceil(bh * rs)
+      // what is painted there already, coarsely: where it is all but black there is nothing for a skin to break up
+      const Q = 4
+      const qw = Math.ceil(bw / Q)
+      const qh = Math.ceil(bh / Q)
+      const probe = makeCanvas(qw, qh)
+      probe.g.drawImage(g.canvas, bx0 * dpr, by0 * dpr, bw * dpr, bh * dpr, 0, 0, qw, qh)
+      const lit = probe.g.getImageData(0, 0, qw, qh).data
+      // smooth fields, on a grid half as fine: tone in big patches, where the scree lies, the rust
+      const LW = (bw >> 1) + 3
+      const LH = (bh >> 1) + 3
+      const low = new Float32Array(LW * LH)
+      const scree = new Float32Array(LW * LH)
+      const rust = new Float32Array(LW * LH)
+      for (let j = 0; j < LH; j++) {
+        const y = by0 + j * 2
+        for (let i = 0; i < LW; i++) {
+          const x = bx0 + i * 2
+          low[j * LW + i] = 0.6 * vnoise(x / 61 + 3, y / 47 + 8) + 0.4 * vnoise(x / 23 + 9, y / 19 + 4)
+          scree[j * LW + i] = vnoise(x / 90 + 21, y / 130 + 6)
+          rust[j * LW + i] = sm((vnoise(x / 70 + 13, y / 95 + 2) - 0.48) / 0.22)
+        }
+      }
+      // each row: where the mountain is (a little wide: the silhouette clips it), its middle, how far the face has
+      // fanned out there (1 at the summit), and how far down the face the row is when blocks grow with the fan
+      const XL = new Float32Array(th)
+      const XR = new Float32Array(th)
+      const MG = new Float32Array(th) // how much wider than the mountain the row is taken
+      const CX = new Float32Array(th)
+      const GF = new Float32Array(th)
+      const SY = new Float32Array(th)
+      const crownXs = crownPts.map((p) => p.x)
+      const cx0 = Math.min(...crownXs) - 2
+      const cx1 = Math.max(...crownXs) + 2
+      let down = 0
+      for (let j = 0; j < th; j++) {
+        const y = by0 + (j + 0.5) / rs
+        let xl = cx0
+        let xr = cx1
+        if (y >= rimY) {
+          const x = clamp01((y - rimY) / H) * ROWS
+          const i = Math.min(ROWS - 1, Math.floor(x))
+          xl = lerp(left[i].x, left[i + 1].x, x - i)
+          xr = lerp(right[i].x, right[i + 1].x, x - i)
+        }
+        CX[j] = (xl + xr) / 2
+        GF[j] = Math.max(1, Math.min(2.4, Math.sqrt((xr - xl) / (2 * rw))))
+        MG[j] = y >= rimY ? 0.06 * halfBase : 0
+        XL[j] = xl - MG[j]
+        XR[j] = xr + MG[j]
+        down += 1 / (GF[j] * rs)
+        SY[j] = down
+      }
+      // the tiers: where each ledge stands across the face, and how much of the tier under it is columns there
+      const TN = 192
+      const tiers = []
+      for (let k = 0, fk = 0.15; fk < 0.93; k++) {
+        const lip = new Float32Array(TN + 1)
+        const col = new Float32Array(TN + 1)
+        const edge = new Float32Array(TN + 1) // how much of a ledge there is here: it comes and goes along the face
+        for (let q = 0; q <= TN; q++) {
+          const u = -1.15 + (q / TN) * 2.3
+          lip[q] = fk + 0.04 * (vnoise(u * 3.1 + k * 7.7, 2.3) - 0.5) + 0.014 * (vnoise(u * 9 + k * 3.3, 5.1) - 0.5)
+          const open = sm((vnoise(u * 2.3 + k * 11.1, 4.2) - (0.76 - 0.12 * colK)) / 0.08)
+          col[q] = colK > 0 ? open * clamp01(0.1 + 0.6 * vnoise(u * 1.9 + k * 5.3, 8.8)) : 0
+          edge[q] = sm((vnoise(u * 2.9 + k * 3.7, 6.6) - 0.32) / 0.2)
+        }
+        tiers.push({ lip, col, edge })
+        fk += 0.085 + 0.09 * hash2(k * 5 + 1, 91)
+      }
+      const NT = tiers.length
+      // the spire and the crown, above the first ledge: columns hang from the top of the rock in places, and reach a
+      // different way down in each; between them and below them it is broken rock like the rest
+      const spire = new Float32Array(TN + 1)
+      for (let q = 0; q <= TN; q++) {
+        const u = -1.15 + (q / TN) * 2.3
+        spire[q] = colK > 0 ? sm((vnoise(u * 2.9 + 3.3, 9.4) - (0.62 - 0.14 * colK)) / 0.1) * clamp01(0.3 + 0.75 * vnoise(u * 2.1 + 7.9, 1.6)) : 0
+      }
+      const topF = (tipY - rimY) / H
+      const colW = phone ? 6 : 8 // a column's width at the summit, px
+      const CB = phone ? 11 : 15 // a block's size at the summit, px
+      const { cv: tex, g: tg } = makeCanvas(tw, th)
+      const timg = tg.createImageData(tw, th)
+      const td = timg.data
+      for (let j = 1; j < th - 1; j++) {
+        const y = by0 + (j + 0.5) / rs
+        const f = (y - rimY) / H
+        const i0 = Math.max(1, Math.floor((XL[j] - bx0) * rs))
+        const i1 = Math.min(tw - 2, Math.ceil((XR[j] - bx0) * rs))
+        if (i1 < i0) continue
+        const gf = GF[j]
+        const span = XR[j] - XL[j] - 2 * MG[j] || 1
+        const rvx = riverXAt(y)
+        const lj = j / rs / 2
+        const j0 = lj | 0
+        const fj = lj - j0
+        const qrow = Math.min(qh - 1, (j / rs / Q) | 0) * qw
+        const vy = SY[j] / CB
+        for (let i = i0; i <= i1; i++) {
+          const q4 = (qrow + Math.min(qw - 1, (i / rs / Q) | 0)) * 4
+          if (lit[q4] < 7 && lit[q4 + 1] < 7 && lit[q4 + 2] < 7) continue
+          const x = bx0 + (i + 0.5) / rs
+          // light: from the river where it is near, from the moon's side where it is not, and a little from above
+          const d = x - rvx
+          const wr = Math.exp(-Math.abs(d) / (fall * 2.5))
+          const lx = (d > 0 ? -1 : 1) * wr + (1 - wr)
+          const grain = hash2(i * 7 + 3, j * 13 + 11) - 0.5
+          // the smooth fields here
+          const li = i / rs / 2
+          const l0 = li | 0
+          const fi = li - l0
+          const a = j0 * LW + l0
+          const lo = lerp(lerp(low[a], low[a + 1], fi), lerp(low[a + LW], low[a + LW + 1], fi), fj)
+          const sc = lerp(lerp(scree[a], scree[a + 1], fi), lerp(scree[a + LW], scree[a + LW + 1], fi), fj)
+          // across the fan, in px as they are at the summit
+          const fx = (x - CX[j]) / gf
+          // which tier, and how far down it
+          const u = ((x - XL[j] - MG[j]) / span) * 2 - 1
+          const q = Math.min(TN, Math.max(0, Math.round(((u + 1.15) / 2.3) * TN)))
+          // (a ledge runs level round the mountain, so across the face it sags in the middle as the relief's own rows do)
+          const ft = f / (1 + 0.03 * (1 - Math.min(1, u * u)))
+          let k = -1
+          while (k + 1 < NT && tiers[k + 1].lip[q] <= ft) k++
+          const top = k < 0 ? -9 : tiers[k].lip[q]
+          const bot = k + 1 < NT ? tiers[k + 1].lip[q] : 1.08
+          // columns: slim on the spire, stouter below, no two the same width; each tier has its own set
+          const cwide = k < 0 ? colW : colW * 1.3
+          const fxk = fx + (k + 2) * 977.3
+          const ci0 = Math.floor(fxk / cwide)
+          const bnd0 = (ci0 + 0.7 * hash2(ci0, 77)) * cwide
+          const c = fxk < bnd0 ? ci0 - 1 : ci0
+          const b0 = (c + 0.7 * hash2(c, 77)) * cwide
+          const b1 = (c + 1 + 0.7 * hash2(c + 1, 77)) * cwide
+          let M = 0
+          if (colK > 0) {
+            if (k < 0) M = sm(((topF + (bot - topF) * spire[q] * (0.7 + 0.6 * hash2(c * 3 + 1, 19)) - ft) * H) / 3)
+            else M = sm(((top + (bot - top) * tiers[k].col[q] * (0.75 + 0.5 * hash2(c * 3 + 1, 19 + k)) - ft) * H) / 3)
+          }
+          let t = 0.5
+          if (M < 1) {
+            // broken rock: blocks, each one flat face
+            const uu = fx / CB + 0.9 * (lo - 0.5)
+            const vv = vy + 0.9 * (sc - 0.5)
+            const pw = 1 / (CB * gf * CB * gf)
+            crustAt(uu, vv, pw, pw)
+            const ep = PLATE[0]
+            const tone = PLATE[1]
+            let lam = Math.sin(tone * 37.7) * lx - 0.5 * Math.cos(tone * 91.3)
+            lam = lam < -1 ? -1 : lam > 1 ? 1 : lam
+            let tr = 0.5 + (lam > 0 ? 0.15 : 0.2) * lam + 0.1 * (tone - 0.5)
+            // cracks: a few wide and black, some hairlines, the rest closed
+            const rk = PLATE[2]
+            if (rk < 0.55) {
+              const wide = rk < 0.2 ? 2.4 : 1.1
+              if (ep < wide) tr -= (rk < 0.2 ? 0.26 : 0.18) * (1 - ep / wide)
+            }
+            // smaller breaks on the blocks
+            crustAt(uu * 2.7 + 31.7, vv * 2.7 + 11.3, pw / 7.29, pw / 7.29)
+            const lam2 = Math.sin(PLATE[1] * 53.1) * lx - 0.5 * Math.cos(PLATE[1] * 71.9)
+            tr += (lam2 > 0 ? 0.06 : 0.1) * lam2
+            if (PLATE[2] < 0.3 && PLATE[0] < 1) tr -= 0.1 * (1 - PLATE[0])
+            // and big slabs: the face is broken across in large pieces too, each its own tone and turned a little
+            // its own way, and they do not keep to the planes
+            crustAt(uu * 0.34 + 5.1, vv * 0.34 + 8.7, pw * 8.65, pw * 8.65)
+            let lam3 = Math.sin(PLATE[1] * 43.3) * lx - 0.5 * Math.cos(PLATE[1] * 67.1)
+            lam3 = lam3 < -1 ? -1 : lam3 > 1 ? 1 : lam3
+            tr += 0.15 * (PLATE[1] - 0.5) + (lam3 > 0 ? 0.07 : 0.1) * lam3
+            if (PLATE[2] < 0.3 && PLATE[0] < 2.6) tr -= 0.2 * (1 - PLATE[0] / 2.6)
+            // scree and ash: the breaks fade out
+            const smooth = 0.75 * sm((sc - 0.56) / 0.14)
+            tr += (0.5 + 0.05 * grain - tr) * smooth
+            t = tr
+          }
+          if (M > 0.01) {
+            const cw = (b1 - b0) * gf
+            const p = (fxk - b0) / (b1 - b0)
+            // a prism seen from the side: the face toward the light, the face square on, the face turned away
+            const turn = p < 0.3 ? 1 - sm((p - 0.22) / 0.08) : p > 0.7 ? -sm((p - 0.7) / 0.08) : 0
+            let tc = 0.5 + 0.24 * turn * lx + 0.14 * (hash2(c * 7 + 1, 5 + k) - 0.5)
+            // the joint between two columns
+            const edge = Math.min(p, 1 - p) * cw
+            if (edge < 1) tc -= 0.14 * (1 - edge)
+            // a column is broken across only here and there (long shafts, not courses of brick)
+            const seg = 46 + 120 * hash2(c * 3 + 2, 41)
+            const yy = (y + 157 * hash2(c * 11 + 3, 23)) / seg
+            const blk = Math.floor(yy)
+            if ((yy - blk) * seg < 1.1) tc -= 0.08
+            tc += 0.06 * (hash2(c * 5 + 1, blk * 9 + 2) - 0.5)
+            t += (tc - t) * M
+          }
+          // the ledge over this tier: its edge catches the light, and the rock under it is in its shadow
+          if (k >= 0) {
+            const under = (ft - top) * H
+            const lk = tiers[k].edge[q]
+            if (under < 1.5) t += 0.12 * lk
+            else if (under < 12) t -= 0.22 * lk * (1 - (under - 1.5) / 10.5)
+          }
+          t += 0.3 * (lo - 0.5) + 0.03 * grain
+          t = 0.5 + (t - 0.5) * rockK
+          // rust in patches, and the rest a touch toward violet, as old lava is
+          const ox = lerp(lerp(rust[a], rust[a + 1], fi), lerp(rust[a + LW], rust[a + LW + 1], fi), fj) * rockK
+          const o4 = (j * tw + i) * 4
+          td[o4] = 255 * (t + 0.05 * ox)
+          td[o4 + 1] = 255 * (t - 0.012 * ox)
+          td[o4 + 2] = 255 * (t - 0.01 * ox + 0.014 * (1 - ox))
+          td[o4 + 3] = 255
+        }
+      }
+      tg.putImageData(timg, 0, 0)
+      g.save()
+      trace()
+      g.clip()
+      g.globalCompositeOperation = 'overlay'
+      g.drawImage(tex, bx0, by0, bw, bh)
+      g.restore()
+    }
+    mark('mountainRockSkin')
     // the facets where the walls break: a thin line of caught light on each
     g.lineWidth = 1
     for (const [a, b, colour] of [[12, 13, 'rgba(255,170,96,0.5)'], [14, 15, 'rgba(255,170,96,0.28)'], [21, 22, 'rgba(120,160,144,0.3)'], [23, 24, 'rgba(120,160,144,0.24)'], [25, 26, 'rgba(120,160,144,0.18)']]) {
@@ -1555,7 +1951,7 @@ export function createScene(w, h, o = {}) {
   const paintGround = (g) => {
     g.beginPath()
     g.moveTo(-10, h + 10)
-    for (let x = -10; x <= w + 10; x += 14) g.lineTo(x, shoreY - 2 + (vnoise(x * 0.012, 6.6) - 0.5) * 9)
+    for (let x = -10; x <= w + 10; x += 7) g.lineTo(x, groundTopAt(x))
     g.lineTo(w + 10, h + 10)
     g.closePath()
     const grd = g.createLinearGradient(0, shoreY - 6, 0, h)
@@ -1565,20 +1961,35 @@ export function createScene(w, h, o = {}) {
     g.fill()
   }
 
+  let forePts = null // the outline of the rise up front, as drawn
+  /** The top of the rise up front at x; below the window where it does not stand. */
+  const foreTopAt = (x) => {
+    const p = forePts
+    if (!p) return h + 10
+    const a = (x - p[0].x) * lake.dir
+    if (a < 0) return h + 10
+    for (let i = 1; i < p.length; i++) {
+      if ((p[i].x - x) * lake.dir >= 0) return lerp(p[i - 1].y, p[i].y, (x - p[i - 1].x) / (p[i].x - p[i - 1].x || 1))
+    }
+    return p[p.length - 1].y
+  }
   const paintFore = (g) => {
+    // the rise up front stands on the open side, away from the mountain: the lake's point runs in under its edge
+    const X = (u) => (lake.dir > 0 ? u * w : (1 - u) * w)
     const ctrl = phone
-      ? [{ x: w * 0.56, y: h + 6 }, { x: w * 0.8, y: h - h * 0.045 }, { x: w + 10, y: h - h * 0.07 }]
-      : [{ x: w * 0.47, y: h + 6 }, { x: w * 0.6, y: h - h * 0.07 }, { x: w * 0.73, y: h - h * 0.105 }, { x: w * 0.88, y: h - h * 0.17 }, { x: w + 10, y: h - h * 0.14 }]
+      ? [{ x: X(0.56), y: h + 6 }, { x: X(0.8), y: h - h * 0.045 }, { x: X(1) + 10 * lake.dir, y: h - h * 0.07 }]
+      : [{ x: X(0.47), y: h + 6 }, { x: X(0.6), y: h - h * 0.07 }, { x: X(0.73), y: h - h * 0.105 }, { x: X(0.88), y: h - h * 0.17 }, { x: X(1) + 10 * lake.dir, y: h - h * 0.14 }]
     const { pts } = jagged(ctrl, 0.07, 4)
+    forePts = pts
     g.beginPath()
     g.moveTo(pts[0].x, h + 10)
     for (const p of pts) g.lineTo(p.x, p.y)
-    g.lineTo(w + 10, h + 10)
+    g.lineTo(X(1) + 10 * lake.dir, h + 10)
     g.closePath()
     g.fillStyle = 'rgb(3,5,5)'
     g.fill()
     // its edge toward the lake catches the glow
-    const grd = g.createLinearGradient(pts[0].x, 0, pts[0].x + w * 0.22, 0)
+    const grd = g.createLinearGradient(pts[0].x, 0, pts[0].x + w * 0.22 * lake.dir, 0)
     grd.addColorStop(0, 'rgba(255,128,60,0.2)')
     grd.addColorStop(1, 'rgba(255,128,60,0)')
     g.beginPath()
@@ -1588,23 +1999,72 @@ export function createScene(w, h, o = {}) {
     g.stroke()
   }
 
+  mark('farRangesBuild')
   paintSky()
+  mark('sky')
   if (L.ridges) {
     far.paintBands(sky.g)
-    far.paintNear(land.g)
+    far.paintNear(hills.g)
   }
-  paintMountain(land.g)
+  mark('farRangesPaint')
+  // The mountain is the costly part of the build (its skin above all), and it is the same picture at every window
+  // size: only its scale and its place change. So it can come ready-made: `o.mountain` is a picture baked from this
+  // same code (`o.bakeMountain`, below) with a note of where the peak and the rim are in it, and then none of it is
+  // painted here. The geometry above is still worked out, so the river, the lake and the light all sit on it.
+  let baked = null
+  if (o.mountain) {
+    const { image, meta } = o.mountain
+    const k = H / meta.H
+    land.g.imageSmoothingQuality = 'high'
+    land.g.drawImage(image, peakX + (meta.x - meta.peakX) * k, rimY + (meta.y - meta.rimY) * k, meta.w * k, meta.h * k)
+  } else if (o.bakeMountain) {
+    // painted alone on a clear canvas, cut down to what was painted, and handed back (info.bake)
+    const mtn = makeCanvas(w, h, dpr)
+    paintMountain(mtn.g)
+    land.g.drawImage(mtn.cv, 0, 0, w, h)
+    const mw = mtn.cv.width
+    const mh = mtn.cv.height
+    const md = mtn.g.getImageData(0, 0, mw, mh).data
+    let x0 = mw
+    let y0 = mh
+    let x1 = -1
+    let y1 = -1
+    for (let y = 0; y < mh; y++) {
+      for (let x = 0; x < mw; x++) {
+        if (md[(y * mw + x) * 4 + 3] < 8) continue
+        if (x < x0) x0 = x
+        if (x > x1) x1 = x
+        if (y < y0) y0 = y
+        if (y > y1) y1 = y
+      }
+    }
+    // (`o.bakeSpan`: keep only this much either side of the peak, in mountain heights: a phone never shows the far
+    // reach of the shoulders, so its picture need not carry them)
+    if (o.bakeSpan) {
+      x0 = Math.max(x0, Math.floor((peakX + o.bakeSpan[0] * H) * dpr))
+      x1 = Math.min(x1, Math.ceil((peakX + o.bakeSpan[1] * H) * dpr))
+    }
+    const cut = makeCanvas(x1 - x0 + 1, y1 - y0 + 1)
+    cut.g.drawImage(mtn.cv, -x0, -y0)
+    baked = {
+      cv: cut.cv,
+      // all in px of the window it was painted in; the picture itself is `dpr` times as fine
+      meta: { H, peakX, rimY, x: x0 / dpr, y: y0 / dpr, w: (x1 - x0 + 1) / dpr, h: (y1 - y0 + 1) / dpr, riverU: riverLine.u[rowFoot] * mx, touches: { left: x0 === 0, right: x1 === mw - 1 } },
+    }
+  } else paintMountain(land.g)
+  mark('mountainFinish')
   paintGround(land.g)
   paintFore(fore.g)
 
   // N'bel's monolith, the memorial Vulkan raised for his foster father: one plain basalt stone on the shore, right of the
   // river's mouth, and the only thing in the frame whose size is known. About 2.2% of the screen tall, slim, a touch
   // tapered, its top sheared flat. Dark, lit warm from the lake side. Drawn on the foreground layer, over the lake's glow.
+  mark('groundAndRise')
   const mono = (() => {
     const mh = Math.max(10, h * 0.022)
     const mw = Math.max(3.4, mh * 0.3)
-    const x = river.mouth.x + lake.rx * 0.2
-    const y = lakeTopAt(x) - 4 // on the basin's rim, a few px back from the water
+    const x = river.mouth.x + Math.min(76, w * 0.05)
+    const y = lakeTopAt(x) - 4 // on the strip of ground between the rock and the lava
     return { x, y, h: mh, w: mw }
   })()
   if (L.monolith) {
@@ -1636,8 +2096,12 @@ export function createScene(w, h, o = {}) {
   }
 
   // ---------------------------------------------------------------- Prometheus (the approved lit sphere from feat/volcano-polish)
+  mark('monolith')
+  const MOON_TRIAL = 0.62 // how much the disc swells at the height of a cataclysm, on the scale where its closest pass is 1.15
   const moon = (() => {
-    const r = Math.max(20, Math.min(w * 0.11, h * 0.14))
+    // (painted at the size it is in a cataclysm, its largest; `r` handed back is its size at an ordinary closest pass)
+    const r0 = Math.max(20, Math.min(w * 0.11, h * 0.14))
+    const r = r0 * ((1.15 + MOON_TRIAL) / 1.15)
     const size = Math.ceil(r * 2)
     const { cv, g } = makeCanvas(size, size)
     const img = g.createImageData(size, size)
@@ -1715,7 +2179,7 @@ export function createScene(w, h, o = {}) {
       }
     }
     g.putImageData(img, 0, 0)
-    return { cv, r }
+    return { cv, r: r0 }
   })()
 
   // ---------------------------------------------------------------- the lake's surface
@@ -1726,80 +2190,29 @@ export function createScene(w, h, o = {}) {
   // near) and no seam runs toward a point. Where each pixel sits on that plane never changes, so it is worked out once.
   // A repaint finds each pixel's two nearest sites (the drift only slides the plane under them), turns the distance to
   // the seam into a smooth hairline, and maps heat to colour. It runs about eight times a second.
-  const SITES = 64
-  const siteR = mulberry32(seed ^ 0x1ac3)
-  const SJX = new Float32Array(SITES * SITES)
-  const SJY = new Float32Array(SITES * SITES)
-  const SW = new Float32Array(SITES * SITES)
-  const ST = new Float32Array(SITES * SITES)
-  const SR = new Float32Array(SITES * SITES)
-  for (let i = 0; i < SITES * SITES; i++) {
-    SJX[i] = 0.1 + 0.8 * siteR()
-    SJY[i] = 0.1 + 0.8 * siteR()
-    SW[i] = 0.35 * siteR() // a weight, so some plates are big and some small
-    ST[i] = siteR() // the plate's tone
-    SR[i] = siteR() // the seam's rank: far from the inlet only some seams show, so old plates read as big ones
-  }
-  const PLATE = new Float32Array(3) // the last lookup: px to the seam, the plate's tone, the seam's rank
-  /**
-   * The two nearest plate sites at (u, v) in plate units. iw2 and ih2 are the squared px-per-unit the plane has across
-   * and down here, so the distance to the seam comes out in screen px along the seam's own normal, and a seam is the
-   * same hairline whichever way it runs.
-   */
-  const crustAt = (u, v, iw2, ih2) => {
-    const ui = Math.floor(u)
-    const vi = Math.floor(v)
-    let d1 = 99
-    let d2 = 99
-    let i1 = 0
-    let i2 = 0
-    let x1 = 0
-    let y1 = 0
-    let x2 = 0
-    let y2 = 0
-    for (let j = -1; j <= 1; j++) {
-      const cy = vi + j
-      const row = (cy & 63) << 6
-      const oy = cy - v
-      for (let i = -1; i <= 1; i++) {
-        const cx = ui + i
-        const ci = row | (cx & 63)
-        const dx = cx + SJX[ci] - u
-        const dy = oy + SJY[ci]
-        const d = dx * dx + dy * dy - SW[ci]
-        if (d < d1) {
-          d2 = d1
-          i2 = i1
-          x2 = x1
-          y2 = y1
-          d1 = d
-          i1 = ci
-          x1 = dx
-          y1 = dy
-        } else if (d < d2) {
-          d2 = d
-          i2 = ci
-          x2 = dx
-          y2 = dy
-        }
-      }
-    }
-    const lx = x1 - x2
-    const ly = y1 - y2
-    PLATE[0] = (d2 - d1) / (2 * Math.sqrt(lx * lx * iw2 + ly * ly * ih2) + 1e-6)
-    PLATE[1] = ST[i1]
-    const r = SR[i1] + SR[i2]
-    PLATE[2] = r >= 1 ? r - 1 : r
-  }
-  const PLATE_B = 2.2 // the fresh small plates by the inlet: the same plane, 2.2 times finer
-  const DRIFT = 0.03 // plate units a second, toward the viewer (about a px a second on the near shore)
+  const PLATE_B = 2.2 // the pool's ragged edge is cut by the same plane, 2.2 times finer
+  // The lake is the river gone wide and slow: the same Doom fire, the same palette, laid flat on the ground. The
+  // river's mouth is the fire's source and the fire's "up" runs outward from it in every direction along the ground, so
+  // the tongues fan out from the mouth, cool as they go, and crust over in specks that live longer the farther they
+  // drift. Tuner `lakeCrust`: how much of it crusts (0 none). Tuner `lakeHeat`: how hot it runs.
+  const crustK = Math.max(0, Math.min(1, tn.lakeCrust ?? 0.3))
+  const lakeHeatT = Math.max(0.5, Math.min(1.5, tn.lakeHeat ?? 1))
+  // And it grows. The ground never changes: it is old lava gone cold (basalt plates, dark cracks), all the way across
+  // the window. The lava floods it from the river's mouth outward as the level rises, as far as the lake's own shore.
+  // `level` (0 to 1) is how much lava lies on the ground: the caller owns it and hands it to draw() each frame, so it
+  // outlives a rebuild. Every pixel of the lake's bed carries its fill order, worked out once (the level at which the
+  // lava reaches it), so a repaint tells which side of the front a pixel is on by comparing two numbers.
+  const FRONT_HEAT = 0.62 // how hot the lava's edge burns against the rock, on the lip's own 0 to 1 scale
+  const LAKE_KY = 3 // the ground is seen at a low angle: a px up the screen is three px of ground
+  let curLevel = Math.max(0, Math.min(1, o.lakeLevel ?? 1))
+  let lakeFlow = 1 // how fast the lake's fire runs, against its resting rate (draw() sets it)
+  mark('moon')
   const lakeBox = (() => {
     const S = phone ? 0.75 : 1
-    const RIMW = 13
-    const x0 = Math.max(0, Math.floor(lake.cx - lake.rx * 1.06 - RIMW))
-    const x1 = Math.min(w, Math.ceil(lake.cx + lake.rx * 1.06 + RIMW))
-    const y0 = Math.floor(h - lake.vis - RIMW - 4)
-    const lw = Math.max(2, Math.ceil((x1 - x0) * S))
+    const RIMW = 8
+    const x0 = 0
+    const y0 = Math.floor(shoreY - 9) // just above the highest the ground line gets
+    const lw = Math.max(2, Math.ceil(w * S))
     const lh = Math.max(2, Math.ceil((h - y0) * S))
     const surf = makeCanvas(lw, lh)
     const img = surf.g.createImageData(lw, lh)
@@ -1807,27 +2220,80 @@ export function createScene(w, h, o = {}) {
     // heat to colour, in the river's own palette (and its lavaHeat): a lookup in eighths of a palette step
     const lut = new Float32Array(3 * 320)
     for (let i = 0; i < 320; i++) heatColour((i / 8) * lavaHeatK, lut, i * 3)
-    // the plane: the lake seen from low down. q is how far a screen row sits below the horizon the plane runs off to;
-    // plates are Wc wide and Hc tall there, in px, and shrink with distance (Hc as the square, as a plane does).
-    const topY = h - lake.vis
-    const yh = topY - 1.3 * lake.vis
+    // the ground line and the lake's far shore, per column
+    const GT = new Float32Array(lw)
+    const FS = new Float32Array(lw)
+    const HT = new Float32Array(lw) // the top of the rise up front: what lies under it is never seen, so never painted
+    for (let i = 0; i < lw; i++) {
+      GT[i] = groundTopAt(x0 + (i + 0.5) / S)
+      FS[i] = lakeTopAt(x0 + (i + 0.5) / S)
+      HT[i] = L.fore === false ? h + 10 : foreTopAt(x0 + (i + 0.5) / S)
+    }
+    // the shore short of the edge, and how much of a brim there is, per column
+    const NS = new Float32Array(lw)
+    const BR = new Float32Array(lw)
+    for (let i = 0; i < lw; i++) {
+      NS[i] = groundShoreAt(x0 + (i + 0.5) / S)
+      BR[i] = brimAt(x0 + (i + 0.5) / S)
+    }
+    // the lake's point, as seen: where its far shore runs in under the rise up front (or leaves the window)
+    let tipSeen = Math.max(0, Math.min(w, lake.tipX))
+    for (let a = Math.max(0, (lake.footEnd - lake.edgeX) * lake.dir); a <= w; a += 2) {
+      const x = lake.edgeX + a * lake.dir
+      const i = Math.min(lw - 1, Math.max(0, Math.floor(x * S)))
+      if (HT[i] <= FS[i] + 1 || FS[i] >= h) {
+        tipSeen = x
+        break
+      }
+    }
+    // the plane: flat ground seen from low down. q is how far a screen row sits below the horizon the plane runs off
+    // to (just above the ground line, so the far plates are slivers); plates are Wc wide and Hc tall there, in px.
+    const yh = shoreY - 0.4 * groundH
     const qn = h - yh
     const Wn = Math.max(44, Math.min(84, w * 0.052))
     const Hn = Wn * 0.42
-    // the stream: where the river ends. Heat falls away from it, mostly sideways, and more slowly toward the viewer
+    // the mouth: where the river comes over the shore. The pool: where its last stretch ends, a little way out.
+    const mx0 = river.mouth.x
+    const my0 = lakeTopAt(mx0) + 2
     const ix = river.inlet.x
     const iy = river.inlet.y
-    const Rh = Math.max(lake.rx * 0.2, 36)
-    const poolRx = Math.max(river.hw[river.N] * 2, lake.rx * 0.11)
+    const Rh = Math.max(groundH * 0.85, 36)
+    const poolRx = Math.max(river.hw[river.N] * 2, groundH * 0.45)
     const poolRy = poolRx * 0.42
     const pcy = iy + poolRy * 0.25
-    // where the river crosses the shore: the rim glows brightest there
-    const mx0 = river.mouth.x
-    const my0 = river.mouth.y
-    const mk = () => ({ n: 0, off: [], ua: [], va: [], iw: [], ih: [], hn: [], phi: [], gr: [], p1c: [], p1s: [], p2c: [], p2s: [], cool: [], shore: [] })
-    const grpNear = mk()
-    const grpFar = mk()
-    const edge = { off: [], r: [], g: [], b: [] } // the lit lip on the water's own edge
+    // The fill order. The lava spreads from the mouth over the ground: sideways along the mountain's base both ways,
+    // and toward the viewer. Its front is an ellipse that reaches the window's edge on the mountain's side and the
+    // lake's far point together, when the lake is full; it comes to the window's bottom under the mouth at about a
+    // third full. The front is pushed out in lobes by its bearing from the mouth (so along any one bearing the lava
+    // only ever advances) and made ragged by a little fine noise; both fade to nothing at the mouth and at the end.
+    // The lava held goes as the area flooded, so the order is the square of the distance.
+    const reachM = Math.max(40, Math.abs(mx0 - lake.edgeX))
+    const reachD = Math.max(40, Math.abs(tipSeen - mx0) + 12)
+    const reachY = h + 0.6 * groundH - my0
+    const fillAt = (sx, sy, i) => {
+      const ax = (sx - mx0) * lake.dir
+      const fx = ax >= 0 ? ax / reachD : ax / reachM
+      const fy = Math.max(0, sy - my0) / reachY
+      const f = Math.hypot(fx, fy)
+      if (f < 1e-4) return 0
+      const c = fx / f
+      const s = fy / f
+      const n = 0.5 * (vnoise(c * 2.1 + 7, s * 2.1 + 3) - 0.5) + 0.22 * (vnoise(c * 6 + 1, s * 6 + 9) - 0.5) + 0.07 * (vnoise(sx / 26 + 2, sy / 9 + 31) - 0.5)
+      const fn = clamp01(f + n * sm(f / 0.4) * (1 - Math.min(1, f)))
+      let F = fn * fn
+      // Along the brim the ground between the lake's own shore and the shelf's edge floods last, over the end of the
+      // filling: the lava creeps up to the edge, and is at it when the lake is full.
+      if (BR[i] > 0 && sy < NS[i]) F = Math.max(F, 0.84 + 0.16 * clamp01((NS[i] - sy) / Math.max(1, NS[i] - FS[i])))
+      return F
+    }
+    const FG = new Float32Array(lw * lh)
+    for (let j = 0; j < lh; j++) {
+      const sy = y0 + (j + 0.5) / S
+      for (let i = 0; i < lw; i++) FG[j * lw + i] = fillAt(x0 + (i + 0.5) / S, sy, i)
+    }
+    const keys = ['off', 'fl', 'ig', 'dpx', 'w0', 'lipn', 'liph', 'ep0', 'rk0', 'hn', 'po', 'fr', 'fc', 'dr', 'dg', 'db']
+    const grp = Object.fromEntries(keys.map((key) => [key, []]))
+    let rMax = 0
     for (let j = 0; j < lh; j++) {
       const sy = y0 + (j + 0.5) / S
       const q = sy - yh
@@ -1838,234 +2304,344 @@ export function createScene(w, h, o = {}) {
       const dys = (sy - iy) / (Rh * 0.42)
       for (let i = 0; i < lw; i++) {
         const sx = x0 + (i + 0.5) / S
-        const ex = (sx - lake.cx) / lake.rx
-        const ey = (sy - lake.cy) / lake.ry
-        const rho = Math.hypot(ex, ey) || 1e-6
-        const rim = shoreAt(Math.atan2(ey, ex))
-        // px to the shore: negative inside the water
-        const dpx = (rho / rim - 1) / (Math.hypot(ex / lake.rx, ey / lake.ry) / (rho * rim))
-        if (dpx > RIMW) continue
+        const gt = GT[i]
+        if (sy < gt - 0.5) continue // above the ground line: the picture behind shows
+        if (sy > HT[i] + 1.5) continue // under the rise up front
         const o4 = (j * lw + i) * 4
-        const dxs = (sx - ix) / Rh
-        const rr2 = dxs * dxs + dys * dys
-        const hn = 0.95 * Math.exp(-rr2) + 0.17 * Math.exp(-0.1 * rr2)
-        // the lit lip: brightest where the river crosses the shore, a thin line along the rock's inner edge
-        const dm = Math.exp(-(((sx - mx0) / (Rh * 0.95)) ** 2) - ((sy - my0) / (Rh * 1.3)) ** 2)
-        const lipHeat = 0.05 + 0.95 * dm * dm
-        const lp = Math.exp(-(((dpx - 0.9) / 1.3) ** 2))
-        const la = Math.min(1, lp * (0.3 + 0.7 * lipHeat) * (0.55 + 0.45 * vnoise(sx * 0.08 + 4, sy * 0.1 + 6)))
-        const li = Math.min(319, ((3.5 + 17 * lipHeat) * 8) | 0) * 3
-        if (dpx >= 0.5) {
-          // the rim: dark rock a few px deep, ragged, with the lava's light on it near the inlet. It never changes, so it
-          // goes straight into the image once.
-          const rw = 8 + 4 * vnoise(sx * 0.045 + 9, sy * 0.09 + 2)
-          const ra = 1 - sm((dpx - rw * 0.5) / (rw * 0.55))
-          const gb = hash2(i * 5 + 3, j * 11 + 7) - 0.5
-          const base = 9 + 6 * gb + 4 * vnoise(sx * 0.2, sy * 0.4)
-          const wash = Math.min(1, hn) * (1 - sm(dpx / rw))
-          const wp = Math.exp(-(((dpx - 1.6) / 4.5) ** 2)) * 0.2 * lipHeat * lipHeat
-          const lq = Math.min(1, la + wp)
-          data[o4] = base * 1.1 + 30 * wash + lut[li] * lq
-          data[o4 + 1] = base + 8 * wash + lut[li + 1] * lq
-          data[o4 + 2] = base * 0.95 + 2 * wash + lut[li + 2] * lq
-          data[o4 + 3] = 255 * Math.max(ra, lq)
-          continue
-        }
-        data[o4 + 3] = 255 // (opaque to the very edge: a half-clear edge dimmed the lip on every other pixel and it read as beads)
-        if (dpx > -1.5) {
-          edge.off.push(o4)
-          edge.r.push(lut[li] * la)
-          edge.g.push(lut[li + 1] * la)
-          edge.b.push(lut[li + 2] * la)
-        }
-        // the pool: the stream's own ellipse, ragged by angle, joined to a lane as wide as the channel so the river's
-        // last stretch lies on open lava from the shore on
-        const pdx = (sx - ix) / poolRx
-        const pdy = (sy - pcy) / poolRy
-        const pa = Math.atan2(pdy, pdx)
-        const pr =
-          1 + 0.3 * (vnoise(Math.cos(pa) * 1.7 + 11, Math.sin(pa) * 1.7 + 4) - 0.5) * 2 + 0.1 * (vnoise(Math.cos(pa) * 5 + 2, Math.sin(pa) * 5 + 9) - 0.5) * 2
-        let phi = 1 - Math.hypot(pdx, pdy) / pr
-        if (sy < iy + 14) {
-          const wl = 1.5 * riverHwAt(sy) + 6
-          const lat = Math.abs(sx - riverXAt(sy))
-          const lane = lat < wl * 0.6 ? 0.95 : 0.95 * clamp01((wl * 1.15 - lat) / (wl * 0.55))
-          const lg = lane * (1 - sm((sy - iy) / 14))
-          if (lg > phi) phi = lg
-        }
-        const farK = clamp01(1 - (sy - topY) / lake.vis)
-        const side = 0.35 + 0.65 * clamp01((sx - (lake.cx - lake.rx)) / (2 * lake.rx))
-        const grp = hn > 0.26 || phi > -0.2 || dpx > -1.5 ? grpNear : grpFar
-        grp.n++
-        grp.off.push(o4)
-        // a slow warp laid on the plane, so the seams bend and wander and the cells do not read as a honeycomb
+        data[o4 + 3] = 255 * clamp01(sy - gt + 0.5) // the ground's own top edge, one soft px
+        // px to the lake's far shore: negative on the lake's bed
+        const dpx = FS[i] - sy
+        // the ground, cold: old lava. Basalt plates, each a different grey, with dark cracks between some of them; it
+        // darkens toward the viewer, as the old flat ground did. What the lava lights on it is added in the pass, from
+        // the same cracks.
         const wu = 0.15 * (vnoise(sx / 120 + 31, sy / 34 + 7) - 0.5) * 2 + 0.06 * (vnoise(sx / 34 + 3, sy / 9 + 19) - 0.5) * 2
         const wvv = 0.15 * (vnoise(sx / 120 + 8, sy / 34 + 41) - 0.5) * 2 + 0.06 * (vnoise(sx / 34 + 27, sy / 9 + 5) - 0.5) * 2
-        grp.ua.push((sx - lake.cx) / Wc + wu)
-        grp.va.push(vv + wvv)
-        grp.iw.push(1 / (Wc * Wc))
-        grp.ih.push(1 / (Hc * Hc))
+        const uu = (sx - w / 2) / Wc + wu
+        const vp = vv + wvv
+        const iw2 = 1 / (Wc * Wc)
+        const ih2 = 1 / (Hc * Hc)
+        crustAt(uu, vp, iw2, ih2)
+        const ep0 = PLATE[0]
+        const rk0 = PLATE[2]
+        const seen = clamp01((0.62 - rk0) * 6 + 0.5)
+        let bev = 1 - ep0 / 6
+        bev = bev > 0 ? bev * bev * 3 * seen : 0
+        const nearK = clamp01((sy - gt) / (h - gt))
+        const gr = hash2(i * 3 + 11, j * 7 + 5) * 2 - 1
+        const grey = (13 + 10 * PLATE[1] + gr * 2 + 1.5 * vnoise(sx * 0.07 + 7, sy * 0.14 + 2) + bev) * (1 - 0.55 * clamp01(1.4 - ep0) * seen) * (1 - 0.5 * nearK)
+        const cool = 0.5 * (1 - nearK)
+        const dr = grey - 1.5 * cool
+        const dg = grey * 0.965 + 1.5 * cool
+        const db = grey * 0.985 + 4 * cool
+        if (dpx > RIMW) {
+          // ground the lava never comes near: painted once
+          data[o4] = dr
+          data[o4 + 1] = dg
+          data[o4 + 2] = db
+          continue
+        }
+        const dxs = (sx - ix) / Rh
+        const hn = 0.95 * Math.exp(-(dxs * dxs + dys * dys))
+        // the lit lip: a thin line along the rock's edge, brightest where the river crosses the shore
+        const dm = Math.exp(-(((sx - mx0) / (Rh * 0.95)) ** 2) - ((sy - my0) / (Rh * 1.3)) ** 2)
+        // the pool: the stream's own ellipse, ragged by angle, joined to a lane as wide as the channel so the river's
+        // last stretch lies on open lava from the shore on. It is always lava, whatever the level.
+        let w0 = 0
+        if (dpx < 0.5) {
+          const pdx = (sx - ix) / poolRx
+          const pdy = (sy - pcy) / poolRy
+          const pa = Math.atan2(pdy, pdx)
+          const pr =
+            1 + 0.3 * (vnoise(Math.cos(pa) * 1.7 + 11, Math.sin(pa) * 1.7 + 4) - 0.5) * 2 + 0.1 * (vnoise(Math.cos(pa) * 5 + 2, Math.sin(pa) * 5 + 9) - 0.5) * 2
+          let phi = 1 - Math.hypot(pdx, pdy) / pr
+          if (sy < iy + 14) {
+            const wl = 1.5 * riverHwAt(sy) + 6
+            const lat = Math.abs(sx - riverXAt(sy))
+            const lane = lat < wl * 0.6 ? 0.95 : 0.95 * clamp01((wl * 1.15 - lat) / (wl * 0.55))
+            const lg = lane * (1 - sm((sy - iy) / 14))
+            if (lg > phi) phi = lg
+          }
+          if (phi > -0.3) {
+            crustAt(uu * PLATE_B + 17.3, vp * PLATE_B + 29.1, iw2 * PLATE_B * PLATE_B, ih2 * PLATE_B * PLATE_B)
+            w0 = clamp01((phi - (0.06 + 0.42 * PLATE[1])) * 14 + 0.5)
+          }
+        }
+        // the fill order, and how many px the front moves for one unit of it (so the front is one soft px wide). The
+        // strip of ground between the rock and the shore takes the shore's own, so it lights when the lava arrives.
+        const js = dpx > 0.5 ? Math.min(lh - 1, Math.max(j, Math.round((FS[i] + 1 - y0) * S - 0.5))) : j
+        const fi = js * lw + i
+        const F = FG[fi]
+        const Fx = FG[i + 1 < lw ? fi + 1 : fi - 1] - F
+        const Fy = FG[js + 1 < lh ? fi + lw : fi - lw] - F
+        // where this pixel looks in the lake's fire: how far it is from the mouth over the ground, and on what bearing
+        // (how far out from the shore, not how far down the screen: the shore wanders, and pixels above the mouth's own
+        // height all looked along one bearing, which striped them)
+        const dxf = sx - mx0
+        const dyf = Math.max(0, -dpx) * LAKE_KY
+        const rad = Math.hypot(dxf, dyf)
+        if (dpx < 0.5 && rad > rMax) rMax = rad
+        grp.off.push(o4)
+        grp.fl.push(F)
+        grp.ig.push(1 / Math.max(1e-6, Math.hypot(Fx, Fy)))
+        grp.dpx.push(dpx)
+        grp.w0.push(w0)
+        grp.lipn.push(0.55 + 0.45 * vnoise(sx * 0.08 + 4, sy * 0.1 + 6))
+        grp.liph.push(0.05 + 0.95 * dm * dm)
+        grp.ep0.push(ep0)
+        grp.rk0.push(rk0)
         grp.hn.push(hn)
-        grp.phi.push(phi)
-        grp.gr.push(hash2(i * 3 + 11, j * 7 + 5) * 2 - 1)
-        const f1 = TAU * 1.6 * vnoise(sx * 0.012 + 3.1, sy * 0.034 + 1.7)
-        const f2 = TAU * 1.4 * vnoise(sx * 0.07 + 7, sy * 0.14 + 2)
-        grp.p1c.push(Math.cos(f1))
-        grp.p1s.push(Math.sin(f1))
-        grp.p2c.push(Math.cos(f2))
-        grp.p2s.push(Math.sin(f2))
-        grp.cool.push((0.25 + 0.75 * farK) * side * clamp01(1 - hn * 2))
-        grp.shore.push(clamp01(-dpx / 7))
+        // what a pixel's colour gets besides the fire's heat, in palette steps: a white-gold heart where the river
+        // pours in, and a chilled margin where the lake lies against its shore (not at the mouth)
+        // (not along the brim: there is no rock there to chill it; the lava thins as it goes over, and burns brighter)
+        grp.po.push((hn > 0.35 ? 9 * (hn - 0.35) : 0) + sm((dpx + 5) / 5) * (2.5 * BR[i] - 3 * (1 - dm) * (1 - BR[i])))
+        grp.fr.push(rad)
+        grp.fc.push(Math.atan2(dyf, dxf) / Math.PI)
+        grp.dr.push(dr)
+        grp.dg.push(dg)
+        grp.db.push(db)
       }
     }
-    const cat = (key, Type) => Type.from(grpNear[key].concat(grpFar[key]))
+    const n = grp.off.length
+    const DRY = new Uint8ClampedArray(n * 3)
+    for (let k = 0; k < n; k++) {
+      DRY[k * 3] = grp.dr[k]
+      DRY[k * 3 + 1] = grp.dg[k]
+      DRY[k * 3 + 2] = grp.db[k]
+    }
+    mark('groundPlatesAndLakeBed')
+    // ---- the fire. Rows run outward from the mouth (the last row is the source, at the mouth; row 0 is the lake's
+    // farthest point), columns are bearings (0 along the shore on the open side, the last along it on the mountain's).
+    const CELL = phone ? 2 : 2.4 // px of ground a row covers
+    const cols = phone ? 128 : 224
+    const rows = Math.max(24, Math.ceil(rMax / CELL) + 4)
+    const SRC = 22
+    const fire = new DoomFire(cols, rows, { maxHeat: SRC, variation: 1 })
+    const FR = Float32Array.from(grp.fr, (r) => Math.max(0, rows - 1 - r / CELL))
+    const FC = Float32Array.from(grp.fc, (c) => (lake.dir > 0 ? c : 1 - c) * (cols - 1))
+    // only the cells some pixel of the lake looks at are run: past the first third of the way out that is two thin
+    // fans along the ground, not the whole half-circle
+    const SLO = new Int16Array(rows).fill(cols)
+    const SHI = new Int16Array(rows).fill(-1)
+    for (let k = 0; k < n; k++) {
+      if (grp.dpx[k] >= 0.5) continue
+      const y = Math.round(FR[k])
+      for (let yy = Math.max(1, y - 1); yy <= Math.min(rows - 1, y + 2); yy++) {
+        SLO[yy] = Math.min(SLO[yy], Math.max(0, Math.floor(FC[k]) - 3))
+        SHI[yy] = Math.max(SHI[yy], Math.min(cols - 1, Math.ceil(FC[k]) + 3))
+      }
+    }
+    // The mean heat wanted on the way out, as [fraction, heat]: the river's last heat at the mouth, deep red at the
+    // far point. Its slope is the chance of losing a step per row.
+    const target = [[0, SRC], [0.05, 19.5], [0.22, 16.5], [0.55, 12.5], [1, 8]].map(([s, v]) => [s, v * lakeHeatT])
+    const lose = new Float32Array(rows)
+    const mean = new Float32Array(rows) // where a cell settles if nothing crusts it
+    const heal = new Float32Array(rows) // the chance a crusted cell takes back two steps of heat this row
+    const speck = new Float32Array(rows) // the chance a cell crusts over this row
+    const jit = new Float32Array(rows) // the chance a cell wanders a bearing this row: a bearing is wide far out
+    for (let y = 0; y < rows; y++) {
+      const s = 1 - y / (rows - 1)
+      let k = 1
+      while (k < target.length - 1 && target[k][0] < s) k++
+      lose[y] = Math.min(0.95, (target[k - 1][1] - target[k][1]) / (target[k][0] - target[k - 1][0]) / (rows - 1))
+      mean[y] = lerp(target[k - 1][1], target[k][1], clamp01((s - target[k - 1][0]) / (target[k][0] - target[k - 1][0]))) - 2
+      heal[y] = 0.4 - 0.26 * s // a speck lives a few rows by the mouth and a long way at the far point
+      speck[y] = (0.006 + 0.022 * s) * (crustK / 0.3)
+      jit[y] = Math.min(1, 140 / Math.max(1, (rows - 1 - y) * CELL))
+    }
+    const step = () => {
+      const cells = fire.cells
+      for (let y = 1; y < rows; y++) {
+        // (this row feeds the next one out, so it runs wherever either of them is looked at)
+        const lo = Math.min(SLO[y], SLO[y - 1])
+        const hi = Math.max(SHI[y], SHI[y - 1])
+        if (hi < lo) continue
+        const row = y * cols
+        const above = row - cols
+        const p = lose[y]
+        const settle = mean[y] - 2.5
+        const hl = heal[y]
+        const sp = speck[y]
+        const pj = jit[y]
+        for (let x = lo; x <= hi; x++) {
+          let dx = x
+          if (Math.random() < pj) {
+            dx += ((Math.random() * 3) | 0) - 1
+            if (dx < 0) dx = 0
+            else if (dx >= cols) dx = cols - 1
+          }
+          let next = cells[row + x] - (Math.random() < p ? 1 : 0)
+          if (next < settle) {
+            // crust, and it heals from beneath
+            if (Math.random() < hl) next += 2
+          } else if (Math.random() < sp) {
+            // a speck two cells wide where it can be
+            next = 2 + ((Math.random() * 6) | 0)
+            cells[above + (dx + 1 < cols ? dx + 1 : dx)] = next
+          }
+          cells[above + dx] = next > 0 ? next : 0
+        }
+      }
+    }
+    // already burning when the page opens: every cell starts near where it would settle, then the fire runs a while
+    // to find its grain (running it from cold would take as many steps as the lake has rows)
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) fire.cells[y * cols + x] = Math.max(0, Math.round(mean[y] + (Math.random() - 0.5) * 4))
+    }
+    for (let i = 0; i < 12; i++) {
+      fire.stokeCoals(i * 0.17, 0.3, 0.6)
+      step()
+    }
     return {
       x0, y0, S, lw, lh,
       cv: surf.cv,
       g: surf.g,
       img,
       lut,
-      n: grpNear.n + grpFar.n,
-      nNear: grpNear.n,
-      OFF: cat('off', Int32Array),
-      UA: cat('ua', Float32Array),
-      VA: cat('va', Float32Array),
-      IW2: cat('iw', Float32Array),
-      IH2: cat('ih', Float32Array),
-      HN: cat('hn', Float32Array),
-      PHI: cat('phi', Float32Array),
-      GR: cat('gr', Float32Array),
-      P1C: cat('p1c', Float32Array),
-      P1S: cat('p1s', Float32Array),
-      P2C: cat('p2c', Float32Array),
-      P2S: cat('p2s', Float32Array),
-      COOL: cat('cool', Float32Array),
-      SHORE: cat('shore', Float32Array),
-      EOFF: Int32Array.from(edge.off),
-      ER: Float32Array.from(edge.r),
-      EG: Float32Array.from(edge.g),
-      EB: Float32Array.from(edge.b),
+      mx: mx0,
+      reachM,
+      reachD,
+      n,
+      OFF: Int32Array.from(grp.off),
+      FL: Float32Array.from(grp.fl),
+      IG: Float32Array.from(grp.ig),
+      DPX: Float32Array.from(grp.dpx),
+      W0: Float32Array.from(grp.w0),
+      LIPN: Float32Array.from(grp.lipn),
+      LIPH: Float32Array.from(grp.liph),
+      EP0: Float32Array.from(grp.ep0),
+      RK0: Float32Array.from(grp.rk0),
+      HN: Float32Array.from(grp.hn),
+      PO: Float32Array.from(grp.po),
+      FR,
+      FC,
+      DRY,
+      fire,
+      step,
+      rows,
+      cols,
+      SLO,
+      SHI,
+      SRC,
+      prev: new Uint8Array(fire.cells),
+      heat: new Float32Array(cols * rows),
       done: false,
-      par: 0,
-      t: 0,
+      facc: 0,
+      pacc: 0,
       fl: 0,
+      lv: -1,
     }
   })()
-  /**
-   * One pass over the water's pixels: all of those by the inlet (they have the most going on), and every other one of
-   * the rest (`par` picks which half; the crust far out moves under a px a second, so the half that waits is never
-   * more than a fraction of a px behind).
-   */
-  const lakePass = (t, flare, par) => {
+  /** Where the flooded part of the lake ends, left and right, at a level: [x0, x1] in screen px. */
+  const lakeSpan = (level) => {
+    const fL = Math.sqrt(clamp01(level))
+    const B = lakeBox
+    const a = B.mx - fL * (lake.dir > 0 ? B.reachM : B.reachD)
+    const b = B.mx + fL * (lake.dir > 0 ? B.reachD : B.reachM)
+    return [Math.max(0, a), Math.min(w, b)]
+  }
+  /** One pass over the lake's bed and the strip of ground along its shore. */
+  const lakePass = (flare, level) => {
     const B = lakeBox
     const data = B.img.data
     const lut = B.lut
-    const { OFF, UA, VA, IW2, IH2, HN, PHI, GR, P1C, P1S, P2C, P2S, COOL, SHORE } = B
-    const nNear = B.nNear
-    const hk = 1 + 0.4 * flare // an eruption lights the whole lake
-    const dv = t * DRIFT
-    const s1 = Math.sin(t * 0.62)
-    const c1 = Math.cos(t * 0.62)
-    const s2 = Math.sin(t * 1.55)
-    const c2 = Math.cos(t * 1.55)
-    const nUpd = nNear + ((B.n - nNear - par + 1) >> 1)
-    for (let q = 0; q < nUpd; q++) {
-      const k = q < nNear ? q : nNear + par + ((q - nNear) << 1)
-      const hn = HN[k] * hk
-      const iw2 = IW2[k]
-      const ih2 = IH2[k]
-      const u = UA[k]
-      const v = VA[k] - dv
-      crustAt(u, v, iw2, ih2)
-      const ep = PLATE[0]
-      let tone = PLATE[1]
-      const hs = hn * 2.2 > 1 ? 1 : hn * 2.2
-      // a seam only shows if its rank is under a line that rises toward the inlet: far out, only some of the seams show,
-      // and the old crust reads as big plates
-      let wv = (0.16 + 0.84 * hs - PLATE[2]) * 6 + 0.5
-      wv = wv < 0 ? 0 : wv > 1 ? 1 : wv
-      // the seam: an antialiased line whose half-width is a little under a px far out and 2 px by the inlet, and a soft
-      // glow bleeding onto the plate edges
-      let core = 0
-      let gl = 0
-      if (wv > 0.004) {
-        core = 0.92 + 1.4 * hn - ep
-        core = core < 0 ? 0 : core > 1 ? 1 : core
-        core *= wv * (0.4 + 0.6 * hs) // far out the seams only smoulder
-        gl = 1 - ep / (2.4 + 5 * hn)
-        gl = gl > 0 ? gl * gl * wv * (0.12 + 0.55 * hn) : 0
-      }
-      let lf = 0
-      if (k < nNear) {
-        // by the inlet the crust breaks into small fresh plates, and the pool's edge is eaten by them
-        crustAt(u * PLATE_B + 17.3, v * PLATE_B + 29.1, iw2 * PLATE_B * PLATE_B, ih2 * PLATE_B * PLATE_B)
-        const toneB = PLATE[1]
-        let wb = (hn - 0.26) * 4
-        wb = wb < 0 ? 0 : wb > 1 ? 1 : wb
-        if (wb > 0) {
-          const epB = PLATE[0]
-          let wvB = (0.55 + 0.45 * (hn * 1.6 > 1 ? 1 : hn * 1.6) - PLATE[2]) * 6 + 0.5
-          wvB = wvB < 0 ? 0 : wvB > 1 ? 1 : wvB
-          wvB *= wb
-          if (wvB > 0.004) {
-            let coreB = 0.9 + 1.1 * hn - epB
-            coreB = coreB < 0 ? 0 : coreB > 1 ? 1 : coreB
-            coreB *= wvB
-            let glB = 1 - epB / (2.4 + 5 * hn)
-            glB = glB > 0 ? glB * glB * wvB * (0.12 + 0.55 * hn) : 0
-            if (coreB > core) core = coreB
-            if (glB > gl) gl = glB
+    const { OFF, FL, IG, DPX, W0, LIPN, LIPH, EP0, RK0, HN, PO, FR, FC, DRY, heat, rows, cols, n } = B
+    const hk = 1 + 0.4 * flare // an eruption lights the ground round the pool a little more
+    const full = level >= 0.999
+    const none = level <= 0.0005
+    const lipGain = 0.75 + 0.25 * Math.min(1.5, 1 + 0.4 * flare)
+    const freshK = 1 - sm((level - 0.9) / 0.1) // nothing is fresh once the lake is full
+    for (let k = 0; k < n; k++) {
+      // px to the lava's edge, negative under the lava: the front, or the shore where the front has passed it
+      const fp = full ? -99 : none ? 99 : (FL[k] - level) * IG[k]
+      const dpx = DPX[k]
+      const e = fp > dpx ? fp : dpx
+      const wl = e <= -0.5 ? 1 : e >= 0.5 ? 0 : 0.5 - e
+      const w0 = W0[k]
+      const wet = wl > w0 ? wl : w0
+      const hn = HN[k]
+      let r = 0
+      let g = 0
+      let b = 0
+      if (wet < 1) {
+        // dry ground. Near the lava (the front, or the pool) it is lit warm and its old cracks glow again.
+        const k3 = k * 3
+        r = DRY[k3]
+        g = DRY[k3 + 1]
+        b = DRY[k3 + 2]
+        let hd = e < 90 ? 0.85 * Math.exp(-(e > 0 ? e : 0) / 20) : 0
+        if (hn * hk > hd) hd = hn * hk
+        if (hd > 0.02) {
+          const wm = hd > 1 ? 1 : hd
+          r += 34 * wm
+          g += 9 * wm
+          b += 3 * wm
+          const hs = hd * 2.2 > 1 ? 1 : hd * 2.2
+          let wv = (0.16 + 0.84 * hs - RK0[k]) * 6 + 0.5
+          wv = wv < 0 ? 0 : wv > 1 ? 1 : wv
+          if (wv > 0.004) {
+            const ep = EP0[k]
+            let core = 0.92 + 1.4 * hd - ep
+            core = core < 0 ? 0 : core > 1 ? 1 : core
+            core *= wv * (0.4 + 0.6 * hs)
+            let gl = 1 - ep / (2.4 + 5 * hd)
+            gl = gl > 0 ? gl * gl * wv * (0.12 + 0.55 * hd) : 0
+            if (core > 0.004 || gl > 0.004) {
+              let li = ((3.6 + 17 * hd) * 8) | 0
+              li = (li > 319 ? 319 : li) * 3
+              const sr = lut[li]
+              const sg = lut[li + 1]
+              const sb = lut[li + 2]
+              r += gl * sr * 0.5
+              g += gl * sg * 0.5
+              b += gl * sb * 0.5
+              r += (sr - r) * core
+              g += (sg - g) * core
+              b += (sb - b) * core
+            }
           }
-          tone += (toneB - tone) * wb
-        }
-        const phi = PHI[k]
-        if (phi > -0.3) {
-          lf = (phi - (0.06 + 0.42 * toneB)) * 14 + 0.5
-          lf = lf < 0 ? 0 : lf > 1 ? 1 : lf
         }
       }
-      const gr = GR[k]
-      // the plate: basalt, each one a different grey, a touch lighter than the ground round the lake (a faint lit edge
-      // where the seam's glow would catch it, and a slow mottle from the shimmer's phase); warm by the inlet, a cool
-      // sheen far off on the moon's side, and dark where it meets the shore
-      let bev = 1 - ep / 6
-      bev = bev > 0 ? bev * bev * 4 * wv : 0
-      let r = 19 + 13 * tone + gr * 2.4 + 1.8 * P2C[k] + bev
-      let g = r * 0.965
-      let b = r * 0.985
-      const wm = hn > 1 ? 1 : hn
-      const cw = COOL[k]
-      r += 34 * wm - 3 * cw
-      g += 9 * wm + 2.5 * cw
-      b += 3 * wm + 9 * cw
-      const dark = 0.55 + 0.45 * SHORE[k]
-      r *= dark
-      g *= dark
-      b *= dark
-      if (core > 0.004 || gl > 0.004) {
-        // heat in the seam, on the fire's own scale: dull red far out, orange to gold toward the inlet; it breathes
-        const T = (3.6 + 17 * hn) * (1 + 0.16 * (s1 * P1C[k] + c1 * P1S[k]))
+      if (wet > 0) {
+        // the lava: the fire's heat here, as the river reads it
+        const fr0 = FR[k]
+        const fc0 = FC[k]
+        const r0 = fr0 | 0
+        const c0 = fc0 | 0
+        const fr = fr0 - r0
+        const fc = fc0 - c0
+        const ra = r0 * cols
+        const rb = (r0 + 1 < rows ? r0 + 1 : r0) * cols
+        const c1 = c0 + 1 < cols ? c0 + 1 : c0
+        const top = heat[ra + c0] + (heat[ra + c1] - heat[ra + c0]) * fc
+        const bot = heat[rb + c0] + (heat[rb + c1] - heat[rb + c0]) * fc
+        let T = top + (bot - top) * fr + PO[k] + 2 * flare * hn
+        // lava that has only just come over the ground runs hotter than the lake behind it
+        if (wl > 0 && !full) {
+          const age = level - FL[k]
+          if (age < 0.05) T += 4 * (age > 0 ? 1 - age / 0.05 : 1) * freshK * (1 - hn)
+        }
         let li = (T * 8) | 0
-        li = (li > 319 ? 319 : li) * 3
-        const sr = lut[li]
-        const sg = lut[li + 1]
-        const sb = lut[li + 2]
-        r += gl * sr * 0.5
-        g += gl * sg * 0.5
-        b += gl * sb * 0.5
-        r += (sr - r) * core
-        g += (sg - g) * core
-        b += (sb - b) * core
+        li = (li > 319 ? 319 : li < 0 ? 0 : li) * 3
+        if (wet >= 1) {
+          r = lut[li]
+          g = lut[li + 1]
+          b = lut[li + 2]
+        } else {
+          r += (lut[li] - r) * wet
+          g += (lut[li + 1] - g) * wet
+          b += (lut[li + 2] - b) * wet
+        }
       }
-      if (lf > 0) {
-        // open lava: the river's own heat where the stream comes in, cooling outward; it shimmers
-        const hq = hn > 1.05 ? 1.05 : hn
-        const To = 5.5 + 14 * hq * hq + 1.8 * (s2 * P2C[k] + c2 * P2S[k]) + 1 * gr + 3 * flare
-        let lo = (To * 8) | 0
-        lo = (lo > 319 ? 319 : lo < 0 ? 0 : lo) * 3
-        r += (lut[lo] - r) * lf
-        g += (lut[lo + 1] - g) * lf
-        b += (lut[lo + 2] - b) * lf
+      // the lit lip: a hairline on the rock right at the lava's edge, and a little of its light beyond
+      if (e > -3 && e < 7 && (w0 < 0.5 || dpx > -3)) {
+        const lh = LIPH[k] > FRONT_HEAT ? LIPH[k] : FRONT_HEAT
+        const x = (e - 0.9) / 1.3
+        const y = (e - 1.6) / 4.5
+        const la = (Math.exp(-x * x) * LIPN[k] * (0.3 + 0.7 * lh) + Math.exp(-y * y) * 0.2 * lh * lh) * lipGain
+        const li = Math.min(319, ((3.5 + 17 * lh) * 8) | 0) * 3
+        r += lut[li] * la
+        g += lut[li + 1] * la
+        b += lut[li + 2] * la
       }
       const o4 = OFF[k]
       data[o4] = r
@@ -2073,31 +2649,103 @@ export function createScene(w, h, o = {}) {
       data[o4 + 2] = b
     }
   }
-  const paintLake = (t, flare) => {
+  const LAKE_RATE = o.lakeRate ?? 6 // fire steps a second: half the river's, the lava slows on flat ground
+  const paintLake = (t, flare, level, secs) => {
     const B = lakeBox
-    // about three repaints a second: the crust drifts and breathes slowly (a px a second at most), and between repaints
-    // the last image stands. A flare repaints at once.
-    if (B.done && Math.abs(t - B.t) < 0.34 && Math.abs(flare - B.fl) < 0.12) return
-    if (!B.done) lakePass(t, flare, 1) // the very first one fills everything
-    lakePass(t, flare, B.par)
-    B.par ^= 1
-    B.done = true
-    B.t = t
-    B.fl = flare
-    // the lit lip on the water's own edge (the rim's is in the image already)
-    const data = B.img.data
-    const lip = 0.75 + 0.25 * Math.min(1.5, 1 + 0.4 * flare)
-    for (let e = 0; e < B.EOFF.length; e++) {
-      const o4 = B.EOFF[e]
-      data[o4] += B.ER[e] * lip
-      data[o4 + 1] += B.EG[e] * lip
-      data[o4 + 2] += B.EB[e] * lip
+    // An eruption reaches the lake as a slow swell, not a flash.
+    B.fl += (flare - B.fl) * (B.done && secs > 0 ? 1 - Math.exp(-secs / 0.8) : 0)
+    // the fire
+    B.facc += secs * LAKE_RATE * lakeFlow
+    let stepped = false
+    for (let guard = 0; B.facc >= 1 && guard < 3; guard++) {
+      B.facc -= 1
+      B.prev.set(B.fire.cells)
+      B.fire.maxHeat = B.SRC + 2 * B.fl
+      B.fire.stokeCoals(t, 0.3 * (1 - B.fl), 0.6)
+      B.step()
+      stepped = true
     }
+    if (B.facc > 1) B.facc = 1
+    // The picture: about twenty times a second (the lava is slow), and at once for a new scene or a level that jumps.
+    B.pacc += secs
+    if (B.done && B.pacc < 0.045 && Math.abs(level - B.lv) < 0.0004 && !stepped) return
+    B.pacc = 0
+    const { heat, prev, rows, cols, SLO, SHI } = B
+    const cur = B.fire.cells
+    const a = B.facc
+    for (let y = 0; y < rows; y++) {
+      // (a row's cells are read by the pixels of the rows either side of it too)
+      const lo = Math.min(SLO[y], y + 1 < rows ? SLO[y + 1] : cols)
+      const hi = Math.max(SHI[y], y + 1 < rows ? SHI[y + 1] : -1)
+      for (let i = y * cols + lo, end = y * cols + hi; i <= end; i++) heat[i] = prev[i] + (cur[i] - prev[i]) * a
+    }
+    lakePass(B.fl, level)
+    B.done = true
+    B.lv = level
     B.g.putImageData(B.img, 0, 0)
   }
 
+  mark('lakeFire')
   // ---------------------------------------------------------------- moving things
   const glow = makeGlow()
+  // Where the lake goes over the edge (the brim), what lies below is never drawn: its light is. A glow comes up from
+  // under the edge and grows as the lava gathers down there, as if a second lake were filling; it backlights the
+  // mountain's foot beside it, and it lights the fog.
+  const overEdge = (() => {
+    if (!lake.brim) return null
+    const x = (lake.brim.x0 + lake.brim.x1) / 2
+    const y = groundTopAt(x)
+    return { x, y, glowX: x, glowY: y + 0.03 * h }
+  })()
+  // Fog: banks of volcanic haze that lie low along the horizon and drift with the wind, behind the mountain and a
+  // little in front of its foot. Each is a baked sprite in two layers, as the plume's puffs are: a grey-brown body
+  // that sits just above the sky, and the same shape in forge orange, weighted to its underside, laid on top wherever
+  // lava lights it from beneath (the lake, and above all the light under the spill). Tuner `fog`: how thick.
+  const fogK = Math.max(0, Math.min(2, tn.fog ?? 1)) * (quietFar ? 0.6 : 1)
+  const fogTex = (() => {
+    const W = 256
+    const Hh = 96
+    const make = (sd) => {
+      const r = mulberry32(sd)
+      const blobs = Array.from({ length: 24 }, () => {
+        const rx = 0.1 + r() * 0.2
+        const ry = 0.08 + r() * 0.14
+        return { x: rx + r() * (1 - 2 * rx), y: ry + r() * (1 - 2 * ry), rx, ry, a: 0.22 + r() * 0.38 }
+      })
+      const layer = (rgb, under) => {
+        const { cv, g } = makeCanvas(W, Hh)
+        for (const b of blobs) {
+          const k = under ? clamp01(0.3 + (b.y - 0.5) * 2.4) : 1
+          g.save()
+          g.translate(b.x * W, b.y * Hh)
+          g.scale(b.rx * W, b.ry * Hh)
+          const grd = g.createRadialGradient(0, 0, 0, 0, 0, 1)
+          grd.addColorStop(0, `rgba(${rgb},${(b.a * k).toFixed(3)})`)
+          grd.addColorStop(0.55, `rgba(${rgb},${(b.a * k * 0.55).toFixed(3)})`)
+          grd.addColorStop(1, `rgba(${rgb},0)`)
+          g.fillStyle = grd
+          g.beginPath()
+          g.arc(0, 0, 1, 0, TAU)
+          g.fill()
+          g.restore()
+        }
+        return cv
+      }
+      return { body: layer('112,94,84', false), warm: layer('255,126,54', true) }
+    }
+    return [make(0x71), make(0x72), make(0x73)]
+  })()
+  const fogBank = (yLo, yHi, hLo, hHi, i) => ({
+    x: rand(-0.3, 1.05) * w,
+    y: shoreY - rand(yLo, yHi) * h,
+    w: (phone ? rand(0.6, 1.1) : rand(0.24, 0.46)) * w,
+    h: rand(hLo, hHi) * h,
+    v: rand(1.5, 5),
+    tex: i % 3,
+    a: rand(0.5, 1),
+  })
+  const fogBack = Array.from({ length: phone ? 7 : 14 }, (_, i) => fogBank(0.0, 0.16, 0.07, 0.15, i))
+  const fogFront = Array.from({ length: phone ? 2 : 4 }, (_, i) => fogBank(0, 0.05, 0.07, 0.11, i + 1))
   // The plume's puffs, baked once: three lumpy shapes, each in two layers. The body is a grey-brown that sits just
   // above the sky; the warm layer is the same shape in forge orange, weighted to the underside, and is added on top
   // for the first third of the column, where the breach lights it from beneath.
@@ -2149,16 +2797,20 @@ export function createScene(w, h, o = {}) {
     const roll = Math.random()
     let x
     let y
-    if (roll < 0.55) {
+    // the lake's share grows with the lake: a pool throws a few sparks, a full basin a good many
+    const lakeShare = 0.1 + 0.2 * Math.sqrt(curLevel)
+    if (roll < 0.7 - lakeShare) {
       x = breach.x + rand(-0.2, 0.2) * ch
       y = breach.y - rand(0, 0.3) * ch
-    } else if (roll < 0.85) {
+    } else if (roll < 1 - lakeShare) {
       const fr = riverAt(Math.random())
       x = fr.x + rand(-1, 1) * fr.hw
       y = fr.y
     } else {
-      x = river.inlet.x + rand(-0.4, 0.5) * lake.rx * 0.5
-      y = river.inlet.y + rand(4, 26)
+      // anywhere on the flooded part, a little in from its ends
+      const [a, b] = lakeSpan(Math.max(curLevel, 0.04))
+      x = lerp(a, b, 0.5 + rand(-0.44, 0.44))
+      y = lakeTopAt(x) + rand(2, groundH * 0.5)
     }
     const big = Math.random() < 0.07
     const e = {
@@ -2195,6 +2847,7 @@ export function createScene(w, h, o = {}) {
   let sparks = []
   let spits = []
   let flare = 0
+  let lastBreathe = 0.6
   // Where reading text sits behind a bright thing, the thing dims. `k` is the lowest `env.calm` over the thing (1 clear,
   // about 0.1 right under text) and `floor` the least light it keeps. The factors ease, so a drifting moon or a page
   // that is measured again never makes the light pop.
@@ -2204,29 +2857,135 @@ export function createScene(w, h, o = {}) {
   let breachK = 1 // the breach's light factor: the glow, the crown walls' light and the plume's warm underside
   let dimPrimed = false // the first frame takes its target at once, so a new scene does not fade in from full light
 
-  const erupt =(scale = 1) => {
-    const n = Math.round(rand(10, 30) * scale)
-    for (let i = 0; i < n; i++) {
-      const speed = rand(2.2, 6.5)
-      const angle = -Math.PI / 2 + rand(-0.45, 0.5)
-      sparks.push({ x: breach.x + rand(-0.15, 0.15) * ch, y: breach.y, px: 0, py: 0, vx: Math.cos(angle) * speed + 0.4, vy: Math.sin(angle) * speed, size: rand(0.9, 2.2), age: 0, life: rand(0.7, 2.4), alpha: rand(0.75, 1) })
+  // An eruption. It used to be a dozen thin sparks and half a second of glow, every few seconds: among the embers
+  // that drift up all the time it could not be told apart. Now it has a size. A small one (scale under about 1.3) is
+  // a spit: a short jet and a brief glow. A big one is an event:
+  //   - a fountain: lava thrown up out of the breach for a second or more, white-hot at the base, in a column that
+  //     opens as it climbs two or three crown heights, each clot arcing over and falling back red;
+  //   - a cloud: dark ash thrown up with it, behind the crown, lit orange from beneath at first, that swells, slows,
+  //     leans with the wind and thins out over several seconds;
+  //   - light: the breach flares and stays up for a second or two, the sky round the crown takes it, and the river
+  //     runs hotter and faster off the breach.
+  // Everything is sized by the crown, so it is the same eruption on a phone.
+  let kick = 0 // flare still to come from the last eruption
+  let jets = [] // fountains in progress: { t, dur, scale, acc, rate }
+  let landed = [] // clots lying on the rock, cooling: { x, y, size, alpha, t, cool }
+  let clouds = [] // puffs of ash on their way up: { x, y, vx, vy, r, gr, age, life, wait, tex, k }
+  const GRAV = 6 // crown heights a second, each second
+  // `burst`: how long the fountain plays, against its usual length. In a Time of Trial the eruptions come every
+  // second or two, and at full length they ran into one another: there they are cut short (and thrown harder, with
+  // less ash each), so each is a burst with a gap after it.
+  const erupt = (scale = 1, burst = 1) => {
+    const big = scale >= 1.3
+    jets.push({ t: 0, dur: (big ? rand(0.9, 1.6) : rand(0.2, 0.4)) * burst, scale, acc: 3, rate: burst < 1 ? 1.5 : 1 })
+    // (the light is owed, and paid over the next few frames: it comes up fast but it does not flash)
+    kick = Math.max(kick, Math.min(1.6, 0.45 + 0.5 * scale) - flare)
+    const puffsUp = big ? Math.round(rand(4, 7) * (burst < 1 ? 0.5 : 1)) : Math.random() < 0.4 ? 1 : 0
+    for (let i = 0; i < puffsUp && clouds.length < 24; i++) {
+      clouds.push({
+        x: breach.x + rand(-0.3, 0.3) * ch,
+        y: breach.y - rand(0, 0.25) * ch,
+        vx: rand(0.1, 0.5) * ch,
+        vy: -rand(1.1, 2.1) * ch * Math.sqrt(Math.min(2.4, scale)),
+        r: rand(0.4, 0.65) * ch,
+        gr: rand(0.6, 1.05) * ch,
+        age: 0,
+        life: rand(4.5, 8),
+        wait: i * rand(0.08, 0.18),
+        tex: (Math.random() * 3) | 0,
+        k: big ? 1 : 0.55,
+      })
     }
-    flare = 1
+  }
+  /** The mountain's outline at x: the y where a clot coming down over it meets the rock (the ground line, off the mountain). */
+  const rockTopAt = (x) => {
+    if (Math.abs(x - peakX) <= rw) return rimY
+    const side = x < peakX ? left : right
+    for (let i = 1; i <= ROWS; i++) {
+      if ((side[i].x - x) * (x < peakX ? -1 : 1) >= 0) return Math.min(side[i].y, groundTopAt(x))
+    }
+    return groundTopAt(x)
+  }
+  /** One clot of lava off the breach. */
+  const throwClot = (scale) => {
+    const speed = ch * rand(2.4, 5.6) * Math.sqrt(Math.min(2.4, scale))
+    const angle = -Math.PI / 2 + (Math.random() + Math.random() - 1) * (0.2 + 0.12 * scale)
+    sparks.push({
+      x: breach.x + rand(-0.14, 0.14) * ch,
+      y: breach.y,
+      px: 0,
+      py: 0,
+      vx: Math.cos(angle) * speed + 0.12 * ch,
+      vy: Math.sin(angle) * speed,
+      size: rand(1.1, 2.6) * (scale >= 1.3 ? 1.25 : 1) * Math.max(0.7, ch / 80),
+      age: 0,
+      life: rand(1.6, 3.2),
+      alpha: rand(0.8, 1),
+      deep: rand(0.02, 0.22) * H, // how far down the face from the outline it comes to rest
+      // how long it takes to cool once it has landed: under a second from a spit, two to four from a big eruption
+      // (more lava in each clot, and it lies on the rock still molten)
+      cool: rand(0.5, 0.9) * (1 + 2.2 * Math.max(0, Math.min(2.4, scale) - 0.8)),
+    })
   }
 
   // ---------------------------------------------------------------- one frame
   function draw(ctx, t, dt, env = {}) {
     const secs = (dt * 16.7) / 1000
-    const calm = env.calm || (() => 1)
+    // `o.mirror`: the whole drawing is turned left for right (the mountain on the right, for the pages other than
+  // home). It is the same scene drawn through a flipped canvas, so it is the same mountain, and the same baked
+  // picture serves. Where the page's text is, is asked for in the page's own left and right.
+    const calm0 = env.calm || (() => 1)
+    const calm = o.mirror ? (x, y) => calm0(w - x, y) : calm0
     const phase = env.moonPhase ?? 0.42
+    // Prometheus and the Time of Trial: how stirred the mountain is. A trial keeps the breach aflame (the caller keeps
+    // it throwing).
+    const trial = clamp01(env.trial ?? 0)
+    const stir = excitement(phase, trial)
+    if (Number.isFinite(env.lakeLevel)) curLevel = clamp01(env.lakeLevel)
+    // How long the lake has been going over the edge, 0 to 1 (the caller owns it: it starts to rise when the lake is
+    // full). The light below grows with it.
+    const below = overEdge ? sm(clamp01(env.spill ?? 0)) : 0
+    // what lights the fog from beneath: the lake, and the light under the spill
+    const [fgx0, fgx1] = lakeSpan(curLevel)
+    const lakeMid = (fgx0 + fgx1) / 2
+    const lakeLight = 0.4 * Math.sqrt(curLevel)
+    const paintFog = (list, kBody, kWarm) => {
+      for (const b of list) {
+        b.x += b.v * secs
+        if (b.x > w + 20) b.x = -b.w - 20
+        const cx = b.x + b.w / 2
+        let lit = lakeLight * Math.exp(-(((cx - lakeMid) / (0.45 * w)) ** 2))
+        if (below > 0) lit += below * Math.exp(-(((cx - overEdge.glowX) / (0.26 * w)) ** 2))
+        const tx = fogTex[b.tex]
+        ctx.globalCompositeOperation = 'source-over'
+        ctx.globalAlpha = Math.min(1, kBody * b.a * fogK)
+        ctx.drawImage(tx.body, b.x, b.y - b.h / 2, b.w, b.h)
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.globalAlpha = Math.min(1, kWarm * b.a * fogK * (0.08 + 0.92 * Math.min(1, lit)) * steady)
+        ctx.drawImage(tx.warm, b.x, b.y - b.h / 2, b.w, b.h)
+      }
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.globalAlpha = 1
+    }
+    if (kick > 0) {
+      const add = kick * (secs > 0 ? 1 - Math.exp(-secs / 0.1) : 1)
+      flare += add
+      kick = kick - add < 0.01 ? 0 : kick - add
+    }
+    if (trial > 0.2 && flare < trial) flare = trial
     const breathe = 0.6 + Math.sin(t * 0.45) * 0.4
-    const heat = 0.78 + 0.22 * breathe + flare * 0.5
+    lastBreathe = breathe
+    const heat = 0.78 + 0.22 * breathe + flare * 0.5 + 0.2 * stir
+    // light that does not belong to the crater (under the spill, on the fog): it breathes slowly, and an eruption at the
+    // summit does not make it flash
+    const steady = 0.9 + 0.1 * Math.sin(t * 0.37)
     // how far a dimmed thing eases this frame; a frozen frame (dt 0) takes its target whole
     const dimStep = dimPrimed && dt > 0 ? 1 - Math.exp(-secs / DIM_EASE) : 1
     // the breach lights the sky and the crown right behind it: where text sits on it (the mountain on the left, under a
     // page header), that light steps back. The lowest of the breach and a point half a crater-width above it.
     breachK += (dimFor(Math.min(calm(breach.x, breach.y), calm(breach.x, breach.y - 0.5 * rw)), 0.25) - breachK) * dimStep
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    if (o.mirror) ctx.setTransform(-dpr, 0, 0, dpr, w * dpr, 0)
+    else ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.globalCompositeOperation = 'source-over'
     ctx.globalAlpha = 1
     if (L.sky) ctx.drawImage(sky.cv, 0, 0, w, h)
@@ -2235,20 +2994,43 @@ export function createScene(w, h, o = {}) {
       ctx.fillRect(0, 0, w, h)
     }
 
+    // Time of Trial: the weak sun is blotted out. A smooth veil over the sky and the far country, eased in and out,
+    // never a flash (the live site's own numbers). The moon is drawn over it, dimmed a little: it is the moon that
+    // brings the trial, and it must be seen to.
+    const veil = trial > 0.01 ? Math.min(0.7, 0.62 * trial) : 0
+    if (veil) {
+      ctx.globalAlpha = veil
+      ctx.fillStyle = '#0a0503'
+      ctx.fillRect(0, 0, w, h)
+      ctx.globalAlpha = 1
+    }
+
     // Prometheus, on the live site's own path across the sky
     if (L.moon) {
       const near = Math.sin(Math.PI * phase)
-      const scale = 0.55 + 0.6 * near * near
+      // In a Time of Trial it comes closer still, and the greater the trial the closer: a trial, a great trial, a
+      // cataclysm, each a step nearer. The disc swells by as much as the trial rages, so it comes in over the
+      // trial's rise, stands there while it holds, and draws off as it falls. (It keeps its height: lower, it would
+      // stand on the title.)
+      const scale = 0.55 + 0.6 * near * near + MOON_TRIAL * trial
       const mx = (-0.12 + 1.24 * phase) * w + (vnoise(t * 0.02, 3) - 0.5) * w * 0.02
       let my = (0.27 - 0.12 * near) * h + (vnoise(t * 0.017, 9) - 0.5) * h * 0.03
       const rad = (moon.r * scale) / 1.15
       if (my + rad > moonCeil) my = moonCeil - rad // stack layout only: the whole disc stays above the spire tip
       // behind reading text the disc dims: the lowest calm at its centre and on a ring at 0.6 of its radius
       const ring = rad * 0.6
-      const under = Math.min(calm(mx, my), calm(mx + ring, my), calm(mx - ring, my), calm(mx, my + ring), calm(mx, my - ring))
-      moonK += (dimFor(under, 0.3) - moonK) * dimStep
-      ctx.globalAlpha = 0.85 * (0.6 + 0.4 * near) * moonK
+      // (the moon is on every visitor's clock, so a mirrored page does not mirror it: it is drawn, and asks about the
+      // page's text, in the page's own left and right)
+      // (Not the top of the ring where it lies under the nav bar: the bar hides that part of the disc, and its links
+      // used to dim the whole moon at its closest pass, the one time it most needs to be seen. And in a Time of
+      // Trial it keeps more of its light even over text: it is what the trial is about.)
+      const top = my - ring > (env.navBottom ?? 0) ? calm0(mx, my - ring) : 1
+      const under = Math.min(calm0(mx, my), calm0(mx + ring, my), calm0(mx - ring, my), calm0(mx, my + ring), top)
+      moonK += (dimFor(under, 0.3 + 0.25 * trial) - moonK) * dimStep
+      ctx.globalAlpha = 0.85 * (0.6 + 0.4 * near) * moonK * (1 - 0.3 * veil)
+      if (o.mirror) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.drawImage(moon.cv, mx - rad, my - rad, rad * 2, rad * 2)
+      if (o.mirror) ctx.setTransform(-dpr, 0, 0, dpr, w * dpr, 0)
       ctx.globalAlpha = 1
     }
     dimPrimed = true
@@ -2260,7 +3042,7 @@ export function createScene(w, h, o = {}) {
       const N = PLUME_N
       // (on a phone the text sits just above the crown, so there the column is shorter and fainter)
       const rise = Math.min(Math.max(ch * 3, Math.min(breach.y - h * 0.12, ch * (phone ? 4.5 : 7.5))) * plumeReach, Math.max(ch * 3, breach.y - h * 0.05))
-      const quiet = (phone ? 0.6 : 1) * plumeK
+      const quiet = (phone ? 0.6 : 1) * plumeK * (1 + 0.5 * stir)
       const drift = Math.min(w * 0.2, rise * 0.55)
       for (let i = 0; i < N; i++) {
         const k = (i / N + t * 0.016) % 1
@@ -2291,32 +3073,126 @@ export function createScene(w, h, o = {}) {
       ctx.globalAlpha = 1
     }
 
+    // an eruption's cloud: ash thrown up behind the crown, lit from beneath while the fountain plays
+    for (let i = clouds.length - 1; i >= 0; i--) {
+      const c = clouds[i]
+      if (c.wait > 0) {
+        c.wait -= secs
+        continue
+      }
+      c.age += secs
+      if (c.age >= c.life) {
+        clouds.splice(i, 1)
+        continue
+      }
+      c.vy *= Math.exp(-1.9 * secs)
+      c.vx += 0.3 * ch * secs // the wind takes it
+      c.x += c.vx * secs
+      c.y += c.vy * secs
+      c.r += c.gr * secs * Math.exp(-0.45 * c.age)
+      const p = c.age / c.life
+      const show = sm(c.age / 0.18) * (1 - sm((p - 0.4) / 0.6)) * c.k
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.globalAlpha = Math.min(1, 0.85 * show)
+      ctx.drawImage(puffs[c.tex].body, c.x - c.r, c.y - c.r, c.r * 2, c.r * 2)
+      const lit = 1 - sm(c.age / 1.4)
+      if (lit > 0.02) {
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.globalAlpha = Math.min(1, 0.7 * show * lit) * breachK
+        ctx.drawImage(puffs[c.tex].warm, c.x - c.r, c.y - c.r, c.r * 2, c.r * 2)
+      }
+    }
+    // and the sky round the crown takes the flash
+    if (flare > 0.02) {
+      const fs = ch * (11 + 5 * flare)
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.globalAlpha = Math.min(0.3, 0.16 * flare) * breachK
+      ctx.drawImage(glow, breach.x - fs / 2, breach.y - fs * 0.62, fs, fs * 0.9)
+    }
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.globalAlpha = 1
+
     // the live far volcanoes: the pin of light baked into the notch gets a halo that breathes, very slowly
     if (L.ridges && far.lives.length) {
       ctx.globalCompositeOperation = 'lighter'
       for (const v of far.lives) {
-        ctx.globalAlpha = 0.14 + 0.16 * (0.5 + 0.5 * Math.sin(t * 0.35 + v.ph))
-        ctx.drawImage(glow, v.x - v.r * 1.6, v.y - v.r * 1.6, v.r * 3.2, v.r * 3.2)
+        // (in a Time of Trial the whole chain is alight: they flare with this one)
+        const vr = v.r * (1 + 0.6 * stir)
+        ctx.globalAlpha = Math.min(1, (0.14 + 0.16 * (0.5 + 0.5 * Math.sin(t * 0.35 + v.ph))) * (1 + 2 * stir))
+        ctx.drawImage(glow, v.x - vr * 1.6, v.y - vr * 1.6, vr * 3.2, vr * 3.2)
       }
       ctx.globalCompositeOperation = 'source-over'
       ctx.globalAlpha = 1
     }
 
+    // the nearest far hills, then what lies between them and the mountain: the fog, the light under the spill, and the
+    // fumes off it. The light falls on the hills' faces, so it reads as coming up from lower ground behind the mountain.
+    if (L.ridges) ctx.drawImage(hills.cv, 0, 0, w, h)
+    // the light under the spill: it comes up from below the edge of the shelf, behind the mountain's foot
+    if (below > 0.004) {
+      const sp = overEdge
+      const gw = w * 0.5
+      const gh = h * 0.46
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.globalAlpha = Math.min(1, 0.6 * below * steady)
+      ctx.drawImage(glow, sp.glowX - gw / 2, sp.glowY - gh / 2, gw, gh)
+      ctx.globalAlpha = Math.min(1, 0.8 * below * steady)
+      ctx.drawImage(glow, sp.glowX - gw * 0.2, sp.glowY - gh * 0.2 - 0.02 * h, gw * 0.4, gh * 0.4)
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.globalAlpha = 1
+    }
+    // the fog behind the mountain
+    if (L.fog && fogK > 0.01) paintFog(fogBack, 0.72, 0.8)
+
     // light thrown up out of the breach, behind the rock
     ctx.globalCompositeOperation = 'lighter'
-    const cs = ch * (6 + flare * 2)
+    const cs = ch * (6 + flare * 4)
     ctx.globalAlpha = Math.min(1, heat * 0.55) * breachK
     ctx.drawImage(glow, breach.x - cs / 2, breach.y - cs * 0.6, cs, cs * 0.9)
     ctx.globalCompositeOperation = 'source-over'
     ctx.globalAlpha = 1
 
     ctx.drawImage(land.cv, 0, 0, w, h)
+    // the light under the spill finds the edge of the mountain's foot from behind
+    if (below > 0.004) {
+      const sp = overEdge
+      const y0 = sp.y - 0.34 * h
+      const rimL = ctx.createLinearGradient(0, y0, 0, sp.y)
+      rimL.addColorStop(0, 'rgba(255,150,80,0)')
+      rimL.addColorStop(1, `rgba(255,150,80,${(0.6 * below).toFixed(3)})`)
+      ctx.beginPath()
+      let pen = false
+      for (const p of (lake.dir > 0 ? right : left).outline) {
+        if (p.y < y0 || p.y > sp.y + 4) continue
+        if (pen) ctx.lineTo(p.x, p.y)
+        else ctx.moveTo(p.x, p.y)
+        pen = true
+      }
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.strokeStyle = rimL
+      ctx.lineWidth = 1.8
+      ctx.stroke()
+      ctx.globalCompositeOperation = 'source-over'
+    }
 
     // the lake
+    // how much lava the basin holds: the caller's number (it owns the growth), or the scene's own if it sends none
+    if (Number.isFinite(env.lakeLevel)) curLevel = clamp01(env.lakeLevel)
     if (L.lake) {
-      paintLake(t, flare)
+      lakeFlow = 1 + 0.6 * stir
+      paintLake(t, flare, curLevel, secs)
       ctx.imageSmoothingEnabled = true
       const lb = lakeBox
+      // the whole flooded sheet lights the mountain's foot above it: a low wide glow, as wide as the lava is (under
+      // the basin's image, so the lava keeps its own colour)
+      const [gx0, gx1] = lakeSpan(curLevel)
+      const gw = (gx1 - gx0) * 1.5 + groundH
+      const gh = groundH * 2.6
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.globalAlpha = 0.09 * heat * (0.3 + 0.7 * Math.sqrt(curLevel))
+      ctx.drawImage(glow, (gx0 + gx1) / 2 - gw / 2, shoreY - gh * 0.55, gw, gh)
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.globalAlpha = 1
       // the basin: its rim, its water and the lit lip along the shore are all in the one image
       ctx.drawImage(lb.cv, lb.x0, lb.y0, lb.lw / lb.S, lb.lh / lb.S)
       // what it lights: the rock above the inlet
@@ -2356,7 +3232,7 @@ export function createScene(w, h, o = {}) {
       ctx.fill()
       ctx.restore()
       // the molten body: the Doom fire, laid along the channel
-      lava.paint(secs, t, flare)
+      lava.paint(secs * (1 + 0.5 * stir + 0.4 * Math.min(1, flare)), t, Math.min(1, flare), stir)
       ctx.drawImage(lava.cv, lava.x0, lava.y0)
       // just below the breach the margins shear against the banks and burn bright
       ctx.globalCompositeOperation = 'lighter'
@@ -2462,7 +3338,7 @@ export function createScene(w, h, o = {}) {
     ctx.globalAlpha = Math.min(1, heat * 0.9) * breachK
     ctx.drawImage(glow, breach.x - ms / 2, breach.y - ms * 0.42, ms, ms * 0.75)
     // lava spat up off the breach
-    if (spits.length < 14 && Math.random() < 0.16 * dt) spits.push({ x: breach.x + rand(-0.14, 0.14) * ch, y: breach.y, vx: rand(-0.7, 0.7) * (ch / 70), vy: -rand(1.4, 3.8) * (ch / 70), age: 0, life: rand(0.6, 1.5), size: rand(1.2, 2.8) })
+    if (spits.length < 14 + 10 * stir && Math.random() < 0.16 * dt * (1 + 2 * stir)) spits.push({ x: breach.x + rand(-0.14, 0.14) * ch, y: breach.y, vx: rand(-0.7, 0.7) * (ch / 70), vy: -rand(1.4, 3.8) * (ch / 70), age: 0, life: rand(0.6, 1.5), size: rand(1.2, 2.8) })
     for (let i = spits.length - 1; i >= 0; i--) {
       const s = spits[i]
       s.age += secs
@@ -2484,6 +3360,9 @@ export function createScene(w, h, o = {}) {
     ctx.globalCompositeOperation = 'source-over'
     ctx.globalAlpha = 1
 
+    // the fog that lies in front of the mountain's foot, low over the lake's far shore
+    if (L.fog && fogK > 0.01) paintFog(fogFront, 0.2, 0.28)
+
     ctx.drawImage(fore.cv, 0, 0, w, h)
 
     // embers: off the breach, the river and the inlet, carried up and downwind
@@ -2501,7 +3380,7 @@ export function createScene(w, h, o = {}) {
         const p = e.age / e.life
         const fade = p < 0.1 ? p / 0.1 : p > 0.6 ? 1 - (p - 0.6) / 0.4 : 1
         const flick = 0.74 + Math.sin(e.phase * 2.4) * 0.26
-        ctx.globalAlpha = Math.max(0, e.alpha * fade * flick)
+        ctx.globalAlpha = Math.min(1, Math.max(0, e.alpha * fade * flick * (1 + 0.4 * stir)))
         ctx.drawImage(glow, e.x - e.size / 2, e.y - e.size / 2, e.size, e.size)
         if (e.green) {
           ctx.globalAlpha = Math.max(0, e.alpha * fade * flick * 0.5)
@@ -2512,28 +3391,70 @@ export function createScene(w, h, o = {}) {
         }
       }
     }
-    // eruption sparks
+    // the fountain: while a jet plays it throws clots of lava (strongest at its start, easing off), and each flies
+    // its arc: white-hot off the breach, orange at the top, red as it falls
+    for (let i = jets.length - 1; i >= 0; i--) {
+      const j = jets[i]
+      j.t += secs
+      if (j.t >= j.dur) {
+        jets.splice(i, 1)
+        continue
+      }
+      j.acc += secs * (j.scale >= 1.3 ? 95 : 55) * j.scale * j.rate * (1 - 0.6 * (j.t / j.dur))
+      while (j.acc >= 1) {
+        j.acc -= 1
+        if (sparks.length < 420) throwClot(j.scale)
+      }
+    }
+    // clots that have landed lie where they fell and cool: orange, then red, then gone. From a big eruption that
+    // takes a few seconds, so the mountainside is left spotted with them.
+    for (let i = landed.length - 1; i >= 0; i--) {
+      const c = landed[i]
+      c.t += secs
+      if (c.t >= c.cool) {
+        landed[i] = landed[landed.length - 1]
+        landed.pop()
+        continue
+      }
+      const b = 1 - c.t / c.cool // how hot it still is
+      const hs = c.size * (2.6 + 3.6 * b)
+      ctx.globalAlpha = Math.max(0, c.alpha * 0.75 * b * Math.sqrt(b))
+      ctx.drawImage(glow, c.x - hs / 2, c.y - hs / 2, hs, hs)
+      ctx.globalAlpha = Math.max(0, c.alpha * (0.35 + 0.65 * b) * Math.min(1, b * 4))
+      ctx.fillStyle = b > 0.62 ? '#ffa040' : b > 0.3 ? '#d8481a' : '#8c2610'
+      ctx.fillRect(c.x - c.size * 0.55, c.y - c.size * 0.4, c.size * 1.1, c.size * 0.8)
+    }
+    ctx.lineCap = 'round'
     for (let i = sparks.length - 1; i >= 0; i--) {
       const s = sparks[i]
       s.age += secs
-      s.px = s.x
-      s.py = s.y
-      s.vy += 0.07 * dt
-      s.x += s.vx * 1.5 * dt
-      s.y += s.vy * 1.5 * dt
+      // (the tail is where it was a moment ago, whatever the frame rate)
+      s.px = s.x - s.vx * 0.04
+      s.py = s.y - s.vy * 0.04
+      s.vy += GRAV * ch * secs
+      s.x += s.vx * secs
+      s.y += s.vy * secs
       if (s.age >= s.life || s.y > h + 30) {
         sparks.splice(i, 1)
         continue
       }
-      const fade = 1 - s.age / s.life
+      // coming down, it lands on the rock (a little way down the face from the outline) or on the ground
+      if (s.vy > 0 && s.y >= rockTopAt(s.x) + s.deep) {
+        if (landed.length >= 520) landed.shift()
+        landed.push({ x: s.x, y: s.y, size: s.size, alpha: s.alpha, t: 0, cool: s.cool })
+        sparks.splice(i, 1)
+        continue
+      }
+      const p = s.age / s.life
+      const fade = 1 - p * p
       ctx.globalAlpha = Math.max(0, s.alpha * fade)
-      ctx.strokeStyle = '#ffb872'
-      ctx.lineWidth = s.size * 1.1
+      ctx.strokeStyle = p < 0.16 ? '#fff2c8' : p < 0.5 ? '#ffb45e' : '#e2501c'
+      ctx.lineWidth = s.size * 1.2
       ctx.beginPath()
       ctx.moveTo(s.px, s.py)
       ctx.lineTo(s.x, s.y)
       ctx.stroke()
-      const hs = s.size * 5
+      const hs = s.size * (p < 0.5 ? 6.5 : 4.5)
       ctx.globalAlpha = Math.max(0, s.alpha * fade * 0.7)
       ctx.drawImage(glow, s.x - hs / 2, s.y - hs / 2, hs, hs)
     }
@@ -2553,8 +3474,11 @@ export function createScene(w, h, o = {}) {
       }
     }
     ctx.globalAlpha = 1
-    if (flare) flare = Math.max(0, flare - secs * 1.8)
+    if (flare) flare = Math.max(0, flare - secs * 0.9)
   }
 
-  return { draw, erupt, info: { peakX, rimY, ch, H, shoreY, breach, tipY, stack, inlet: river.inlet, lake, monolith: mono } }
+  // (heatNow: the breach's breathing and flare, as the Archive plaque reads them on the live site)
+  mark('spritesAndParticles')
+  timing.total = Math.round(Object.values(timing).reduce((a, b) => a + b, 0))
+  return { draw, erupt, heatNow: () => ({ breathe: lastBreathe, flare: Math.min(1, flare) }), info: { bake: baked, riverU: riverLine.u[rowFoot] * mx, timing, layers: { sky: sky.cv, hills: hills.cv, land: land.cv, fore: fore.cv, ground: lakeBox.cv }, overEdge, peakX, rimY, ch, H, shoreY, breach, tipY, stack, inlet: river.inlet, lake, lakeSpan, monolith: mono } }
 }

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>The golden check, running</title>
+    <style>
+      body {
+        margin: 16px;
+        background: #020403;
+        color: #c3d0c6;
+        font: 12px/1.5 ui-monospace, Consolas, monospace;
+      }
+      #log {
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      Builds fixed scenes of the hero drawing, with chance seeded, draws fixed frames and leaves a hash of each picture
+      in this page. golden.mjs runs it in headless Chrome and compares the hashes with the recorded ones. Open it in a
+      browser to see the hashes.
+    -->
+    <p id="log">running…</p>
+    <script id="golden" type="application/json"></script>
+    <script type="module" src="./golden.js"></script>
+  </body>
+</html>

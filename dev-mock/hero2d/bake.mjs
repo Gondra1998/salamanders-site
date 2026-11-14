@@ -5,40 +5,16 @@
 //
 // Writes baked/baked.json and the pictures it names: mountain-desktop.webp, mountain-phone.webp, moon.webp. Anything
 // else in baked/ from an earlier bake is removed.
-import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import os from 'node:os'
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { dumpDom } from '../../scripts/deathfire/chrome.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const url = process.env.BAKE_URL || 'http://127.0.0.1:5191/dev-mock/hero2d/bake.html'
-const chrome = [process.env.CHROME, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find((p) => p && existsSync(p))
-if (!chrome) throw new Error('Chrome not found: set CHROME to its path')
 
-const dom = await new Promise((resolve, reject) => {
-  const child = spawn(chrome, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--virtual-time-budget=120000', '--dump-dom', url], { stdio: ['ignore', 'pipe', 'pipe'] })
-  try {
-    os.setPriority(child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL)
-  } catch {
-    // not fatal: it only keeps the machine responsive
-  }
-  const chunks = []
-  let err = ''
-  child.stdout.on('data', (c) => chunks.push(c))
-  child.stderr.on('data', (c) => (err += c))
-  const timer = setTimeout(() => {
-    child.kill()
-    reject(new Error('Chrome took more than 3 minutes'))
-  }, 180000)
-  child.on('error', reject)
-  child.on('close', (code) => {
-    clearTimeout(timer)
-    const text = Buffer.concat(chunks).toString('utf8')
-    if (!text.includes('<title>baked</title>')) reject(new Error(`the page did not finish baking (exit ${code}). ${err.slice(-400)}`))
-    else resolve(text)
-  })
-})
+const dom = await dumpDom(url)
+if (!dom.includes('<title>baked</title>')) throw new Error('the page did not finish baking: is the dev server up on 127.0.0.1:5191?')
 
 const meta = JSON.parse(dom.match(/<script id="meta" type="application\/json">([\s\S]*?)<\/script>/)[1])
 const out = join(here, 'baked')

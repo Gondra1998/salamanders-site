@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Baking the mountain</title>
+    <title>Baking the scene</title>
     <style>
       body {
         margin: 16px;
@@ -10,23 +10,25 @@
         color: #c3d0c6;
         font: 12px/1.5 ui-monospace, Consolas, monospace;
       }
+      #log {
+        white-space: pre;
+      }
       img {
         display: block;
         max-width: 100%;
-        margin: 8px 0 20px;
+        margin: 4px 0 20px;
         background: repeating-conic-gradient(#10201a 0% 25%, #0a1410 0% 50%) 50% / 24px 24px;
       }
     </style>
   </head>
   <body>
     <!--
-      THROWAWAY MOCK TOOL. Paints the mountain alone, once for desktop and once for phones, and leaves the two pictures
-      and their measurements in this page. bake.mjs runs it in headless Chrome and writes them to ./baked/.
-      Open it in a browser to see what would be written.
+      THROWAWAY MOCK TOOL. Paints the parts of the scene that are the same picture for every visitor (the mountain and
+      the moon) and leaves them and their measurements in this page. bake.mjs runs it in headless Chrome and writes
+      them to ./baked/. Open it in a browser to see what would be written.
     -->
     <p id="log">baking…</p>
-    <img id="desktop" alt="The mountain, desktop master" />
-    <img id="phone" alt="The mountain, phone master" />
+    <div id="pictures"></div>
     <script id="meta" type="application/json"></script>
     <script type="module" src="./bake.js"></script>
   </body>

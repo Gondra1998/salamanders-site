@@ -528,8 +528,10 @@ export function createScene(w, h, o = {}) {
     // lake. (It was stretched to the channel's width: 28 columns squeezed into 17 px at the top, which averaged the
     // top third to a flat orange.) The narrow top only looks at the middle columns.
     const cellPx = phone ? 1.5 : 2
+    // (as wide as the channel, not as the fan at its mouth: the fan would have made the grid more than twice as
+    // wide all the way up, for its last few rows. Out in the fan the edge columns serve; they are feathered away.)
     let maxHw = 0
-    for (let i = 0; i <= river.N; i++) maxHw = Math.max(maxHw, river.hw[i])
+    for (let i = 0; i <= river.N; i++) if (river.fan[i] < 0.05) maxHw = Math.max(maxHw, river.hw[i])
     const cols = Math.max(12, Math.ceil((2 * maxHw) / cellPx) + 6)
     const mid = (cols - 1) / 2
     const SOURCE = 34 // warm white at the breach; an eruption pushes it to the top of the ramp
@@ -594,7 +596,7 @@ export function createScene(w, h, o = {}) {
         fire.cells[y * cols + x] = Math.max(0, Math.round(v))
       }
     }
-    for (let i = 0; i < Math.min(rows, 90); i++) {
+    for (let i = 0; i < Math.min(rows, 45); i++) {
       fire.stokeCoals(i * 0.1, WAVE, 0.6)
       step()
     }
@@ -2112,7 +2114,10 @@ export function createScene(w, h, o = {}) {
   const moon = (() => {
     // (painted at the size it is in a cataclysm, its largest; `r` handed back is its size at an ordinary closest pass)
     const r0 = Math.max(20, Math.min(w * 0.11, h * 0.14))
-    const r = r0 * ((1.15 + MOON_TRIAL) / 1.15)
+    // `o.moonImage`: the same picture, baked. It never changes, so it need not be painted in every visitor's browser.
+    if (o.moonImage) return { cv: o.moonImage, r: r0 }
+    // (`o.moonR`: a bake asks for it big, so one picture serves every window)
+    const r = (o.moonR ?? r0) * ((1.15 + MOON_TRIAL) / 1.15)
     const size = Math.ceil(r * 2)
     const { cv, g } = makeCanvas(size, size)
     const img = g.createImageData(size, size)
@@ -2297,13 +2302,24 @@ export function createScene(w, h, o = {}) {
       if (BR[i] > 0 && sy < NS[i]) F = Math.max(F, 0.84 + 0.16 * clamp01((NS[i] - sy) / Math.max(1, NS[i] - FS[i])))
       return F
     }
+    mark('groundSetup')
     const FG = new Float32Array(lw * lh)
     for (let j = 0; j < lh; j++) {
       const sy = y0 + (j + 0.5) / S
-      for (let i = 0; i < lw; i++) FG[j * lw + i] = fillAt(x0 + (i + 0.5) / S, sy, i)
+      // (only where the lake can come, and a little round it: not for the ground it never reaches, nor under the rise)
+      for (let i = 0; i < lw; i++) if (sy > FS[i] - RIMW - 3 && sy < HT[i] + 3) FG[j * lw + i] = fillAt(x0 + (i + 0.5) / S, sy, i)
     }
-    const keys = ['off', 'fl', 'ig', 'dpx', 'w0', 'lipn', 'liph', 'ep0', 'rk0', 'hn', 'po', 'fr', 'fc', 'dr', 'dg', 'db']
-    const grp = Object.fromEntries(keys.map((key) => [key, []]))
+    mark('groundFillOrder')
+    // What the pass needs to know of each pixel the lava can come to, as plain rows of numbers. They are sized before
+    // they are filled (the count of such pixels, column by column: at most this many), because growing sixteen lists
+    // a pixel at a time was a good part of what this box cost to build.
+    let cap = 0
+    for (let i = 0; i < lw; i++) cap += Math.max(0, Math.min(lh, Math.ceil((Math.min(HT[i] + 1.5, h) - (FS[i] - RIMW)) * S) + 2))
+    const keys = ['fl', 'ig', 'dpx', 'w0', 'lipn', 'liph', 'ep0', 'rk0', 'hn', 'po', 'fr', 'fc']
+    const grp = Object.fromEntries(keys.map((key) => [key, new Float32Array(cap)]))
+    const OFF = new Int32Array(cap)
+    const DRY = new Uint8ClampedArray(cap * 3)
+    let n = 0
     let rMax = 0
     for (let j = 0; j < lh; j++) {
       const sy = y0 + (j + 0.5) / S
@@ -2391,33 +2407,28 @@ export function createScene(w, h, o = {}) {
         const dyf = Math.max(0, -dpx) * LAKE_KY
         const rad = Math.hypot(dxf, dyf)
         if (dpx < 0.5 && rad > rMax) rMax = rad
-        grp.off.push(o4)
-        grp.fl.push(F)
-        grp.ig.push(1 / Math.max(1e-6, Math.hypot(Fx, Fy)))
-        grp.dpx.push(dpx)
-        grp.w0.push(w0)
-        grp.lipn.push(0.55 + 0.45 * vnoise(sx * 0.08 + 4, sy * 0.1 + 6))
-        grp.liph.push(0.05 + 0.95 * dm * dm)
-        grp.ep0.push(ep0)
-        grp.rk0.push(rk0)
-        grp.hn.push(hn)
+        if (n >= cap) continue // (cannot happen: the count above is an upper bound)
+        OFF[n] = o4
+        grp.fl[n] = F
+        grp.ig[n] = 1 / Math.max(1e-6, Math.hypot(Fx, Fy))
+        grp.dpx[n] = dpx
+        grp.w0[n] = w0
+        grp.lipn[n] = 0.55 + 0.45 * vnoise(sx * 0.08 + 4, sy * 0.1 + 6)
+        grp.liph[n] = 0.05 + 0.95 * dm * dm
+        grp.ep0[n] = ep0
+        grp.rk0[n] = rk0
+        grp.hn[n] = hn
         // what a pixel's colour gets besides the fire's heat, in palette steps: a white-gold heart where the river
         // pours in, and a chilled margin where the lake lies against its shore (not at the mouth)
         // (not along the brim: there is no rock there to chill it; the lava thins as it goes over, and burns brighter)
-        grp.po.push((hn > 0.35 ? 9 * (hn - 0.35) : 0) + sm((dpx + 5) / 5) * (2.5 * BR[i] - 3 * (1 - dm) * (1 - BR[i])))
-        grp.fr.push(rad)
-        grp.fc.push(Math.atan2(dyf, dxf) / Math.PI)
-        grp.dr.push(dr)
-        grp.dg.push(dg)
-        grp.db.push(db)
+        grp.po[n] = (hn > 0.35 ? 9 * (hn - 0.35) : 0) + sm((dpx + 5) / 5) * (2.5 * BR[i] - 3 * (1 - dm) * (1 - BR[i]))
+        grp.fr[n] = rad
+        grp.fc[n] = Math.atan2(dyf, dxf) / Math.PI
+        DRY[n * 3] = dr
+        DRY[n * 3 + 1] = dg
+        DRY[n * 3 + 2] = db
+        n++
       }
-    }
-    const n = grp.off.length
-    const DRY = new Uint8ClampedArray(n * 3)
-    for (let k = 0; k < n; k++) {
-      DRY[k * 3] = grp.dr[k]
-      DRY[k * 3 + 1] = grp.dg[k]
-      DRY[k * 3 + 2] = grp.db[k]
     }
     mark('groundPlatesAndLakeBed')
     // ---- the fire. Rows run outward from the mouth (the last row is the source, at the mouth; row 0 is the lake's
@@ -2427,8 +2438,13 @@ export function createScene(w, h, o = {}) {
     const rows = Math.max(24, Math.ceil(rMax / CELL) + 4)
     const SRC = 22
     const fire = new DoomFire(cols, rows, { maxHeat: SRC, variation: 1 })
-    const FR = Float32Array.from(grp.fr, (r) => Math.max(0, rows - 1 - r / CELL))
-    const FC = Float32Array.from(grp.fc, (c) => (lake.dir > 0 ? c : 1 - c) * (cols - 1))
+    // (distance and bearing become a row and a column of the fire, in place)
+    const FR = grp.fr.subarray(0, n)
+    const FC = grp.fc.subarray(0, n)
+    for (let k = 0; k < n; k++) {
+      FR[k] = Math.max(0, rows - 1 - FR[k] / CELL)
+      FC[k] = (lake.dir > 0 ? FC[k] : 1 - FC[k]) * (cols - 1)
+    }
     // only the cells some pixel of the lake looks at are run: past the first third of the way out that is two thin
     // fans along the ground, not the whole half-circle
     const SLO = new Int16Array(rows).fill(cols)
@@ -2498,7 +2514,7 @@ export function createScene(w, h, o = {}) {
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) fire.cells[y * cols + x] = Math.max(0, Math.round(mean[y] + (Math.random() - 0.5) * 4))
     }
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 8; i++) {
       fire.stokeCoals(i * 0.17, 0.3, 0.6)
       step()
     }
@@ -2512,20 +2528,20 @@ export function createScene(w, h, o = {}) {
       reachM,
       reachD,
       n,
-      OFF: Int32Array.from(grp.off),
-      FL: Float32Array.from(grp.fl),
-      IG: Float32Array.from(grp.ig),
-      DPX: Float32Array.from(grp.dpx),
-      W0: Float32Array.from(grp.w0),
-      LIPN: Float32Array.from(grp.lipn),
-      LIPH: Float32Array.from(grp.liph),
-      EP0: Float32Array.from(grp.ep0),
-      RK0: Float32Array.from(grp.rk0),
-      HN: Float32Array.from(grp.hn),
-      PO: Float32Array.from(grp.po),
+      OFF: OFF.subarray(0, n),
+      FL: grp.fl.subarray(0, n),
+      IG: grp.ig.subarray(0, n),
+      DPX: grp.dpx.subarray(0, n),
+      W0: grp.w0.subarray(0, n),
+      LIPN: grp.lipn.subarray(0, n),
+      LIPH: grp.liph.subarray(0, n),
+      EP0: grp.ep0.subarray(0, n),
+      RK0: grp.rk0.subarray(0, n),
+      HN: grp.hn.subarray(0, n),
+      PO: grp.po.subarray(0, n),
       FR,
       FC,
-      DRY,
+      DRY: DRY.subarray(0, n * 3),
       fire,
       step,
       rows,
@@ -3507,5 +3523,5 @@ export function createScene(w, h, o = {}) {
   // (heatNow: the breach's breathing and flare, as the Archive plaque reads them on the live site)
   mark('spritesAndParticles')
   timing.total = Math.round(Object.values(timing).reduce((a, b) => a + b, 0))
-  return { draw, erupt, heatNow: () => ({ breathe: lastBreathe, flare: Math.min(1, flare) }), info: { bake: baked, riverU: riverLine.u[rowFoot] * mx, timing, layers: { sky: sky.cv, hills: hills.cv, land: land.cv, fore: fore.cv, ground: lakeBox.cv }, overEdge, peakX, rimY, ch, H, shoreY, breach, tipY, stack, inlet: river.inlet, lake, lakeSpan, monolith: mono } }
+  return { draw, erupt, heatNow: () => ({ breathe: lastBreathe, flare: Math.min(1, flare) }), info: { bake: { mountain: baked, moon: moon.cv }, riverU: riverLine.u[rowFoot] * mx, timing, layers: { sky: sky.cv, hills: hills.cv, land: land.cv, fore: fore.cv, ground: lakeBox.cv }, overEdge, peakX, rimY, ch, H, shoreY, breach, tipY, stack, inlet: river.inlet, lake, lakeSpan, monolith: mono } }
 }

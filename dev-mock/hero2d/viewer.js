@@ -13,18 +13,20 @@
 //               ?lvl=0..1 (hold the lake at this level; without it the lake starts at the tuner's "Lake start" and grows)
 //               ?grow=0|1 (force the growth off or on)  ?fast=1 (the lake fills 30 times as fast, to watch it)
 //               ?spill=0..1 (hold the spill at this much; use with ?lvl=1)
-//               ?mtn=live (paint the mountain here instead of using the baked picture)
-//               ?moon=0..1 also stops the sky's clock (0.5 is the closest pass and brings a Time of Trial, as on the live
-//               site)  ?skyfast=1 (the moon crosses in 30 seconds; a trial still runs at its own length and carries the moon)
-//               ?trial=1|2|3 (start a Time of Trial of that tier)
+//               ?mtn=live (paint everything here instead of using the baked pictures)
+//               ?nobake=mountain,moon (paint just these here: to weigh what each picture saves)
+//               ?moon=0..1 also stops the sky's clock (the moon is held there; a page never opens into a Time of Trial,
+//               so add ?trial= to see one)  ?skyfast=1 (the moon crosses in 30 seconds; a trial still runs at its own
+//               length and carries the moon)
+//               ?trial=1|2|3 (start a Time of Trial of that tier)  ?visit=new (forget this browser's place in the cycle)
 import { createScene, excitement, trialLength, trialLevel } from './mock.js'
 
 const q = new URLSearchParams(location.search)
 const LAYERS = ['sky', 'moon', 'plume', 'ridges', 'relief', 'river', 'lake', 'monolith', 'fog', 'embers', 'ash']
 const off = new Set((q.get('off') || '').split(',').filter(Boolean))
 const state = {
-  // the mountain: 'baked' draws the ready-made picture (./baked/, written by bake.mjs) where there is one for the
-  // drawing asked for; 'live' paints it here, as the sliders say
+  // the baked pictures (./baked/, written by bake.mjs): 'baked' uses them where there is one for the drawing asked
+  // for; 'live' paints everything here, as the sliders say
   mtn: q.get('mtn') === 'live' ? 'live' : 'baked',
   mode: q.get('mode') || 'mock',
   size: q.get('size') || 'full',
@@ -45,24 +47,38 @@ const state = {
   inner: q.get('inner') === 'left' ? 'left' : 'right',
 }
 const COMPS = { a: { faceX: 0.29, flip: false }, b: { faceX: 0.14, flip: true } }
-// The baked mountain: one picture for desktop and one for phones, each with where its peak and rim are. The sliders
-// that shape the mountain are baked in, so moving any of them off its default paints the mountain live again.
-const baked = { desktop: null, phone: null }
+// The baked pictures: the parts of the scene that are the same for every visitor, painted once by bake.mjs instead of
+// in every browser. A mountain for desktop, one for phones, and one moon. A browser fetches only what its own window
+// needs: the list, the moon, and the mountain for its kind of device (a phone never fetches the desktop's). Until
+// they arrive nothing is built (painting it all here first, only to throw it away, would cost more than the wait).
+// The sliders that shape the mountain are baked in, so moving any of them off its default paints the mountain live.
+// `baked[kind]`: null not asked for yet, false none to be had (everything is painted live), or the mountain.
+const baked = { desktop: null, phone: null, moon: null }
+const NO_BAKE = new Set((q.get('nobake') || '').split(',')) // ?nobake=moon: paint these here, to weigh each picture
 const MOUNTAIN_KEYS = ['baseW', 'crown', 'rock', 'columns', 'planes']
-let mtnNow = 'live' // what the scene on screen was built with
-async function loadBaked() {
-  try {
-    const meta = await (await fetch('./baked/mountain.json', { cache: 'no-store' })).json()
-    for (const kind of ['desktop', 'phone']) {
-      if (!meta[kind]) continue
-      const blob = await (await fetch(`./baked/mountain-${kind}.webp`, { cache: 'no-store' })).blob()
-      baked[kind] = { image: await createImageBitmap(blob), meta: meta[kind], kb: Math.round(blob.size / 1024) }
+let bakedNow = 'all painted here' // what the scene on screen was built with
+let bakedList = null
+let bakedMoon = null
+const fetching = {}
+async function picture(entry) {
+  const blob = await (await fetch(`./baked/${entry.file}`, { cache: 'no-store' })).blob()
+  return { image: await createImageBitmap(blob), meta: entry, kb: Math.round(blob.size / 1024) }
+}
+function needBaked(kind) {
+  fetching[kind] ??= (async () => {
+    try {
+      bakedList ??= fetch('./baked/baked.json', { cache: 'no-store' }).then((r) => r.json())
+      const list = await bakedList
+      bakedMoon ??= picture(list.moon)
+      const [moon, mountain] = await Promise.all([bakedMoon, picture(list[kind].mountain)])
+      baked.moon = moon
+      baked[kind] = mountain
+    } catch {
+      baked[kind] = false // none baked yet
     }
-  } catch {
-    // none baked yet: everything is painted live
-  }
-  showMtn()
-  rebuild()
+    showMtn()
+    rebuild()
+  })()
 }
 // At or under this width the page gets the phone drawing and the stack layout. 768 is the live site's own breakpoint.
 const CUT = parseInt(q.get('cut'), 10) || 768
@@ -108,27 +124,61 @@ const lakeState = {
 }
 const FAST = 30
 const SPILL_SECS = 90
-// The sky. Prometheus crosses once every 15 minutes on the wall clock, as on the live site, so every visitor sees the
-// same moon. At its closest pass (mid-crossing) it brings the Time of Trial, its size drawn by chance. The viewer owns
-// the clock and the trial (the live component does); the scene is told the moon's place and how hard the trial rages.
+// The sky. Prometheus crosses once every 15 minutes. At its closest pass (mid-crossing) it brings the Time of Trial,
+// its size drawn by chance. The viewer owns the clock and the trial (the live component does); the scene is told the
+// moon's place and how hard the trial rages.
+//
+// Each visitor has their own crossing. (The live site has one for everybody, on the wall clock, so a page can open
+// in the middle of a trial.) The first time a browser opens the site its crossing begins: the moon at the start of
+// its way, the trial seven and a half minutes off. The browser remembers when that was, so another page or a reload
+// inside those 15 minutes goes on with the same crossing; after them, the next visit begins a new one. A page left
+// open runs on from one crossing into the next.
+// A trial begins only when the closest pass is seen to happen. A page opened after it (a reload in the middle of a
+// trial, say) opens calm, the moon already going away: no page ever opens into a trial.
 //
 // While a Time of Trial is on, the trial is the moon's clock, and that is all: the moon is where the trial found it,
 // carried on by the trial's own seconds at the sky's true pace. Nothing else moves it, whichever clock was running
 // before. When the trial ends the moon goes on from where the trial left it.
 const CYCLE_MS = 15 * 60 * 1000
+const VISIT_KEY = 'deathfire.crossingBegan'
+/** Keep when this browser's crossing began (ms), where the browser lets us. */
+function keepVisit(ms) {
+  try {
+    localStorage.setItem(VISIT_KEY, String(Math.round(ms)))
+  } catch {
+    // storage is off (a private window, say): every page then begins a crossing, which is still never inside a trial
+  }
+}
+/** When this browser's crossing began: the one it remembers if that is still going on, otherwise now. */
+function visitBegan(fresh) {
+  const now = Date.now()
+  let began = NaN
+  try {
+    began = fresh ? NaN : parseFloat(localStorage.getItem(VISIT_KEY))
+  } catch {
+    // as above
+  }
+  if (!(began <= now && now - began < CYCLE_MS)) {
+    began = now
+    keepVisit(began)
+  }
+  return began
+}
 const sky = {
-  clock: !q.has('moon'), // follow the wall clock; dragging the moon, or ?moon=, takes it by hand
+  clock: !q.has('moon'), // follow the visitor's clock; dragging the moon, or ?moon=, takes it by hand
   fast: q.get('skyfast') === '1',
+  began: visitBegan(q.get('visit') === 'new'), // when this visitor's crossing began, on the wall clock
   // where the moon is, in crossings: the whole part is which crossing, the rest how far across. (It starts where
   // ?moon= puts it, if it does: a trial begun as the page opens must find the moon there, not where the clock has it.)
-  at: q.has('moon') ? Math.min(0.999, Math.max(0, state.moon)) : Date.now() / CYCLE_MS,
-  lastCycle: -1, // the crossing whose closest pass has been seen
+  at: 0,
+  before: null, // how far across the moon was a moment ago (null as the page opens: nothing has been seen yet)
   trialAt: -1, // seconds into the Time of Trial in progress; -1 when none
   trialTier: 1,
   trialClock: 0, // seconds until the blast throws again
   trial: 0, // how hard it rages now, 0 to 1
   trialFrom: null, // where the moon was (in crossings) when the trial in progress began
 }
+sky.at = q.has('moon') ? Math.min(0.999, Math.max(0, state.moon)) : (Date.now() - sky.began) / CYCLE_MS
 function startTrial(tier) {
   const roll = Math.random()
   sky.trialTier = tier || (roll < 0.05 ? 3 : roll < 0.3 ? 2 : 1)
@@ -143,7 +193,14 @@ function skyStep(secs) {
     if (sky.trialFrom === null) sky.trialFrom = sky.at
     sky.at = sky.trialFrom + (sky.trialAt * 1000) / CYCLE_MS
   } else if (sky.clock && !sky.fast) {
-    sky.at = Date.now() / CYCLE_MS // the wall clock every visitor shares
+    // the visitor's own clock: how long since their crossing began
+    sky.at = (Date.now() - sky.began) / CYCLE_MS
+    if (sky.at >= 1) {
+      // the page stayed open into the next crossing: that one is theirs now
+      sky.began += Math.floor(sky.at) * CYCLE_MS
+      keepVisit(sky.began)
+      sky.at -= Math.floor(sky.at)
+    }
   } else if (sky.clock) {
     sky.at += (secs * 1000 * FAST) / CYCLE_MS // speeded up, to skip the waiting between passes
   } else {
@@ -156,11 +213,10 @@ function skyStep(secs) {
   const phase = sky.at - cycle
   state.moon = phase
   if (document.activeElement !== moonEl) moonEl.value = phase
-  if (phase >= 0.5 && sky.lastCycle !== cycle) {
-    sky.lastCycle = cycle
-    // only if the pass is seen: a page opened long after it has nothing to catch
-    if (phase < 0.56 && sky.trialAt < 0 && state.mode === 'mock') startTrial()
-  }
+  // The closest pass brings a trial only if it is seen to happen: the moon short of it a moment ago, and now at it or
+  // just past. So never as a page opens (nothing was seen a moment ago), nor on coming back to a tab long after it.
+  if (sky.before !== null && sky.before < 0.5 && phase >= 0.5 && phase < 0.56 && sky.trialAt < 0 && state.mode === 'mock') startTrial()
+  sky.before = phase
   sky.trial = 0
   if (sky.trialAt >= 0) {
     sky.trialAt += secs
@@ -319,6 +375,8 @@ function rebuild() {
   const w = win.innerWidth
   const h = win.innerHeight
   if (w < 2 || h < 2) return
+  // the pictures this kind of window needs are fetched the first time it is asked for; the build waits for them
+  if (state.mtn === 'baked' && baked[w > CUT ? 'desktop' : 'phone'] === null) return needBaked(w > CUT ? 'desktop' : 'phone')
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
   cv.width = Math.ceil(w * dpr)
   cv.height = Math.ceil(h * dpr)
@@ -331,12 +389,16 @@ function rebuild() {
   measureCalm()
   // The pages other than home show the home scene mirrored (the mountain on the right), unless asked to keep it left.
   const home = framePath() === '/' || state.inner === 'left'
-  // The mountain ready-made, when there is a picture for this drawing: the home composition, the mountain's sliders
-  // where they were when it was baked, and the relief on.
+  // The baked pictures, for this kind of window. The moon serves whatever the sliders say. The mountain serves when
+  // there is a picture for this drawing: the home composition, the mountain's sliders where they were when it was
+  // baked, and the relief on.
   const kind = w > CUT ? 'desktop' : 'phone'
+  const pic = state.mtn === 'baked' ? baked[kind] : false
   const asBaked = MOUNTAIN_KEYS.every((k) => tuneState[k] === TUNE.find((d) => d.key === k).def)
-  const ready = state.mtn === 'baked' && baked[kind] && asBaked && state.comp === 'b' && state.layers.relief ? baked[kind] : null
-  mtnNow = ready ? 'baked' : 'live'
+  const ready = pic && asBaked && state.comp === 'b' && state.layers.relief && !NO_BAKE.has('mountain') ? pic : null
+  const moonPic = pic && !NO_BAKE.has('moon') ? baked.moon.image : null
+  bakedNow = [ready && 'mountain', moonPic && 'moon'].filter(Boolean).join(', ')
+  bakedNow = bakedNow ? `baked: ${bakedNow}` : 'all painted here'
   // phones keep one composition for now: the peak a little left of centre
   scene = createScene(w, h, {
     dpr,
@@ -347,6 +409,7 @@ function rebuild() {
     tune: { ...tuneState },
     lakeLevel: lakeState.level,
     ...(ready ? { mountain: ready, riverU: ready.meta.riverU } : {}),
+    ...(moonPic ? { moonImage: moonPic } : {}),
     ...(w > CUT ? { ...comp, mirror: !home } : { flip: comp.flip, ...(q.has('px') ? { faceX: Math.min(0.9, Math.max(0.1, parseFloat(q.get('px')) || 0.36)) } : {}) }),
     ...(built ? { textBottom: built.text, titleBottom: built.title, textGap: q.has('gap') ? parseFloat(q.get('gap')) : undefined } : {}),
   })
@@ -468,9 +531,10 @@ function tick(now) {
   }
   costAvg = costAvg * 0.95 + (performance.now() - t0) * 0.05
   costMax = Math.max(costMax * 0.995, performance.now() - t0)
-  note.textContent = `draw ${costAvg.toFixed(2)} ms (worst ${costMax.toFixed(1)}) · t ${t.toFixed(1)} s\nbuild ${scene.info.timing.total} ms, mountain ${mtnNow}`
+  note.textContent = `draw ${costAvg.toFixed(2)} ms (worst ${costMax.toFixed(1)}) · t ${t.toFixed(1)} s\nbuild ${scene.info.timing.total} ms, ${bakedNow}`
+  const into = Math.max(0, Math.round(phase * 900))
   skyOut.textContent =
-    `moon ${phase.toFixed(3)}${sky.clock ? (sky.fast ? ' (clock x30)' : ' (clock)') : ' (by hand)'}\nstirred ${Math.round(stirred * 100)}%` +
+    `moon ${phase.toFixed(3)}${sky.clock ? (sky.fast ? ' (clock x30)' : ` (this visit, ${Math.floor(into / 60)}:${String(into % 60).padStart(2, '0')} in)`) : ' (by hand)'}\nstirred ${Math.round(stirred * 100)}%` +
     (sky.trialAt >= 0 ? `\ntrial ${'I'.repeat(sky.trialTier)} ${Math.round(sky.trial * 100)}%, ${Math.round(sky.trialAt)} of ${trialLength(sky.trialTier)} s` : '')
   window.__mock.sky = { phase, stirred, trial: sky.trial, tier: sky.trialTier, at: sky.trialAt, clock: sky.clock }
 }
@@ -542,8 +606,10 @@ markPhone()
 const mtnOut = document.getElementById('mtn-out')
 function showMtn() {
   for (const b of document.querySelectorAll('#mtns button')) b.setAttribute('aria-pressed', String(b.dataset.mtn === state.mtn))
-  const have = ['desktop', 'phone'].filter((k) => baked[k])
-  mtnOut.textContent = have.length ? have.map((k) => `${k} ${baked[k].kb} KB`).join(', ') : 'no baked picture: run bake.mjs'
+  // what has been fetched so far (only what the windows shown so far needed)
+  const lines = ['desktop', 'phone'].filter((k) => baked[k]).map((k) => `${k} mountain ${baked[k].kb} KB`)
+  if (baked.moon) lines.push(`moon ${baked.moon.kb} KB`)
+  mtnOut.textContent = lines.length ? `fetched\n${lines.join('\n')}` : baked.desktop === false || baked.phone === false ? 'no baked pictures: run bake.mjs' : 'none fetched yet'
 }
 for (const b of document.querySelectorAll('#mtns button')) {
   b.addEventListener('click', () => {
@@ -592,6 +658,22 @@ skyFastEl.addEventListener('click', () => {
   if (sky.fast) sky.clock = true
   showSky()
 })
+// "New visit": as if this browser had never opened the site. A new crossing begins (and is remembered), any trial is
+// over, and the lake is back where it starts.
+document.getElementById('sky-visit').addEventListener('click', () => {
+  sky.began = visitBegan(true)
+  sky.at = 0
+  sky.before = null
+  sky.clock = true
+  sky.fast = false
+  sky.trialAt = -1
+  sky.trial = 0
+  sky.trialFrom = null
+  lakeState.level = tuneState.lakeStart
+  lakeState.spill = 0
+  showSky()
+  showLake()
+})
 for (const b of document.querySelectorAll('#trials button')) b.addEventListener('click', () => startTrial(parseInt(b.dataset.trial, 10)))
 if (q.has('trial')) startTrial(Math.min(3, Math.max(1, parseInt(q.get('trial'), 10) || 1)))
 showSky()
@@ -638,7 +720,6 @@ markSize()
 sizeFrame()
 frame.addEventListener('load', attach, { once: true })
 frame.src = q.get('path') || '/'
-loadBaked()
 
 // ---- tuner
 function tuneChanged() {

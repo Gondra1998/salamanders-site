@@ -64,7 +64,7 @@ function picture(file) {
 /** Build a scene, draw its frames, and hand back the canvas and the scene. */
 function run({ w, h, dpr, options, env = {}, frames = FRAMES, before }) {
   seedChance()
-  const scene = createScene(w, h, { dpr, phoneMax: 768, flip: true, layers: { ash: false }, tune: { ...TUNE }, lakeLevel: env.lakeLevel ?? 0.3, ...options })
+  const scene = createScene(w, h, { dpr, phoneMax: 768, flip: true, tune: { ...TUNE }, lakeLevel: env.lakeLevel ?? 0.3, ...options })
   const cv = document.createElement('canvas')
   cv.width = Math.ceil(w * dpr)
   cv.height = Math.ceil(h * dpr)
@@ -92,7 +92,8 @@ try {
   // the layers the scene paints once and keeps, as they stand after those frames
   for (const name of ['sky', 'hills', 'land', 'fore', 'ground']) out[`layer-${name}`] = hash(home.scene.info.layers[name])
 
-  out['desktop-inner'] = hash(run({ ...desktop, options: { faceX: 0.14, mirror: true, quiet: true, ...withPictures('desktop') } }).cv)
+  // an inner page: the same scene, drawn mirrored and quiet
+  out['desktop-inner'] = hash(run({ ...desktop, options: { faceX: 0.14, ...withPictures('desktop') }, env: { mirror: true, quiet: true } }).cv)
 
   out['desktop-trial'] = hash(
     run({

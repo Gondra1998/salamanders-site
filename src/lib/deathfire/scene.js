@@ -11,7 +11,7 @@
 import { DoomFire } from '../doomfire.js'
 import { clamp01, hash2, mulberry32, sm, vnoise } from './noise.js'
 import { DOOM, MOLTEN, TOP, forgePalette, heatColourIn } from './palette.js'
-import { TAU, lerp, makeCanvas } from './tools.js'
+import { TAU, lerp, makeCanvas as newCanvas } from './tools.js'
 import { excitement } from './trial.js'
 
 /** Catmull-Rom through `pts`, resampled to n + 1 points evenly spaced by arc length. */
@@ -48,7 +48,7 @@ function smoothPath(pts, n) {
 }
 function makeGlow() {
   const s = 64
-  const { cv, g } = makeCanvas(s, s)
+  const { cv, g } = newCanvas(s, s)
   const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2)
   grd.addColorStop(0, 'rgba(255,238,190,1)')
   grd.addColorStop(0.18, 'rgba(255,190,110,0.9)')
@@ -66,6 +66,13 @@ export function createScene(w, h, o = {}) {
   // painter (`o.painter`, the painting module). The painter is handed in, and this file never loads it, so a visitor who gets
   // the pictures never downloads the painting code.
   if (!o.painter && (!o.mountain || !o.moonImage)) throw new Error('deathfire: no mountain picture and no painter')
+  // every canvas this scene makes, so that dispose() can hand their memory back at once
+  const made = []
+  const makeCanvas = (cw, chh, d) => {
+    const c = newCanvas(cw, chh, d)
+    made.push(c.cv)
+    return c
+  }
   // how long each part of the build takes, in ms (info.timing): what is worth baking ahead of time is read from this
   const timing = {}
   let markAt = performance.now()
@@ -84,12 +91,11 @@ export function createScene(w, h, o = {}) {
   // button ends, so the whole mountain stands below it and nothing of the river lies under reading text.
   const stack = phone && Number.isFinite(o.textBottom)
   const dpr = o.dpr ?? 1
-  const L = { sky: true, moon: true, plume: true, ridges: true, relief: true, river: true, lake: true, monolith: true, fog: true, embers: true, ash: true, ...(o.layers || {}) }
+  const L = { sky: true, moon: true, plume: true, ridges: true, relief: true, river: true, lake: true, monolith: true, fog: true, embers: true, ...(o.layers || {}) }
   // the look's numbers (`o.tune`): read as tn.<key> ?? default
   const tn = o.tune || {}
   // `quiet`: the far ranges stand without their live volcanoes (no pin of light, no wisp, no halo), for pages where small
   // text stands over them. The ranges keep their shape: the notches are still cut and the seeded streams run as before.
-  const quietFar = !!o.quiet
   // the lava's colours, for this scene: "forge" unless asked for one of the two it is blended from
   const heatColour = heatColourIn(o.palette === 'doom' ? DOOM : o.palette === 'molten' ? MOLTEN : forgePalette(tn.lavaTint ?? 0.5, tn.lavaRed ?? 0.5))
 
@@ -1179,21 +1185,34 @@ export function createScene(w, h, o = {}) {
         haze(g, def, bd.b)
         g.restore()
       }
-      // the live cones last, so no haze dims them (quiet: none, only the notch in the summit stays)
-      if (!quietFar) {
-        for (const v of lives) {
-          smoke(g, v)
-          g.save()
-          g.globalCompositeOperation = 'lighter'
-          const pin = g.createRadialGradient(v.x, v.y, 0, v.x, v.y, v.r)
-          pin.addColorStop(0, 'rgba(255,196,120,0.95)')
-          pin.addColorStop(0.18, 'rgba(255,120,50,0.6)')
-          pin.addColorStop(0.5, 'rgba(210,60,26,0.2)')
-          pin.addColorStop(1, 'rgba(180,40,18,0)')
-          g.fillStyle = pin
-          g.fillRect(v.x - v.r, v.y - v.r, v.r * 2, v.r * 2)
-          g.restore()
+      // The live cones last, so no haze dims them. A page may ask for the far country quiet (`env.quiet`: no live cones,
+      // only the notch in each summit stays). So, before they are painted, the stretch of sky they will stand in is
+      // kept as it is without them: a quiet frame lays that stretch back over the sky.
+      if (lives.length) {
+        const pad = (v) => v.len * 1.2 + 12 * S + 4
+        const x0 = Math.max(0, Math.floor(Math.min(...lives.map((v) => v.x - pad(v))) * dpr))
+        const x1 = Math.min(g.canvas.width, Math.ceil(Math.max(...lives.map((v) => v.x + pad(v))) * dpr))
+        const y0 = Math.max(0, Math.floor(Math.min(...lives.map((v) => v.y - v.len - 12 * S - 4)) * dpr))
+        const y1 = Math.min(g.canvas.height, Math.ceil(Math.max(...lives.map((v) => v.y + v.r + 2)) * dpr))
+        if (x1 > x0 && y1 > y0) {
+          const keep = makeCanvas(x1 - x0, y1 - y0)
+          keep.g.drawImage(g.canvas, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0)
+          // (in px of the window, on whole pixels of the sky's canvas, so it goes back exactly where it came from)
+          out.quietPatch = { cv: keep.cv, x: x0 / dpr, y: y0 / dpr, w: (x1 - x0) / dpr, h: (y1 - y0) / dpr }
         }
+      }
+      for (const v of lives) {
+        smoke(g, v)
+        g.save()
+        g.globalCompositeOperation = 'lighter'
+        const pin = g.createRadialGradient(v.x, v.y, 0, v.x, v.y, v.r)
+        pin.addColorStop(0, 'rgba(255,196,120,0.95)')
+        pin.addColorStop(0.18, 'rgba(255,120,50,0.6)')
+        pin.addColorStop(0.5, 'rgba(210,60,26,0.2)')
+        pin.addColorStop(1, 'rgba(180,40,18,0)')
+        g.fillStyle = pin
+        g.fillRect(v.x - v.r, v.y - v.r, v.r * 2, v.r * 2)
+        g.restore()
       }
     }
 
@@ -1244,7 +1263,8 @@ export function createScene(w, h, o = {}) {
         face(ir, 'rgba(24,38,33,0.95)') // away from it, under the moon
       }
     }
-    return { lives: quietFar ? [] : lives, paintBands, paintNear } // (quiet: no lives left for the halo pass in `draw`)
+    const out = { lives, paintBands, paintNear, quietPatch: null }
+    return out
   })()
 
 
@@ -1408,7 +1428,9 @@ export function createScene(w, h, o = {}) {
     if (o.moonImage) return { cv: o.moonImage, r: r0 }
     // (`o.moonR`: a bake asks for it big, so one picture serves every window)
     const r = (o.moonR ?? r0) * ((1.15 + MOON_TRIAL) / 1.15)
-    return { cv: o.painter.paintMoon(r), r: r0 }
+    const cv = o.painter.paintMoon(r)
+    made.push(cv)
+    return { cv, r: r0 }
   })()
 
   // ---------------------------------------------------------------- the lake's surface
@@ -1928,6 +1950,7 @@ export function createScene(w, h, o = {}) {
   mark('lakeFire')
   // ---------------------------------------------------------------- moving things
   const glow = makeGlow()
+  made.push(glow)
   // Where the lake goes over the edge (the brim), what lies below is never drawn: its light is. A glow comes up from
   // under the edge and grows as the lava gathers down there, as if a second lake were filling; it backlights the
   // mountain's foot beside it, and it lights the fog.
@@ -1941,7 +1964,7 @@ export function createScene(w, h, o = {}) {
   // little in front of its foot. Each is a baked sprite in two layers, as the plume's puffs are: a grey-brown body
   // that sits just above the sky, and the same shape in forge orange, weighted to its underside, laid on top wherever
   // lava lights it from beneath (the lake, and above all the light under the spill). Tuner `fog`: how thick.
-  const fogK = Math.max(0, Math.min(2, tn.fog ?? 1)) * (quietFar ? 0.6 : 1)
+  const fogK0 = Math.max(0, Math.min(2, tn.fog ?? 1))
   const fogTex = (() => {
     const W = 256
     const Hh = 96
@@ -2075,15 +2098,6 @@ export function createScene(w, h, o = {}) {
     return e
   }
   const embers = Array.from({ length: emberCount }, () => spawnEmber(false))
-  const ash = Array.from({ length: Math.round((phone ? 60 : 150) * ((w * h) / 1.6e6 + 0.3)) }, () => ({
-    x: rand(-30, w + 30),
-    y: rand(0, h),
-    vy: rand(0.12, 0.6),
-    drift: rand(0.02, 0.3),
-    size: rand(1, 2.8),
-    phase: rand(0, TAU),
-    alpha: rand(0.08, 0.28),
-  }))
   let sparks = []
   let spits = []
   let flare = 0
@@ -2171,11 +2185,16 @@ export function createScene(w, h, o = {}) {
   // ---------------------------------------------------------------- one frame
   function draw(ctx, t, dt, env = {}) {
     const secs = (dt * 16.7) / 1000
-    // `o.mirror`: the whole drawing is turned left for right (the mountain on the right, for the pages other than
-  // home). It is the same scene drawn through a flipped canvas, so it is the same mountain, and the same baked
-  // picture serves. Where the page's text is, is asked for in the page's own left and right.
+    // `env.mirror`: the whole drawing is turned left for right (the mountain on the right, for the pages other than
+    // home). It is the same scene drawn through a flipped canvas, so it is the same mountain, the same baked picture
+    // serves, and nothing is built again when the page changes. Where the page's text is, is asked for in the page's
+    // own left and right.
+    const mirror = !!env.mirror
+    // `env.quiet`: the far country without its live volcanoes, and the fog thinner. For pages of small text.
+    const quiet = !!env.quiet
+    const fogK = fogK0 * (quiet ? 0.6 : 1)
     const calm0 = env.calm || (() => 1)
-    const calm = o.mirror ? (x, y) => calm0(w - x, y) : calm0
+    const calm = mirror ? (x, y) => calm0(w - x, y) : calm0
     const phase = env.moonPhase ?? 0.42
     // Prometheus and the Time of Trial: how stirred the mountain is. A trial keeps the breach aflame (the caller keeps
     // it throwing).
@@ -2224,12 +2243,21 @@ export function createScene(w, h, o = {}) {
     // the breach lights the sky and the crown right behind it: where text sits on it (the mountain on the left, under a
     // page header), that light steps back. The lowest of the breach and a point half a crater-width above it.
     breachK += (dimFor(Math.min(calm(breach.x, breach.y), calm(breach.x, breach.y - 0.5 * rw)), 0.25) - breachK) * dimStep
-    if (o.mirror) ctx.setTransform(-dpr, 0, 0, dpr, w * dpr, 0)
+    if (mirror) ctx.setTransform(-dpr, 0, 0, dpr, w * dpr, 0)
     else ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.globalCompositeOperation = 'source-over'
     ctx.globalAlpha = 1
-    if (L.sky) ctx.drawImage(sky.cv, 0, 0, w, h)
-    else {
+    if (L.sky) {
+      ctx.drawImage(sky.cv, 0, 0, w, h)
+      if (quiet && far.quietPatch) {
+        // the stretch of sky where the live far volcanoes stand, as it is without them
+        const q = far.quietPatch
+        const smooth = ctx.imageSmoothingEnabled
+        ctx.imageSmoothingEnabled = false
+        ctx.drawImage(q.cv, q.x, q.y, q.w, q.h)
+        ctx.imageSmoothingEnabled = smooth
+      }
+    } else {
       ctx.fillStyle = '#050a08'
       ctx.fillRect(0, 0, w, h)
     }
@@ -2268,9 +2296,9 @@ export function createScene(w, h, o = {}) {
       const under = Math.min(calm0(mx, my), calm0(mx + ring, my), calm0(mx - ring, my), calm0(mx, my + ring), top)
       moonK += (dimFor(under, 0.3 + 0.25 * trial) - moonK) * dimStep
       ctx.globalAlpha = 0.85 * (0.6 + 0.4 * near) * moonK * (1 - 0.3 * veil)
-      if (o.mirror) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      if (mirror) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.drawImage(moon.cv, mx - rad, my - rad, rad * 2, rad * 2)
-      if (o.mirror) ctx.setTransform(-dpr, 0, 0, dpr, w * dpr, 0)
+      if (mirror) ctx.setTransform(-dpr, 0, 0, dpr, w * dpr, 0)
       ctx.globalAlpha = 1
     }
     dimPrimed = true
@@ -2353,7 +2381,7 @@ export function createScene(w, h, o = {}) {
     ctx.globalAlpha = 1
 
     // the live far volcanoes: the pin of light baked into the notch gets a halo that breathes, very slowly
-    if (L.ridges && far.lives.length) {
+    if (L.ridges && far.lives.length && !quiet) {
       ctx.globalCompositeOperation = 'lighter'
       for (const v of far.lives) {
         // (in a Time of Trial the whole chain is alight: they flare with this one)
@@ -2392,6 +2420,17 @@ export function createScene(w, h, o = {}) {
     ctx.globalCompositeOperation = 'source-over'
     ctx.globalAlpha = 1
 
+    // The host's place behind the rock: whatever it draws here (falling ash; the fliers, when they come) is in front
+    // of the sky, the moon, the far country and the plume, and behind the mountain. It is called in the page's own left
+    // and right, mirrored or not. In front of everything is simply after draw() returns.
+    if (env.behindRock) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      env.behindRock(ctx)
+      if (mirror) ctx.setTransform(-dpr, 0, 0, dpr, w * dpr, 0)
+      else ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.globalAlpha = 1
+    }
     ctx.drawImage(land.cv, 0, 0, w, h)
     // the light under the spill finds the edge of the mountain's foot from behind
     if (below > 0.004) {
@@ -2715,20 +2754,6 @@ export function createScene(w, h, o = {}) {
       ctx.drawImage(glow, s.x - hs / 2, s.y - hs / 2, hs, hs)
     }
     ctx.globalCompositeOperation = 'source-over'
-    if (L.ash) {
-      ctx.fillStyle = '#6b6560'
-      for (const a of ash) {
-        a.y += a.vy * dt
-        a.phase += 0.02 * dt
-        a.x += (a.drift + Math.sin(a.phase) * 0.2) * dt
-        if (a.y > h + 10 || a.x > w + 40) {
-          a.y = rand(-40, -5)
-          a.x = rand(-30, w + 30)
-        }
-        ctx.globalAlpha = a.alpha
-        ctx.fillRect(a.x, a.y, a.size, a.size)
-      }
-    }
     ctx.globalAlpha = 1
     if (flare) flare = Math.max(0, flare - secs * 0.9)
   }
@@ -2736,5 +2761,17 @@ export function createScene(w, h, o = {}) {
   // (heatNow: the breach's breathing and flare, as the Archive plaque reads them on the live site)
   mark('spritesAndParticles')
   timing.total = Math.round(Object.values(timing).reduce((a, b) => a + b, 0))
-  return { draw, erupt, heatNow: () => ({ breathe: lastBreathe, flare: Math.min(1, flare) }), info: { bake: { mountain: baked, moon: moon.cv }, riverU: riverLine.u[rowFoot] * mx, timing, layers: { sky: sky.cv, hills: hills.cv, land: land.cv, fore: fore.cv, ground: lakeBox.cv }, overEdge, peakX, rimY, ch, H, shoreY, breach, tipY, stack, inlet: river.inlet, lake, lakeSpan, monolith: mono } }
+  /** Hand back the memory of every canvas this scene made, at once (a phone's browser has little to spare). */
+  const dispose = () => {
+    for (const c of made) {
+      c.width = 0
+      c.height = 0
+    }
+  }
+  // the river's line, breach to lake, for tests and for whoever wants to stand something on it
+  const riverPath = Array.from({ length: 41 }, (_, i) => {
+    const p = riverAt(i / 40)
+    return [p.x, p.y]
+  })
+  return { draw, erupt, dispose, heatNow: () => ({ breathe: lastBreathe, flare: Math.min(1, flare) }), info: { riverPath, bake: { mountain: baked, moon: moon.cv }, riverU: riverLine.u[rowFoot] * mx, timing, layers: { sky: sky.cv, hills: hills.cv, land: land.cv, fore: fore.cv, ground: lakeBox.cv }, overEdge, peakX, rimY, ch, H, shoreY, breach, tipY, stack, inlet: river.inlet, lake, lakeSpan, monolith: mono } }
 }

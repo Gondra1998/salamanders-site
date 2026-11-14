@@ -24,7 +24,7 @@ import * as painter from '../../src/lib/deathfire/painters.js'
 import { excitement, trialLength, trialLevel } from '../../src/lib/deathfire/trial.js'
 
 const q = new URLSearchParams(location.search)
-const LAYERS = ['sky', 'moon', 'plume', 'ridges', 'relief', 'river', 'lake', 'monolith', 'fog', 'embers', 'ash']
+const LAYERS = ['sky', 'moon', 'plume', 'ridges', 'relief', 'river', 'lake', 'monolith', 'fog', 'embers']
 const off = new Set((q.get('off') || '').split(',').filter(Boolean))
 const state = {
   // the baked pictures (written by the bake tool): 'baked' uses them where there is one for the drawing asked
@@ -409,12 +409,11 @@ function rebuild() {
     layers: state.layers,
     palette: state.pal,
     phoneMax: CUT,
-    quiet: framePath() !== '/', // no live far volcanoes behind the small text of the other pages
     tune: { ...tuneState },
     lakeLevel: lakeState.level,
     ...(ready ? { mountain: ready, riverU: ready.meta.riverU } : {}),
     ...(moonPic ? { moonImage: moonPic } : {}),
-    ...(w > CUT ? { ...comp, mirror: !home } : { flip: comp.flip, ...(q.has('px') ? { faceX: Math.min(0.9, Math.max(0.1, parseFloat(q.get('px')) || 0.36)) } : {}) }),
+    ...(w > CUT ? { ...comp } : { flip: comp.flip, ...(q.has('px') ? { faceX: Math.min(0.9, Math.max(0.1, parseFloat(q.get('px')) || 0.36)) } : {}) }),
     ...(built ? { textBottom: built.text, titleBottom: built.title, textGap: q.has('gap') ? parseFloat(q.get('gap')) : undefined } : {}),
   })
   window.__mock = { scene, w, h, lake: lakeState }
@@ -512,7 +511,10 @@ function tick(now) {
   // (a lake pulled back from full stops spilling, quickly)
   if (lakeState.level < 1 && lakeState.spill > 0 && !q.has('spill')) lakeState.spill = Math.max(0, lakeState.spill - secs / 4)
   const t0 = performance.now()
-  scene.draw(ctx, t, dt, { calm, navBottom, moonPhase: phase, trial: sky.trial, lakeLevel: lakeState.level, spill: lakeState.spill })
+  // (the pages other than home show the same scene mirrored, on desktop, and quiet: no live far volcanoes behind small text)
+  const atHome = framePath() === '/'
+  const mirror = frame.contentWindow.innerWidth > CUT && !(atHome || state.inner === 'left')
+  scene.draw(ctx, t, dt, { calm, navBottom, moonPhase: phase, trial: sky.trial, lakeLevel: lakeState.level, spill: lakeState.spill, mirror, quiet: !atHome })
   if (debugLines) {
     const info = scene.info
     ctx.save()

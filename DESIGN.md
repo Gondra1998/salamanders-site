@@ -500,8 +500,13 @@ established.
 
 ### Canvas budget
 
-Draw target: under 6ms per frame at 390px with 4x CPU throttle, measured headless. Not measured that way yet; on a
-desktop with no throttle the volcano and title together cost 0.22ms average and 1.6ms worst per frame (2026-11-01).
+Draw target: under 6ms per frame at 390px with 4x CPU throttle, measured headless. Measured that way on 2026-11-14
+(one headless Chrome, 390 x 844 at 2x, the home page on the dev server): the volcano 6.6 to 7.6ms a drawn frame at 26
+frames a second, worst 13.8ms, none over 16ms; the title's fire 2.1 to 2.3ms; the volcano's first build 308 to 326ms.
+The machine ran about a third slower that day than when the same drawing measured 5.7ms as a mock (the title's fire,
+unchanged, was 1.6ms then), so it is at the target on a good day and over it on a bad one. Bringing it under, and
+the build down, is tracked as issue #74. On the dev server `window.__deathfire.scene.info.timing` gives what each
+part of a build cost.
 
 Dragons, when they land: the engine lazy-loaded, at most 25 KB gzipped.
 

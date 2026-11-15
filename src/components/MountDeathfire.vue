@@ -162,7 +162,13 @@ async function layout() {
   if (!plan) return false
   view = { mirror: plan.mirror, quiet: plan.quiet }
   stacked = phone && home
-  if (plan.key === sceneKey || plan.key === wanted) return false
+  if (plan.key === sceneKey) {
+    // The scene on screen is the right one. If another was on its way (the window was turned and turned back before
+    // its pictures came), it is not wanted any more: without this it would land when they did, at the wrong size.
+    wanted = ''
+    return false
+  }
+  if (plan.key === wanted) return false
   wanted = plan.key
   const kit = await kitFor(plan.kind)
   // (the component may have gone, or the window changed again, while the pictures were on their way)
@@ -197,6 +203,9 @@ async function layout() {
   ash = createAsh(w, h, { density: LOOK.ash, phone: plan.kind === 'phone' })
   calmAt = -1
   if (mode.value === 'still') still()
+  // Sizing the canvas emptied it, and this frame's turn to draw has already gone by. Fill it now (a frame in which
+  // nothing moves on), or every new size shows the bare page for a frame.
+  else if (!hidden) draw(0, 0, false)
   return true
 }
 
@@ -305,6 +314,9 @@ watch(
     // (a still frame is not on a loop: it is drawn again for the new page, whose text lies elsewhere)
     if (!built && mode.value === 'still') still()
   },
+  // After the new page is in the document, not before: on a phone the home page's hero text is measured there, and
+  // measured too soon it is not found, and the mountain is stood where that text usually ends instead.
+  { flush: 'post' },
 )
 
 onMounted(async () => {

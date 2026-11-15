@@ -300,6 +300,7 @@ describe('what the live mountain did, and this one must', () => {
 
   it('lets ash fall behind the rock and in front of it', async () => {
     await start()
+    fake.clear() // (count one frame's painting, not the one drawn as the scene was built)
     pass(50)
     // 460 flakes to 1600 x 1000 px: 265 in this window, two fifths of them in front
     const main = wrapper.find('canvas.deathfire-canvas').element.getContext('2d')
@@ -315,6 +316,7 @@ describe('what the live mountain did, and this one must', () => {
 
   it('on a page marked ashOver, lets the front ash fall over the page instead, a shade lighter', async () => {
     await start({ path: '/accolades', routes: [{ path: '/accolades', component: Page, meta: { ashOver: true } }] })
+    fake.clear()
     pass(50)
     const veil = wrapper.find('canvas.deathfire-veil').element
     const over = veil.getContext('2d')
@@ -393,6 +395,7 @@ describe('the same mountain behind every page', () => {
     const options = createScene.mock.calls[0][2]
     expect(options.faceX).toBeUndefined()
     expect(options.textBottom).toBe(352)
+    fake.clear()
     pass(50)
     expect(lastEnv()).toMatchObject({ mirror: false, quiet: true })
     // half as much ash on a phone: 460 x (390 x 844 / 1600000) / 2 = 47 flakes, 19 of them in front
@@ -657,5 +660,91 @@ describe('on the dev server', () => {
     wrapper.unmount()
     wrapper = null
     expect(window.__deathfire).toBeUndefined()
+  })
+})
+
+describe('found by the review before the merge', () => {
+  const resizeTo = async (w, h) => {
+    setWindow(w, h)
+    window.dispatchEvent(new Event('resize'))
+    pass(50)
+    await settle()
+  }
+
+  it('does not land a scene nobody wants any more: the window went back before the other kind\'s pictures came', async () => {
+    await start() // a desktop's scene, built
+    let arrive
+    loadBaked.mockImplementation((kind) => (kind === 'phone' ? new Promise((resolve) => (arrive = resolve)) : Promise.resolve(PICTURES)))
+    await resizeTo(390, 844) // turned to a phone's shape: its pictures are slow to come
+    expect(createScene).toHaveBeenCalledTimes(1)
+    await resizeTo(1280, 720) // and turned back before they did
+    arrive(PICTURES)
+    await settle()
+    pass(100)
+    await settle()
+    expect(createScene).toHaveBeenCalledTimes(1)
+    const cv = wrapper.find('canvas.deathfire-canvas').element
+    expect([cv.width, cv.height]).toEqual([1280, 720])
+    expect([cv.style.width, cv.style.height]).toEqual(['1280px', '720px'])
+  })
+
+  it('still builds for the other kind when the window stays that way', async () => {
+    await start()
+    let arrive
+    loadBaked.mockImplementation((kind) => (kind === 'phone' ? new Promise((resolve) => (arrive = resolve)) : Promise.resolve(PICTURES)))
+    await resizeTo(390, 844)
+    arrive(PICTURES)
+    await settle()
+    expect(createScene).toHaveBeenCalledTimes(2)
+    expect(createScene.mock.calls[1].slice(0, 2)).toEqual([390, 844])
+  })
+
+  it('draws a scene as soon as it is built, so a new size never shows an empty canvas for a frame', async () => {
+    await start()
+    // (sizing a canvas empties it: the frame that would have filled it has already run by then)
+    expect(scene().draw).toHaveBeenCalledTimes(1)
+    expect(scene().erupt).not.toHaveBeenCalled()
+    await resizeTo(1000, 700)
+    expect(createScene).toHaveBeenCalledTimes(2)
+    expect(scene().draw).toHaveBeenCalledTimes(1)
+  })
+
+  describe('a phone that asked for reduced motion, going home from another page', () => {
+    // The home page's own hero, drawn by the router as on the site, its lower button ending 372 px down.
+    const Home = { template: '<section class="hero"><div class="cta-row"><a class="one">Join</a><a class="two">Perk builder</a></div></section>' }
+    const Site = { components: { MountDeathfire }, template: '<MountDeathfire /><RouterView />' }
+    let rects
+    beforeEach(() => {
+      setWindow(360, 740)
+      rects = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function () {
+        return { bottom: this.classList.contains('two') ? 372 : this.classList.contains('one') ? 320 : 0 }
+      })
+    })
+    afterEach(() => rects.mockRestore())
+    async function openSite(path) {
+      router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: Home }, { path: '/builds', component: Page }] })
+      router.push(path)
+      await router.isReady()
+      wrapper = mount(Site, { global: { plugins: [router] }, attachTo: document.body })
+      await settle()
+    }
+    const textBottoms = () => createScene.mock.calls.map((call) => call[2].textBottom)
+
+    it('stands the mountain under the home page\'s real buttons, not where they usually are', async () => {
+      motionAllowed.mockReturnValue(false)
+      await openSite('/builds')
+      expect(textBottoms()).toEqual([309]) // no hero on this page: where its text usually ends, at this height
+      await router.push('/')
+      await settle()
+      expect(textBottoms()).toEqual([309, 372])
+      expect(scene().draw).toHaveBeenCalledTimes(1)
+    })
+
+    it('and with motion on, does so at once, without waiting to notice', async () => {
+      await openSite('/builds')
+      await router.push('/')
+      await settle()
+      expect(textBottoms()).toEqual([309, 372])
+    })
   })
 })

@@ -38,6 +38,7 @@ for (const kind of ['desktop', 'phone']) save(meta[kind].mountain)
 writeFileSync(join(out, 'baked.json'), JSON.stringify(meta, null, 2) + '\n')
 // what the page itself noted while it painted
 const log = dom.match(/<p id="log">([\s\S]*?)<\/p>/)
-if (log) console.log(log[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'))
+// (the ampersand last: undone first, an escaped "&amp;lt;" would come out as "<" instead of "&lt;")
+if (log) console.log(log[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'))
 for (const name of readdirSync(out)) if (!written.has(name)) rmSync(join(out, name))
 console.log(`wrote ${out} (${(total / 1024).toFixed(0)} KB of pictures in all; a browser fetches the moon and one mountain)`)

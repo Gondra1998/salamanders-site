@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll, vi } from 'vitest'
 import { router } from './router'
+import { DEATHWATCH_SHOWS_MOUNTAIN } from './lib/deathwatch/mountain'
 
 // jsdom has no scrolling; the router's scrollBehavior asks for it after every navigation.
 beforeAll(() => {
@@ -60,6 +61,15 @@ describe('the Legacy Accolades route', () => {
 })
 
 describe('the Deathwatch routes', () => {
+  it('draws no mountain behind Deathwatch, which is off planet, unless its keeper flips the one switch', () => {
+    expect(DEATHWATCH_SHOWS_MOUNTAIN).toBe(false)
+    expect(router.resolve('/deathwatch').meta.deathfire).toBe(DEATHWATCH_SHOWS_MOUNTAIN)
+    expect(router.resolve('/deathwatch/eventtracker/players').meta.deathfire).toBe(DEATHWATCH_SHOWS_MOUNTAIN)
+    // (the ash over the page is still marked, so the switch brings the veil back with the mountain)
+    expect(router.resolve('/deathwatch').meta.ashOver).toBe(true)
+    for (const path of ['/', '/builds', '/accolades', '/accolades/legacy']) expect(router.resolve(path).meta).not.toHaveProperty('deathfire')
+  })
+
   it('has a hub and an area page under one parent, which carries the title and the ash over the plaque', () => {
     expect(router.resolve('/deathwatch').name).toBe('deathwatch')
     expect(router.resolve('/deathwatch').meta).toMatchObject({ title: 'Watch Fortress Ebonhold', ashOver: true })

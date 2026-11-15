@@ -3,6 +3,7 @@ import Landing from './views/Landing.vue'
 import { scrubCallbackHash } from './lib/discordAuth'
 import { legacyRosterTarget } from './lib/companyKeys'
 import { deathwatchRedirect } from './lib/deathwatch/redirect'
+import { DEATHWATCH_SHOWS_MOUNTAIN } from './lib/deathwatch/mountain'
 
 // Must run before createWebHashHistory() below reads location.hash — see
 // discordAuth.js for why this can't just happen in main.js.
@@ -74,7 +75,9 @@ const routes = [
   {
     path: '/deathwatch',
     component: () => import('./views/deathwatch/DeathwatchLayout.vue'),
-    meta: { title: 'Watch Fortress Ebonhold', ashOver: true },
+    // (`deathfire`: whether Mount Deathfire is drawn behind these pages. Deathwatch is off planet, so it is not,
+    // unless its keeper flips the switch in lib/deathwatch/mountain.js. `ashOver` then brings the ash back with it.)
+    meta: { title: 'Watch Fortress Ebonhold', ashOver: true, deathfire: DEATHWATCH_SHOWS_MOUNTAIN },
     children: [
       { path: '', name: 'deathwatch', component: () => import('./views/deathwatch/DeathwatchHub.vue') },
       {

@@ -1,19 +1,12 @@
 <script setup>
-import { defineAsyncComponent } from 'vue'
 import AppNav from './components/AppNav.vue'
 import SiteFooter from './components/SiteFooter.vue'
 import MountDeathfire from './components/MountDeathfire.vue'
-import { tuningEnabled } from './lib/fireTuning'
-
-// Dev-only slider panel, loaded only when ?tune=1 is present.
-const tuning = tuningEnabled()
-const FireTuner = tuning ? defineAsyncComponent(() => import('./components/FireTuner.vue')) : null
 </script>
 
 <template>
-  <!-- Mount Deathfire behind every page; each route gets its own face of it. -->
+  <!-- Mount Deathfire behind every page: the same mountain, on the left at home and mirrored to the right elsewhere. -->
   <MountDeathfire />
-  <component :is="FireTuner" v-if="tuning" />
 
   <AppNav />
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { withoutHoverMedia } from './test-utils/css'
@@ -13,11 +13,10 @@ import { withoutHoverMedia } from './test-utils/css'
 // stylesheet is under the rules from the day it is added.
 const SWEPT = ['.']
 
-// The canvas and its dev tuner keep their own numbers, so the sweep of src/ never scans them.
+// The canvases keep their own numbers, so the sweep of src/ never scans them.
 const SKIPPED = [
   'components/MountDeathfire.vue',
   'components/FireText.vue',
-  'components/FireTuner.vue',
 ]
 // Files whose authored loops may use ease-in-out (the deathwatch drift and flicker, the gate pulses, the
 // archive gate's unsealing glow).
@@ -275,6 +274,8 @@ describe('the motion rules check', () => {
     expect(files).toContain('components/deathwatch/deathwatch.css')
     expect(files).toContain('components/AppNav.vue')
     for (const skipped of SKIPPED) expect(files).not.toContain(skipped)
+    // (and each of them is a file that is still there: a name left behind after its file went would hide nothing)
+    for (const skipped of SKIPPED) expect(existsSync(new URL(skipped, import.meta.url))).toBe(true)
   })
 
   it('SWEPT reaches every .vue and .css under src/, at any depth', () => {

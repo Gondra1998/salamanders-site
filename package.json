@@ -21,7 +21,9 @@
     "test:mutation": "stryker run",
     "archive": "bun scripts/seal-archive.mjs",
     "archive:dev": "bun scripts/archive-dev-server.mjs",
-    "archive:dev:fixture": "bun scripts/archive-dev-fixture.mjs"
+    "archive:dev:fixture": "bun scripts/archive-dev-fixture.mjs",
+    "deathfire:golden": "node scripts/deathfire/golden.mjs",
+    "deathfire:bake": "node scripts/deathfire/bake.mjs"
   },
   "dependencies": {
     "@fontsource-variable/cinzel": "^5.3.0",

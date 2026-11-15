@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Baking the scene</title>
+    <style>
+      body {
+        margin: 16px;
+        background: #020403;
+        color: #c3d0c6;
+        font: 12px/1.5 ui-monospace, Consolas, monospace;
+      }
+      #log {
+        white-space: pre;
+      }
+      img {
+        display: block;
+        max-width: 100%;
+        margin: 4px 0 20px;
+        background: repeating-conic-gradient(#10201a 0% 25%, #0a1410 0% 50%) 50% / 24px 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      The bake tool's page. Paints the parts of the scene that are the same picture for every visitor (the mountain and
+      the moon) and leaves them and their measurements in this page. bake.mjs runs it in headless Chrome and writes
+      them to src/lib/deathfire/baked/. Open it in a browser to see what would be written.
+    -->
+    <p id="log">baking…</p>
+    <div id="pictures"></div>
+    <script id="meta" type="application/json"></script>
+    <script type="module" src="./bake.js"></script>
+  </body>
+</html>

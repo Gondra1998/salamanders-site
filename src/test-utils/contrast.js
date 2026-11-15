@@ -1,6 +1,8 @@
 // WCAG contrast helpers for tests that check a stylesheet keeps text readable.
 // `LAVA` is the brightest pixel of the volcano behind the site; `TEXT` is body text.
-export const LAVA = [255, 176, 102]
+// (White: the drawing burns out to white at the breach and in an eruption's fountain. `npm run deathfire:golden`
+// reports the brightest pixel it reaches; it was rgb(255, 255, 255) when this was set, 2026-11-14.)
+export const LAVA = [255, 255, 255]
 export const TEXT = [195, 208, 198]
 
 const channel = (c) => {

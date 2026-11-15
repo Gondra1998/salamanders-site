@@ -1,22 +1,11 @@
 import { reactive } from 'vue'
 
 /**
- * Live tuning values for the fire effects.
+ * The numbers the hero's burning title is drawn with (FireText, by way of HeroForge).
  *
- * The panel at ?tune=1 writes here and the components read it, so the look can
- * be dialled in the browser instead of guessed in CSS. Once the numbers are
- * settled, paste them back in as these defaults and the panel stops mattering.
- */
-
-/**
- * The baked hero.
- *
- * These are the numbers Bret settled on at the tuning panel, and they describe
- * the landing page exactly: a tall narrow cone hard over on the left, so the
- * centred wordmark sits clear of it, lit hot and running two dozen lava
- * channels. Every other page is expressed as a departure from this (see
- * ROUTE_PROFILE_DEFAULTS), so treat it as the anchor rather than one preset
- * among several — changing it moves the whole site.
+ * This file once held far more: a dev tuner's sliders for the title and for the volcano behind the site, and a
+ * profile of the volcano for every page. The look is settled and the tuner is gone. The volcano's numbers are
+ * constants now, in src/lib/deathfire/look.js.
  */
 export const DEFAULTS = {
   text: {
@@ -25,190 +14,10 @@ export const DEFAULTS = {
     maxHeight: 0.8,
     variation: 0.95,
     intensity: 1.3,
-    // How bright the un-burnt base of each glyph sits. Too high and the additive
-    // fire clips to a single flat colour.
     base: 0.35,
   },
-  // Mount Deathfire, the great volcano of Nocturne, behind every page.
-  // Not Doom fire — at background scale the pixel grid read as noise.
-  bed: {
-    // Height of the peak above the bottom of the viewport, measured against the
-    // 1600x1000 reference viewport in MountDeathfire and scaled from there.
-    // Taken as raw pixels it walked the summit off the top of any shorter
-    // window, taking the crater and the eruptions with it.
-    height: 690,
-    // Base width as a fraction of the viewport.
-    width: 0.6,
-    // Centre of the range the peak sits in, 0 = left edge, 1 = right.
-    offsetX: 0.18,
-    // How far a page's seed may wander from that centre. This is the *random*
-    // component only; a page's deliberate position is its profile bearing.
-    faceSpread: 0.16,
-    // Lava channels running down the flanks. Eleven fat channels (seven on phones) read as lava; the old 24 read as wires.
-    flows: 11,
-    flowHeat: 1.1,
-    // Light in the crater mouth.
-    caldera: 1.3,
-    // Lower cones behind the peak, for depth.
-    ridges: 8,
-    // Painted heat haze in the sky behind it.
-    glow: 0.64,
-    // Eruption pulses: how often, and how many sparks each throws.
-    eruptRate: 1,
-    sparks: 1.6,
-    // Volcanic ash falling against the rising sparks, per the 1600x1000
-    // reference viewport — the count now scales with screen area, so this is a
-    // density rather than a headcount. 160 was not a chosen number: it was the
-    // old slider ceiling, and the tuning pass ended pinned against it. Same
-    // story as flows/ridges/count, which all still sit at exactly half their
-    // raised maximum and are worth a second pass at the panel.
-    ash: 460,
-    // Continuous plume off the summit.
-    count: 200,
-    speed: 2.35,
-    scale: 2.7,
-    // 0 = all soft embers, 1 = all fast sparks, between = both at once.
-    sparkMix: 0,
-  },
-}
-
-/**
- * Which values a route's seed is allowed to vary.
- *
- * Deathfire is one mountain, but the cone's own profile is now in play too —
- * turning `asymmetry` on was part of the look that got baked, so each page
- * reshapes the flanks rather than only moving the camera. Per-route amount is
- * governed by the profile `variance` below, which is what keeps that from
- * reading as five different mountains.
- */
-export const RANDOMIZE_DEFAULTS = {
-  offsetX: true, // walk around the mountain
-  flows: true, // different channels face you from each side
-  ridges: true, // the far peaks shift with parallax
-  asymmetry: true, // the cone's own profile reshapes per face
-  height: false,
-  width: false,
-}
-
-/**
- * How each page departs from the baked hero.
- *
- *   bearing  — where you stand, added to bed.offsetX in viewport fractions.
- *              Negative walks left, positive right. Deliberately absolute
- *              rather than a multiple of faceSpread: a page's position is a
- *              design decision and shouldn't collapse to zero if the random
- *              spread is later dialled down.
- *   scale    — how tall the peak stands, multiplying bed.height. This is how
- *              far away you are. Sideways is not enough on its own: the perk
- *              tree spans the full width, so a full-height cone shoved to the
- *              edge just drops the summit and its converging lava on top of
- *              the grid. Pulling it down to a horizon is the answer.
- *   variance — how far the seeded detail (cone profile, lava layout, ridge
- *              parallax) is allowed to stray from the neutral cone. 1 is as
- *              loose as the hero, 0 is a clean symmetric mountain with evenly
- *              spaced channels.
- *   density  — how loud the mountain is: plume, ash, sky glow, and the heat of
- *              the lava and caldera. Lava is the brightest thing on screen, so
- *              a page that's mostly reading needs this well under 1.
- *
- * The hero is 0 / 1 / 1 / 1 by definition. Those values are algebraically
- * neutral everywhere they're applied, so `/` renders from exactly the same
- * sequence of random numbers it did before profiles existed. Don't "tidy" them.
- */
-export const ROUTE_PROFILE_DEFAULTS = {
-  // The landing page, exactly as tuned. The anchor for everything below.
-  '/': { bearing: 0, scale: 1, variance: 1, density: 1 },
-
-  // Perk Builder: an eight-column hex tree spanning the full width, the densest
-  // screen on the site. Nowhere to hide a mountain sideways, so it drops to a
-  // low horizon and the lava comes right down. Small and dim compound: at low
-  // scale the dark rock is already hard to read against a dark page, so density
-  // — the lava/glow/ash that actually catches the eye — has to stay well above
-  // where a full-height cone would need it, or the mountain just disappears.
-  '/planner': { bearing: -0.02, scale: 0.4, variance: 0.45, density: 0.6 },
-
-  // Armoury: weapon list and detail panel together span most of the width, so
-  // this is a horizon too, just a nearer one than the planner's.
-  '/armoury': { bearing: 0.3, scale: 0.5, variance: 0.6, density: 0.65 },
-
-  // Builds: empty until you save one, so it can carry a bolder horizon — but
-  // the page is short, which puts the footer over the peak, and the footer
-  // background is only 60% opaque. Density is what keeps the fine print legible.
-  '/builds': { bearing: 0.34, scale: 0.55, variance: 0.9, density: 0.6 },
-
-  // Companies: a left-aligned reading column with the whole right half empty.
-  // The mountain belongs in that empty half, not under the text.
-  '/companies': { bearing: 0.52, scale: 0.65, variance: 0.75, density: 0.7 },
-
-  // Roster: a wide, long page of panels (twelve branch bars that each open into a
-  // ladder). A full cone would put its peak and glow right behind the header and
-  // controls, so it drops to a low horizon like the planner's and armoury's. Density
-  // stays modest so the panels over it read cleanly.
-  '/roster': { bearing: 0.5, scale: 0.5, variance: 0.8, density: 0.55 },
-
-  // Watch Fortress Ebonhold, the hub and every page under /deathwatch: tables and lists over a dark backdrop,
-  // so a low horizon and a modest glow, with the plume and ash still rising behind it. A key ending in "/*"
-  // covers a whole section (see profileKeyFor). Starting values: tune them with ?tune=1.
-  '/deathwatch/*': { bearing: 0.45, scale: 0.5, variance: 0.7, density: 0.5 },
-
-  // Anything unrouted — the 404. Somewhere you haven't been before.
-  '*': { bearing: 0.3, scale: 0.85, variance: 1, density: 0.85 },
 }
 
 const clone = (o) => JSON.parse(JSON.stringify(o))
 
 export const fireTuning = reactive(clone(DEFAULTS))
-export const randomize = reactive({ ...RANDOMIZE_DEFAULTS })
-export const routeProfiles = reactive(clone(ROUTE_PROFILE_DEFAULTS))
-
-/** The hero's profile, and the fallback for a route with nothing declared. */
-export const NEUTRAL_PROFILE = { bearing: 0, scale: 1, variance: 1, density: 1 }
-
-/**
- * The key in routeProfiles that governs `path`: the path's own entry, else the entry for its whole section
- * ("/deathwatch/*" covers "/deathwatch" and every page below it, but not "/deathwatchful"), else the catch-all.
- * Own keys only, so a path like "constructor" can never pick up a property of Object.
- */
-export function profileKeyFor(path) {
-  if (typeof path === 'string') {
-    if (Object.hasOwn(routeProfiles, path)) return path
-    const section = path.match(/^\/[^/]+/)?.[0]
-    if (section && Object.hasOwn(routeProfiles, `${section}/*`)) return `${section}/*`
-  }
-  return '*'
-}
-
-export function profileFor(path) {
-  return routeProfiles[profileKeyFor(path)] || routeProfiles['*'] || NEUTRAL_PROFILE
-}
-
-export function resetTuning() {
-  Object.assign(fireTuning.text, DEFAULTS.text)
-  Object.assign(fireTuning.bed, DEFAULTS.bed)
-  Object.assign(randomize, RANDOMIZE_DEFAULTS)
-  for (const [path, p] of Object.entries(ROUTE_PROFILE_DEFAULTS)) {
-    Object.assign(routeProfiles[path], p)
-  }
-}
-
-/**
- * Is the tuning panel switched on?
- *
- * Sticky for the session once enabled: the flag lives in location.search, and
- * any navigation that rewrites the URL would otherwise drop the panel mid-tune.
- */
-export function tuningEnabled() {
-  if (typeof window === 'undefined') return false
-  const inUrl =
-    /[?&]tune=1\b/.test(window.location.search) || /[?&]tune=1\b/.test(window.location.hash)
-  try {
-    if (inUrl) sessionStorage.setItem('sal-tune', '1')
-    if (/[?&]tune=0\b/.test(window.location.search)) {
-      sessionStorage.removeItem('sal-tune')
-      return false
-    }
-    return inUrl || sessionStorage.getItem('sal-tune') === '1'
-  } catch {
-    return inUrl
-  }
-}

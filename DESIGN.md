@@ -261,7 +261,8 @@ lettering keeps its size). A micro-label writes its size as `max(<size>, var(--t
 ## Layout
 
 Mobile first, single column, with a left-aligned reading column and the volcano placed in the empty half
-(each route has its own volcano profile, quieter on long pages of tables). Pages set their own width: 60rem for
+(the same mountain stands behind every page: on the left on the home page, mirrored to the right elsewhere, and
+under the hero's text on a phone; nothing is drawn behind Deathwatch, which is off planet). Pages set their own width: 60rem for
 Companies, 68rem for Builds, 76rem for the Armoury, the landing page and the sticky navigation (1.25rem padding);
 the reading page has 1.5rem side padding. Breakpoints seen: 600px, 640px, 768px (the phone text floor and tap tokens), 860px and 900px. On a phone cards go full width, tap targets are at least 44px (the banner strips are 56px),
 and the page pads the safe areas so nothing hides under a notch or the home indicator. The Deathwatch area shows
@@ -416,14 +417,23 @@ These keep their own numbers and curves. Everything not listed here is functiona
 
 | File | What | Keeps |
 |---|---|---|
-| `src/components/MountDeathfire.vue`, `src/components/FireText.vue`, `src/components/FireTuner.vue` | the volcano canvas, the title fire and its dev tuner | everything; the policy test skips them |
-| `src/components/MountDeathfire.vue` | the Prometheus cycle: the moon crosses the sky once every 15 minutes on a wall clock every visitor shares; at its closest pass, in live mode only, the Time of Trial: a veil that rises over 6s, holds, and falls over 40-60s, its size drawn by chance | the 15-minute shared clock; the veil eases in and out, is never darker than 0.62, and never flashes; under reduced motion the canvas is one still frame, so the moon freezes where the clock put it |
+| `src/components/MountDeathfire.vue`, `src/components/FireText.vue` | the volcano canvas and the title fire | everything; the policy test skips them |
+| `src/components/MountDeathfire.vue` | the Prometheus cycle: the moon crosses the sky once every 15 minutes, and each visitor has their own crossing: it begins the first time their browser opens the site and is remembered there (`deathfire.crossingBegan`, a time and nothing else), so another page inside those 15 minutes goes on with it. At its closest pass, in live mode and only if the pass is seen to happen, the Time of Trial: a veil that rises over 6s, holds, and falls over 40-60s, its size drawn by chance. No page opens into one | the 15-minute crossing; the veil eases in and out, is never darker than 0.62, and never flashes; under reduced motion the canvas is one still frame, so the moon stands where the visitor's clock put it |
 | `src/components/archive/ArchiveThread.vue` | `brand-cool`, 1.7s `cubic-bezier(0.2, 0.7, 0.3, 1)` | duration and curve |
 | `src/components/archive/ArchiveGate.vue` | `gate-glow`, the unsealing: 1.6s `ease-in-out`, infinite while the gate is unsealing | duration and curve |
 | `src/components/deathwatch/deathwatch.css` | `dw-drift` 40s and `dw-flicker` 5s, `ease-in-out`, `infinite alternate` and `infinite`, bounded by the Deathwatch backdrop: they run as long as it shows | as is |
 | `src/components/deathwatch/deathwatch.css` | `dw-pulse` 1.8s (the skeleton shimmer), `ease-in-out`, 3 iterations then rest | as is |
 | `src/components/deathwatch/DeathwatchBoot.vue` | the gate's screen: its way in (`dwb-in` 500ms) and out (`dwb-out`, `dwb-near` 400ms), and the waking cursor (`dwb-blink` 450ms, 4 times); the easing is `var(--ease-forge)` | the durations and the cursor's count |
 | `src/components/roster/RosterBranch.vue`, `src/components/roster/RosterMember.vue`, `src/components/deathwatch/armour/ArmourView.vue` | the attention flashes: the one that finds a member (`rs-flash` 1.4s and `rs-ping` 1.4s, twice) and the armour card's arrival from a deep link (`ah-flash` 1.3s) | duration and iteration count; the easing is `var(--ease-forge)` |
+
+The volcano's drawing is not in the component, which only hosts it. It lives in `src/lib/deathfire/`: `scene.js`
+builds the mountain, its river and its lake for a window and draws a frame; the numbers of the approved look are
+constants in `look.js`. The mountain and the moon ship as baked pictures (`src/lib/deathfire/baked/`), painted by
+that same code: `npm run deathfire:bake` writes them again after a change to the mountain's numbers.
+`npm run deathfire:golden` proves that a change to the drawing's code moved no pixel (both need the dev server up).
+On the dev server only, the address takes `?moon=0..1` (hold the moon there), `?trial=1|2|3` (start a Time of
+Trial), `?visit=new` (begin a new crossing), `?off=plume,fog` (leave layers out) and `?calm=0` (measure no text).
+Deathwatch shows no mountain; the one switch for that is `src/lib/deathwatch/mountain.js`.
 
 ### Loops
 
@@ -490,8 +500,13 @@ established.
 
 ### Canvas budget
 
-Draw target: under 6ms per frame at 390px with 4x CPU throttle, measured headless. Not measured that way yet; on a
-desktop with no throttle the volcano and title together cost 0.22ms average and 1.6ms worst per frame (2026-11-01).
+Draw target: under 6ms per frame at 390px with 4x CPU throttle, measured headless. Measured that way on 2026-11-14
+(one headless Chrome, 390 x 844 at 2x, the home page on the dev server): the volcano 6.6 to 7.6ms a drawn frame at 26
+frames a second, worst 13.8ms, none over 16ms; the title's fire 2.1 to 2.3ms; the volcano's first build 308 to 326ms.
+The machine ran about a third slower that day than when the same drawing measured 5.7ms as a mock (the title's fire,
+unchanged, was 1.6ms then), so it is at the target on a good day and over it on a bad one. Bringing it under, and
+the build down, is tracked as issue #74. On the dev server `window.__deathfire.scene.info.timing` gives what each
+part of a build cost.
 
 Dragons, when they land: the engine lazy-loaded, at most 25 KB gzipped.
 

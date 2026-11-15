@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
@@ -66,5 +68,29 @@ describe('HeroForge planner button', () => {
       expect(planner.attributes('href')).toBe('/planner')
       expect(planner.text()).toBe('Open the Perk Builder')
     }
+  })
+})
+
+describe('HeroForge on a phone', () => {
+  // The mountain behind the page stands under the hero's buttons on a phone (MountDeathfire measures where the lower
+  // one ends), so the text block must start under the nav and close up, or there is no room for the mountain.
+  const source = readFileSync(join(process.cwd(), 'src/components/HeroForge.vue'), 'utf8').replace(/\r\n/g, '\n')
+  const phone = source.slice(source.indexOf('@media (max-width: 768px)'))
+  const rule = (selector) => {
+    const at = phone.indexOf(`${selector} {`)
+    return at < 0 ? '' : phone.slice(at, phone.indexOf('}', at))
+  }
+
+  it('starts the text under the nav instead of centring it in the screen', () => {
+    expect(rule('.hero')).toContain('align-items: flex-start;')
+    expect(rule('.hero')).toContain('padding: 1.5rem 1.25rem 3rem;')
+  })
+
+  it('closes the block up a little, and leaves the buttons their size', () => {
+    expect(rule('.hero-mark')).toContain('margin-top: 0.9rem;')
+    expect(rule('.tagline')).toContain('margin-top: 0.6rem;')
+    expect(rule('.cta-row')).toContain('margin-top: 1.4rem;')
+    expect(rule('.cta-row')).toContain('gap: 0.6rem;')
+    expect(phone).not.toMatch(/\.btn-(ember|drake|planner)[^{]*\{[^}]*(padding|font-size)/)
   })
 })
